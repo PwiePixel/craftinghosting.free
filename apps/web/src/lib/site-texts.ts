@@ -64,10 +64,17 @@ export function siteSummary(site: PublicSiteDTO, lang: Locale): string {
   const x = siteTexts(site, lang);
   const mc = site.products.minecraft.enabled && site.products.minecraft.plans.length > 0;
   const days = site.rules.cycle.days;
+  // Nur Minecraft-Server haben den Zyklus – Discord-Bots laufen ohne Ablaufdatum
+  const runtimeDe = [mc && `Minecraft-Server laufen ${days} Tage und lassen sich danach kostenlos verlängern.`, x.discord && 'Discord-Bots laufen durchgehend, ohne Ablaufdatum und ohne Ruhetag.']
+    .filter(Boolean)
+    .join(' ');
+  const runtimeEn = [mc && `Minecraft servers run for ${days} days and can then be renewed for free.`, x.discord && 'Discord bots run continuously, with no expiry date and no rest day.']
+    .filter(Boolean)
+    .join(' ');
   if (lang === 'de') {
     const offer = mc && x.discord ? 'kostenlose Minecraft-Server und kostenloses Discord-Bot-Hosting (Python, Node.js)' : x.discord ? 'kostenloses Discord-Bot-Hosting (Python, Node.js)' : 'kostenlose Minecraft-Server';
-    return `CraftingHosting.free ist das kostenlose Hosting-Angebot von Crafting Hosting (crafting.host). Es bietet ${offer} – ohne Zahlungsdaten und ohne versteckte Kosten. Server werden auf der Website erstellt und im Pterodactyl-Panel verwaltet. Die Hardware (${x.cpus}, NVMe) steht in ${x.locationNames}. Jeder Server läuft ${days} Tage und lässt sich danach kostenlos verlängern; ein Fair-Use-System sorgt dafür, dass die geteilte Hardware für alle schnell bleibt.`;
+    return `CraftingHosting.free ist das kostenlose Hosting-Angebot von Crafting Hosting (crafting.host). Es bietet ${offer} – ohne Zahlungsdaten und ohne versteckte Kosten. Server werden auf der Website erstellt und im Pterodactyl-Panel verwaltet. Die Hardware (${x.cpus}, NVMe) steht in ${x.locationNames}. ${runtimeDe} Ein Fair-Use-System sorgt dafür, dass die geteilte Hardware für alle schnell bleibt.`;
   }
   const offer = mc && x.discord ? 'free Minecraft servers and free Discord bot hosting (Python, Node.js)' : x.discord ? 'free Discord bot hosting (Python, Node.js)' : 'free Minecraft servers';
-  return `CraftingHosting.free is the free hosting offer by Crafting Hosting (crafting.host). It provides ${offer} – no payment details and no hidden costs. Servers are created on the website and managed in the Pterodactyl panel. The hardware (${x.cpus}, NVMe) is located in ${x.locationNames}. Every server runs for ${days} days and can then be renewed for free; a fair-use system keeps the shared hardware fast for everyone.`;
+  return `CraftingHosting.free is the free hosting offer by Crafting Hosting (crafting.host). It provides ${offer} – no payment details and no hidden costs. Servers are created on the website and managed in the Pterodactyl panel. The hardware (${x.cpus}, NVMe) is located in ${x.locationNames}. ${runtimeEn} A fair-use system keeps the shared hardware fast for everyone.`;
 }

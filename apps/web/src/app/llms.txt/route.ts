@@ -80,7 +80,7 @@ export async function GET() {
       '',
       bot.fairUse
         ? `Discord bots follow the same fair-use rules as Minecraft servers (max. ${r.fairUse.maxSessionHours} hours in a row).`
-        : 'Discord bots may stay online around the clock – there is no runtime limit and there are no forced breaks.',
+        : `Discord bots may stay online around the clock – there is no runtime limit, there are no forced breaks, and there is no ${r.cycle.days}-day cycle or rest day.`,
       ...(bf.enabled && !bot.fairUse
         ? [
             'Instead, a separate fair-use system for bots applies:',
@@ -97,10 +97,15 @@ export async function GET() {
   lines.push(
     '## Runtime and renewal',
     '',
-    `- Every server has a runtime of ${r.cycle.days} days from creation or the last renewal. Email reminders are sent beforehand.`,
+    `- Every Minecraft server has a runtime of ${r.cycle.days} days from creation or the last renewal. Email reminders are sent beforehand.`,
     `- After that the server is stopped and suspended; data is kept.${restDays > 0 ? ` After a rest period of ${restDays === 1 ? '1 day' : `${restDays} days`} it can be reactivated for free under "My servers" – as often as you like.` : ' It can be reactivated for free under "My servers" – as often as you like.'}`,
     ...(r.cycle.deleteAfterRestHours > 0
       ? [`- If it is not reactivated within ${r.cycle.deleteAfterRestHours} hours after the rest period, it is deleted automatically (reminder ${r.cycle.deleteReminderHours} hours before).`]
+      : []),
+    ...(botOn
+      ? [
+          `- Discord bots are different: they have no ${r.cycle.days}-day cycle and no rest day. A bot runs without an expiry date and never needs to be renewed.${bf.enabled && bf.inactiveDays > 0 ? ` Only a bot that stays offline for ${bf.inactiveDays} days in a row releases its slot; it can be reactivated right away.` : ''}`,
+        ]
       : []),
     '',
     '## How it works',

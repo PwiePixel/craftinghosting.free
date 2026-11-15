@@ -11,9 +11,23 @@
  *  Vorher: Hinweise im Minecraft-Chat (60/10/1 Minuten), danach Status-Text im Panel.
  *
  *  Zusätzlich: Erinnerungen X Tage vor Ablauf.
+ *
+ *  Discord-Bots haben KEINEN 30-Tage-Zyklus und keine Ruhezeit – sie laufen ohne Enddatum (NO_CYCLE_END).
+ *  Sie durchlaufen die Schritte 2–5 nur, wenn das Bot-Fair-Use-System ihren Platz wegen Inaktivität freigibt
+ *  (status → expiring); reaktivieren geht dann sofort.
  */
-import { and, eq, gt, lte } from 'drizzle-orm';
-import { capitalize, deleteAt as deleteAtFor, freeHostingConfig, reactivatableAt, restPeriodAfterText, restPeriodText, type Locale } from '@chfree/shared';
+import { and, eq, gt, lt, lte, ne } from 'drizzle-orm';
+import {
+  NO_CYCLE_END,
+  capitalize,
+  deleteAt as deleteAtFor,
+  freeHostingConfig,
+  productHasCycle,
+  reactivatableAt,
+  restPeriodAfterText,
+  restPeriodText,
+  type Locale,
+} from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { servers, type Server } from '../db/schema';
 import { pterodactyl } from '../pterodactyl';
@@ -33,6 +47,8 @@ const REST_MS = rules.reactivationCooldownMinutes * 60_000;
 const DELETE_MS = rules.deleteAfterRestHours * 3_600_000;
 const deleteAtOf = (server: Server) =>
   server.suspendedAt ? deleteAtFor(server.suspendedAt, rules.reactivationCooldownMinutes, rules.deleteAfterRestHours) : null;
+/** Discord-Bots: kein Zyklus, keine Ruhezeit – die Frist bis zur Löschung ist dieselbe wie bei Minecraft-Servern */
+const isBot = (server: Server) => !productHasCycle(server.kind);
 const hasRest = REST_MS > 0;
 /** „1 Ruhetag“ / „1 rest day“ */
 const rest = (l: Locale) => restPeriodText(rules.reactivationCooldownMinutes, l);
@@ -74,6 +90,14 @@ const t = {
       : hasRest
         ? `Server suspendiert – ${rest(l)}`
         : 'Server suspendiert – jetzt reaktivieren',
+  botSuspendedTitle: (l: Locale) => (l === 'en' ? 'Discord bot suspended – reactivate now' : 'Discord-Bot suspendiert – jetzt reaktivieren'),
+  botSuspendedBody: (server: Server, now: Date) => (l: Locale) => {
+    const until = deleteAtFor(now, rules.reactivationCooldownMinutes, rules.deleteAfterRestHours);
+    const deadline = until ? fmtDateTime(until, l) : null;
+    return l === 'en'
+      ? `“${server.name}” has been suspended because it was offline for a long time. Your files are kept. Click “Reactivate” at ${manageUrlShort(l)} and the bot can run again right away.${deadline ? ` Without reactivation it will be deleted automatically on ${deadline}.` : ''}`
+      : `„${server.name}“ wurde suspendiert, weil er längere Zeit offline war. Deine Dateien bleiben erhalten. Mit einem Klick auf „Reaktivieren“ unter ${manageUrlShort(l)} kann der Bot sofort wieder laufen.${deadline ? ` Ohne Reaktivierung wird er am ${deadline} automatisch gelöscht.` : ''}`;
+  },
   suspendedBody: (server: Server, now: Date) => (l: Locale) => {
     const from = fmtDateTime(reactivatableAt(now, rules.reactivationCooldownMinutes), l);
     if (l === 'en') {
@@ -102,7 +126,11 @@ const t = {
   },
   deletedTitle: (l: Locale) => (l === 'en' ? 'Your server has been deleted' : 'Dein Server wurde gelöscht'),
   deletedBody: (server: Server) => (l: Locale) =>
-    l === 'en'
+    isBot(server)
+      ? l === 'en'
+        ? `“${server.name}” was not reactivated after its slot was released, so it has been deleted automatically. You can create a new free Discord bot at any time.`
+        : `„${server.name}“ wurde nach der Freigabe des Platzes nicht reaktiviert und deshalb automatisch gelöscht. Du kannst jederzeit einen neuen kostenlosen Discord-Bot erstellen.`
+      : l === 'en'
       ? `“${server.name}” was not reactivated after the ${rules.days} days and the rest period, so it has been deleted automatically. You can create a new free server at any time.`
       : `„${server.name}“ wurde nach den ${rules.days} Tagen und der Ruhezeit nicht reaktiviert und deshalb automatisch gelöscht. Du kannst jederzeit einen neuen kostenlosen Server erstellen.`,
 };
@@ -145,14 +173,14 @@ async function handleExpiring(server: Server, now: Date): Promise<'suspended' | 
       serverId: server.id,
       actor: 'system',
       action: 'cycle.suspended',
-      message: `Zyklus ${server.cycleNumber} beendet – Server suspendiert`,
+      message: isBot(server) ? 'Platz wegen Inaktivität freigegeben – Discord-Bot suspendiert' : `Zyklus ${server.cycleNumber} beendet – Server suspendiert`,
     });
     await notify({
       userId: server.userId,
       serverId: server.id,
       type: 'cycle.suspended',
-      title: t.suspendedTitle,
-      body: t.suspendedBody(server, now),
+      title: isBot(server) ? t.botSuspendedTitle : t.suspendedTitle,
+      body: isBot(server) ? t.botSuspendedBody(server, now) : t.suspendedBody(server, now),
       dedupeKey: `cycle-suspended:${server.id}:${server.cycleNumber}`,
     });
   }
@@ -164,7 +192,15 @@ export const cycleJob: JobDefinition = {
   intervalMs: 60_000,
   leaseMs: 5 * 60_000,
   async run({ now, log }) {
-    const stats = { reminders: 0, chat: 0, expired: 0, stopping: 0, suspended: 0, reactivatable: 0, deleteReminders: 0, deleted: 0, errors: 0 };
+    const stats = { reminders: 0, chat: 0, expired: 0, stopping: 0, suspended: 0, reactivatable: 0, deleteReminders: 0, deleted: 0, errors: 0, botsWithoutCycle: 0 };
+
+    // Discord-Bots laufen ohne Enddatum. Bots, die noch ein Zyklusende aus einer früheren Version tragen,
+    // werden hier davon befreit – bevor unten abgelaufene Zyklen eingesammelt werden.
+    const freed = await db
+      .update(servers)
+      .set({ cycleEndsAt: NO_CYCLE_END })
+      .where(and(eq(servers.kind, 'discord'), ne(servers.status, 'deleted'), lt(servers.cycleEndsAt, NO_CYCLE_END)));
+    stats.botsWithoutCycle = affectedRows(freed);
 
     // 0) Hinweise im Minecraft-Chat kurz vor Zyklusende (60/10/1 Minuten)
     const endingSoon = await db
@@ -262,6 +298,8 @@ export const cycleJob: JobDefinition = {
           ),
         );
       for (const server of ready) {
+        // Discord-Bots haben keine Ruhezeit – sie sind sofort reaktivierbar
+        if (isBot(server)) continue;
         const created = await notify({
           userId: server.userId,
           serverId: server.id,
@@ -284,7 +322,7 @@ export const cycleJob: JobDefinition = {
       const expired = await db
         .select()
         .from(servers)
-        .where(and(eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired'), lte(servers.suspendedAt, new Date(now.getTime() - REST_MS))));
+        .where(and(eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired')));
       const allowed = await deletionsAllowed(now);
       for (const server of expired) {
         const at = deleteAtOf(server);

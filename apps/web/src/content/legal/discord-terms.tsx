@@ -1,10 +1,10 @@
-import { formatMb, freeHostingConfig, localePath, locationNames, restPeriodText, type PublicSiteDTO } from '@chfree/shared';
+import { formatMb, freeHostingConfig, localePath, locationNames, type PublicSiteDTO } from '@chfree/shared';
 import Link from 'next/link';
 
 const { fairUse, cycle, serverTypes } = freeHostingConfig;
 // Als Funktionen: Die Werte sind im Admin-Bereich einstellbar und können sich zur Laufzeit ändern
-const hasRestFn = () => cycle.reactivationCooldownMinutes > 0;
-const delHFn = () => cycle.deleteAfterRestHours;
+/** Stunden bis zur automatischen Löschung nach einer Suspendierung (0 = keine Löschung) */
+const delHFn = () => (cycle.deleteAfterRestHours > 0 ? Math.round(cycle.reactivationCooldownMinutes / 60) + cycle.deleteAfterRestHours : 0);
 /** Laufzeiten für Bots, z. B. „Python“ und „Node.js“ */
 const runtimes = serverTypes.filter((t) => t.kind === 'discord').map((t) => t.name);
 
@@ -49,7 +49,7 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
       </section>
 
       <section>
-        <h2>3. Laufzeit und {cycle.days}-Tage-Zyklus</h2>
+        <h2>3. Laufzeit: Dauerbetrieb ohne Ablaufdatum</h2>
         {fairUseEnabled ? (
           <ul>
             <li>Ein Bot darf höchstens {fairUse.maxSessionHours} Stunden am Stück laufen und wird danach automatisch gestoppt.</li>
@@ -62,26 +62,26 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           </ul>
         ) : (
           <p>
-            Discord-Bots dürfen durchgehend laufen: Es gibt keine Begrenzung der Laufzeit am Stück und keine wöchentliche Offline-Zeit. Stattdessen gelten der{' '}
-            {cycle.days}-Tage-Zyklus und das Fair-Use-System für Discord-Bots (Ziffer 4).
+            Discord-Bots dürfen durchgehend laufen: Es gibt keine Begrenzung der Laufzeit am Stück und keine wöchentliche Offline-Zeit. Stattdessen gilt das
+            Fair-Use-System für Discord-Bots (Ziffer 4).
           </p>
         )}
         <ul>
-          <li>Jeder Bot hat einen Zyklus von {cycle.days} Tagen ab Erstellung bzw. letzter Reaktivierung.</li>
-          <li>Nach Ablauf wird der Bot offline genommen, der Nutzer informiert und der Server anschließend suspendiert.</li>
-          {hasRestFn() && (
-            <li>
-              Nach der Suspendierung gilt eine Ruhezeit von {restPeriodText(cycle.reactivationCooldownMinutes, 'de')}. Erst danach kann der Bot reaktiviert werden; der Nutzer
-              wird per E-Mail informiert.
-            </li>
-          )}
           <li>
-            Über „Reaktivieren“ unter <Link href={localePath('de', 'myServers')}>„Meine Server“</Link> beginnt ein neuer Zyklus. Daten bleiben während der Suspendierung erhalten.
+            Für Discord-Bots gibt es keinen {cycle.days}-Tage-Zyklus und keinen Ruhetag: Ein Bot läuft ohne Ablaufdatum und muss nicht verlängert werden.
+          </li>
+          <li>
+            Suspendiert wird ein Bot nur, wenn das Fair-Use-System seinen Platz wegen Inaktivität freigibt oder eine Sperre ausgesprochen wird (Ziffer 4), sowie bei
+            Verstößen gegen diese Bedingungen.
+          </li>
+          <li>
+            Nach einer Freigabe wegen Inaktivität kann der Bot sofort über „Reaktivieren“ unter <Link href={localePath('de', 'myServers')}>„Meine Server“</Link> wieder
+            gestartet werden. Daten bleiben während der Suspendierung erhalten.
           </li>
           {delHFn() > 0 && (
             <li>
-              Wird der Bot nicht innerhalb von {delHFn()} Stunden nach dem Ende der Ruhezeit reaktiviert, wird er einschließlich aller Dateien und Datenbanken automatisch gelöscht.{' '}
-              {cycle.deleteReminderHours} Stunden vorher erhält der Nutzer eine Erinnerung per E-Mail. Während Wartungsarbeiten und 24 Stunden danach finden keine
+              Wird der Bot nicht innerhalb von {delHFn()} Stunden nach der Suspendierung reaktiviert, wird er einschließlich aller Dateien und Datenbanken automatisch
+              gelöscht. {cycle.deleteReminderHours} Stunden vorher erhält der Nutzer eine Erinnerung per E-Mail. Während Wartungsarbeiten und 24 Stunden danach finden keine
               automatischen Löschungen statt.
             </li>
           )}
@@ -112,9 +112,9 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
               {bf.inactiveDays > 0 && (
                 <li>
                   <strong>Aktive Nutzung:</strong> Kostenlose Plätze sind für Bots gedacht, die tatsächlich laufen. Ist ein Bot {bf.inactiveDays} Tage am Stück offline, wird sein
-                  Platz freigegeben: Die Laufzeit endet vorzeitig und der Server wird wie nach Ablauf des {cycle.days}-Tage-Zyklus suspendiert (Ziffer 3).
+                  Platz freigegeben: Der Bot wird gestoppt und suspendiert (Ziffer 3).
                   {bf.inactiveWarningDays > 0 && <> {bf.inactiveWarningDays === 1 ? 'Einen Tag' : `${bf.inactiveWarningDays} Tage`} vorher erhält der Nutzer eine Erinnerung per E-Mail.</>}{' '}
-                  Der Bot kann anschließend unter <Link href={localePath('de', 'myServers')}>„Meine Server“</Link> reaktiviert werden.
+                  Der Bot kann anschließend unter <Link href={localePath('de', 'myServers')}>„Meine Server“</Link> sofort reaktiviert werden.
                 </li>
               )}
               <li>
@@ -239,7 +239,7 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
       </section>
 
       <section>
-        <h2>3. Runtime and {cycle.days}-day cycle</h2>
+        <h2>3. Runtime: continuous operation without an expiry date</h2>
         {fairUseEnabled ? (
           <ul>
             <li>A bot may run for at most {fairUse.maxSessionHours} hours in a row and is then stopped automatically.</li>
@@ -252,25 +252,25 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           </ul>
         ) : (
           <p>
-            Discord bots may run continuously: there is no limit on the runtime in a row and no weekly offline time. Instead, the {cycle.days}-day cycle and the
-            fair-use system for Discord bots (section 4) apply.
+            Discord bots may run continuously: there is no limit on the runtime in a row and no weekly offline time. Instead, the fair-use system for Discord
+            bots (section 4) applies.
           </p>
         )}
         <ul>
-          <li>Every bot has a cycle of {cycle.days} days from creation or the last reactivation.</li>
-          <li>When it ends, the bot is taken offline, the user is informed and the server is then suspended.</li>
-          {hasRestFn() && (
-            <li>
-              After the suspension a rest period of {restPeriodText(cycle.reactivationCooldownMinutes, 'en')} applies. Only then can the bot be reactivated; the user is
-              informed by email.
-            </li>
-          )}
           <li>
-            Clicking “Reactivate” under <Link href={localePath('en', 'myServers')}>“My servers”</Link> starts a new cycle. Data is kept during the suspension.
+            There is no {cycle.days}-day cycle and no rest day for Discord bots: a bot runs without an expiry date and does not need to be renewed.
+          </li>
+          <li>
+            A bot is only suspended if the fair-use system releases its slot because of inactivity or imposes a suspension (section 4), and in the event of
+            violations of these terms.
+          </li>
+          <li>
+            After a release because of inactivity the bot can be started again right away by clicking “Reactivate” under{' '}
+            <Link href={localePath('en', 'myServers')}>“My servers”</Link>. Data is kept during the suspension.
           </li>
           {delHFn() > 0 && (
             <li>
-              If the bot is not reactivated within {delHFn()} hours after the rest period ends, it is deleted automatically including all files and databases. The user receives
+              If the bot is not reactivated within {delHFn()} hours after the suspension, it is deleted automatically including all files and databases. The user receives
               an email reminder {cycle.deleteReminderHours} hours beforehand. No automatic deletions take place during maintenance and for 24 hours afterwards.
             </li>
           )}
@@ -301,9 +301,9 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
               {bf.inactiveDays > 0 && (
                 <li>
                   <strong>Active use:</strong> free slots are meant for bots that are actually running. If a bot is offline for {bf.inactiveDays} days in a row, its slot is
-                  released: the runtime ends early and the server is suspended as after the end of the {cycle.days}-day cycle (section 3).
+                  released: the bot is stopped and suspended (section 3).
                   {bf.inactiveWarningDays > 0 && <> The user receives an email reminder {bf.inactiveWarningDays === 1 ? 'one day' : `${bf.inactiveWarningDays} days`} beforehand.</>}{' '}
-                  The bot can then be reactivated under <Link href={localePath('en', 'myServers')}>“My servers”</Link>.
+                  The bot can then be reactivated right away under <Link href={localePath('en', 'myServers')}>“My servers”</Link>.
                 </li>
               )}
               <li>

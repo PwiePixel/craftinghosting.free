@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { Globe, Heart, Menu, X } from 'lucide-react';
 import { localePath, sectionPath, switchLocalePath, type RegistrationMode } from '@chfree/shared';
 import { Logo, type CustomLogo } from '@/components/brand/logo';
@@ -22,7 +22,10 @@ export function SiteHeader({
   signedIn = false,
   donate = false,
   logo,
+  sections = { minecraft: true, discord: true },
 }: {
+  /** Welche Angebote die Startseite zeigt – „Pakete“ springt zum ersten vorhandenen Abschnitt */
+  sections?: { minecraft: boolean; discord: boolean };
   /** Hochgeladenes Logo aus dem Admin-Bereich */
   logo?: CustomLogo;
   minimal?: boolean;
@@ -49,14 +52,31 @@ export function SiteHeader({
   const donateHref = localePath(lang, 'donate');
 
   const nav: { href: string; label: string; wide?: boolean }[] = [
-    { href: sectionPath(lang, 'plans'), label: t.nav.plans },
-    { href: sectionPath(lang, 'discord'), label: t.nav.discord },
+    // Ohne Minecraft-Pakete führt „Pakete“ zum Discord-Bereich; ohne beides entfällt der Link
+    ...(sections.minecraft || sections.discord ? [{ href: sectionPath(lang, sections.minecraft ? 'plans' : 'discord'), label: t.nav.plans }] : []),
+    ...(sections.discord ? [{ href: sectionPath(lang, 'discord'), label: t.nav.discord }] : []),
     // „Ablauf“ erscheint in der Desktop-Leiste erst ab sehr breiten Fenstern – sonst wird es zu eng
     { href: sectionPath(lang, 'how'), label: t.nav.how, wide: true },
     { href: sectionPath(lang, 'rules'), label: t.nav.rules },
     { href: localePath(lang, 'faq'), label: t.nav.faq },
     { href: localePath(lang, 'status'), label: t.nav.status },
   ];
+
+  /**
+   * Links zu Abschnitten der Startseite: Steht das Ziel schon in der Adresse (z. B. zweiter Klick auf „Pakete“),
+   * würde der Browser nicht mehr scrollen. Deshalb springen wir selbst zum Abschnitt, wenn er auf dieser Seite liegt.
+   */
+  const goToSection = (e: MouseEvent<HTMLAnchorElement>, href: string) => {
+    const [path, hash] = href.split('#');
+    if (!hash || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    const here = window.location.pathname.replace(/\/$/, '') === (path ?? '').replace(/\/$/, '');
+    const target = here ? document.getElementById(hash) : null;
+    if (!target) return;
+    e.preventDefault();
+    setOpen(false);
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (window.location.hash !== `#${hash}`) window.history.pushState(null, '', `#${hash}`);
+  };
 
   // Bewusst <a> statt <Link>: Der Sprachwechsel lädt die Seite komplett neu (andere Sprache im Root-Layout, sauberer Prefetch-Cache).
   const langSwitch = (className?: string) => (
@@ -81,7 +101,7 @@ export function SiteHeader({
         {!minimal && (
           <nav className="hidden items-center gap-5 lg:flex xl:gap-7" aria-label={t.nav.main}>
             {nav.map((item) => (
-              <Link key={item.href} href={item.href} className={cn('text-sm whitespace-nowrap transition-colors', item.wide && 'hidden 2xl:inline', pathname === item.href ? 'text-white' : 'text-muted hover:text-white')}>
+              <Link key={item.label} href={item.href} onClick={(e) => goToSection(e, item.href)} className={cn('text-sm whitespace-nowrap transition-colors', item.wide && 'hidden 2xl:inline', pathname === item.href ? 'text-white' : 'text-muted hover:text-white')}>
                 {item.label}
               </Link>
             ))}
@@ -128,7 +148,7 @@ export function SiteHeader({
         <nav className="border-t border-line lg:hidden" aria-label={t.nav.mobile}>
           <div className="container-page flex flex-col py-3">
             {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }].map((item) => (
-              <Link key={item.href} href={item.href} className="py-2.5 text-[15px] text-gray-200">
+              <Link key={item.label} href={item.href} onClick={(e) => goToSection(e, item.href)} className="py-2.5 text-[15px] text-gray-200">
                 {item.label}
               </Link>
             ))}

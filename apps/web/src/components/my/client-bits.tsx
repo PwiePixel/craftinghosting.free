@@ -80,7 +80,7 @@ export function ReactivateButton({ server }: { server: ServerDTO }) {
           }
         }}
       >
-        {t.reactivate}
+        {server.cycle.unlimited ? t.reactivateBot : t.reactivate}
       </Button>
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>

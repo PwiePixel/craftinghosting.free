@@ -3,6 +3,7 @@
  * Mit BOM und Semikolon – öffnet sich in Excel/LibreOffice ohne Import-Dialog.
  */
 import { desc, eq, ne } from 'drizzle-orm';
+import { hasCycleEnd } from '@chfree/shared';
 import { db } from '../db/client';
 import { newsletterSubscribers, servers, users } from '../db/schema';
 
@@ -35,7 +36,7 @@ export async function exportCsv(type: ExportType): Promise<string> {
       .orderBy(desc(servers.createdAt));
     return toCsv(
       ['Name', 'Produkt', 'Paket', 'Typ', 'Version', 'Status', 'Besitzer', 'RAM (MB)', 'CPU (%)', 'Speicher (MB)', 'Adresse', 'Zyklus', 'Läuft bis', 'Panel-ID', 'Erstellt'],
-      rows.map(({ s, email }) => [s.name, s.kind, s.planId, s.serverType, s.version, s.status, email, s.memoryMb, s.cpuPercent, s.diskMb, s.address, s.cycleNumber, s.cycleEndsAt, s.pteroServerId, s.createdAt]),
+      rows.map(({ s, email }) => [s.name, s.kind, s.planId, s.serverType, s.version, s.status, email, s.memoryMb, s.cpuPercent, s.diskMb, s.address, s.cycleNumber, hasCycleEnd(s.cycleEndsAt) ? s.cycleEndsAt : '', s.pteroServerId, s.createdAt]),
     );
   }
   const rows = await db.select().from(newsletterSubscribers).orderBy(desc(newsletterSubscribers.createdAt));

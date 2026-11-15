@@ -6,7 +6,8 @@ import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInAr
 import {
   ADMIN_PAGE_SIZE,
   allPlans,
-  cycleEndFrom,
+  cycleEndFor,
+  productHasCycle,
   freeHostingConfig,
   productKinds,
   type AdminPanelDTO,
@@ -392,7 +393,7 @@ export async function serverAction(admin: User, id: string, action: ServerAction
           suspensionReason: null,
           suspendedAt: null,
           expiringSince: null,
-          ...(newCycle ? { cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFrom(now, freeHostingConfig.cycle) } : {}),
+          ...(newCycle ? { cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle) } : {}),
         })
         .where(and(eq(servers.id, id), eq(servers.status, 'suspended')));
       if (affectedRows(res) !== 1) throw stateChanged();
@@ -415,14 +416,19 @@ export async function serverAction(admin: User, id: string, action: ServerAction
           expiringSince: null,
           cycleNumber: server.cycleNumber + 1,
           cycleStartedAt: now,
-          cycleEndsAt: cycleEndFrom(now, freeHostingConfig.cycle),
+          cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle),
           ...(wasSuspended ? { reactivationCount: server.reactivationCount + 1, lastReactivatedAt: now } : {}),
         })
         .where(and(eq(servers.id, id), eq(servers.status, server.status)));
       if (affectedRows(res) !== 1) throw stateChanged();
       if (wasSuspended && server.pteroServerId) await ptero.unsuspendServer(server.pteroServerId).catch(() => {});
       await trySyncPanelDescription(server.id);
-      await log('admin.server_extended', `Server „${server.name}“ um ${freeHostingConfig.cycle.days} Tage verlängert (Zyklus ${server.cycleNumber + 1})`);
+      await log(
+        'admin.server_extended',
+        productHasCycle(server.kind)
+          ? `Server „${server.name}“ um ${freeHostingConfig.cycle.days} Tage verlängert (Zyklus ${server.cycleNumber + 1})`
+          : `Discord-Bot „${server.name}“ reaktiviert bzw. Laufzeit erneuert (läuft ohne Enddatum)`,
+      );
       return;
     }
     case 'clear-pause': {

@@ -91,8 +91,8 @@ Weitere Domains leiten standardmäßig auf die Hauptdomain weiter (gut für Such
 | --- | --- | --- |
 | CPU-Dauerlast | über 90 % des Paket-Limits für 30 min am Stück | nach 15 min Vorwarnung per E-Mail, nach 30 min Stopp und 30 min Pause (Starts in der Pause werden rückgängig gemacht) |
 | Verwarnungen | 3 Stopps in 7 Tagen | Bot wird gesperrt (Grund „abuse“), Entsperren im Admin unter *Server* |
-| Inaktivität | 7 Tage am Stück offline | Erinnerung 2 Tage vorher, dann endet die Laufzeit vorzeitig (suspendiert, reaktivierbar wie nach 30 Tagen) |
-| Laufzeit | 30 Tage | wie bei Minecraft: verlängern unter „Meine Server“ |
+| Inaktivität | 7 Tage am Stück offline | Erinnerung 2 Tage vorher, dann wird der Platz freigegeben: Bot suspendiert, **sofort** reaktivierbar unter „Meine Server“, ohne Reaktivierung nach 72 h gelöscht |
+| Laufzeit | kein Ablaufdatum | Discord-Bots haben **keinen** 30-Tage-Zyklus und **keinen** Ruhetag – sie laufen durchgehend und müssen nie verlängert werden |
 
 Geprüft wird jede Minute im Job `sync-power-states` (`apps/api/src/services/bot-fair-use.ts`). Das klassische Fair-Use-System (24 h am Stück, Wochen-Offline-Zeit) gilt für Minecraft und lässt sich für Bots zusätzlich einschalten.
 
@@ -251,7 +251,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | --- | --- | --- |
 | `sync-power-states` | 60 s | Zustand aus dem Panel lesen, Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation, **Fair-Use für Discord-Bots** (CPU-Dauerlast, Inaktivität) |
 | `enforce-fair-use` | 60 s | Chat-Warnungen, 24-h-Limit, Wochen-Offline-Zeit, Pausen-Verstöße |
-| `cycle-lifecycle` | 60 s | Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag |
+| `cycle-lifecycle` | 60 s | 30-Tage-Zyklus der Minecraft-Server: Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag. Discord-Bots haben keinen Zyklus; der Job suspendiert sie nur nach einer Freigabe wegen Inaktivität |
 | `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |

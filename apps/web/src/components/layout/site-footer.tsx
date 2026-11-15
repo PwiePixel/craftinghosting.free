@@ -26,6 +26,16 @@ export function SiteFooter({ lang, donate = false, newsletter = false, logo }: {
   return (
     <footer className="border-t border-line">
       <div className="container-page py-12">
+        {/* Newsletter steht über dem Bereich mit Logo und Links */}
+        {newsletter && (
+          <div className="mb-10 flex flex-col gap-4 border-b border-line pb-10 md:flex-row md:items-start md:justify-between">
+            <div className="max-w-sm">
+              <p className="text-sm font-semibold text-white">{t.newsletter.footerTitle}</p>
+              <p className="mt-1 text-sm text-muted">{t.newsletter.footerText}</p>
+            </div>
+            <NewsletterForm compact id="footer-newsletter" />
+          </div>
+        )}
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div className="max-w-sm">
             <Logo href={localePath(lang, 'home')} custom={logo} />
@@ -51,15 +61,6 @@ export function SiteFooter({ lang, donate = false, newsletter = false, logo }: {
             )}
           </nav>
         </div>
-        {newsletter && (
-          <div className="mt-10 flex flex-col gap-4 border-t border-line pt-8 md:flex-row md:items-start md:justify-between">
-            <div className="max-w-sm">
-              <p className="text-sm font-semibold text-white">{t.newsletter.footerTitle}</p>
-              <p className="mt-1 text-sm text-muted">{t.newsletter.footerText}</p>
-            </div>
-            <NewsletterForm compact id="footer-newsletter" />
-          </div>
-        )}
         <div className="mt-10 flex flex-col gap-2 border-t border-line pt-6 text-[13px] text-subtle sm:flex-row sm:justify-between">
           <p>© 2024 – {new Date().getFullYear()} Crafting Hosting</p>
           <p>craftinghosting.free · A CraftingHosting Service</p>

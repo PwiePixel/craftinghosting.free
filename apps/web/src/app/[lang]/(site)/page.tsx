@@ -358,6 +358,8 @@ export default async function HomePage({ params }: Props) {
       )}
 
       {/* ------------------------------------------------------ Discord-Bots */}
+      {/* Ohne Minecraft-Pakete landen alte „Pakete“-Links (#pakete / #plans) beim Discord-Bereich */}
+      {minecraftPlans.length === 0 && discordPlans.length > 0 && <span id={homeSections.plans[lang]} className="block scroll-mt-16" aria-hidden />}
       {discordPlans.length > 0 && (
         <section id={homeSections.discord[lang]} className="scroll-mt-16 border-t border-line py-20 sm:py-28">
           <div className="container-page">

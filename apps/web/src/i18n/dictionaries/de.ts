@@ -172,7 +172,7 @@ return {
         'Pterodactyl-Panel: Konsole, Dateimanager, SFTP, Startparameter',
         fairUseOn ? `Fair-Use wie bei Minecraft: max. ${fairUse.maxSessionHours} h am Stück` : 'Durchgehend online: kein Laufzeitlimit, keine Pflicht-Pausen',
         'Fair-Use für Bots: keine CPU-Dauerlast, Platz für aktive Bots',
-        `${cycle.days} Tage Laufzeit, kostenlos verlängerbar`,
+        `Kein ${cycle.days}-Tage-Zyklus, kein Ruhetag – läuft ohne Ablaufdatum`,
       ],
       rows: { ram: 'Arbeitsspeicher', cpu: 'CPU', disk: 'NVMe-Speicher', runtime: 'Sprache', runtimeValue: botTypes.map((t) => t.name).join(' / ') },
       create: (name: string) => `${name} erstellen`,
@@ -193,7 +193,7 @@ return {
         ...(r.inactiveDays > 0
           ? ([[`${r.inactiveDays} Tage`, 'offline = Platz frei', 'Plätze sind für aktive Bots. Wer so lange am Stück offline ist, gibt seinen Platz frei – reaktivieren geht mit einem Klick.']] as [string, string, string][])
           : []),
-        [`${cycle.days} Tage`, 'Laufzeit', `Wie bei Minecraft: danach kostenlos verlängern${hasRest ? ` (${afterRest})` : ''}.`],
+        ['∞', 'kein Ablaufdatum', `Anders als bei Minecraft gibt es keinen ${cycle.days}-Tage-Zyklus und keinen Ruhetag. Dein Bot muss nie verlängert werden.`],
       ],
     },
     planLeft: (left: string, total: string) => `Noch ${left} von ${total} Plätzen frei`,
@@ -284,10 +284,10 @@ return {
     noPlans: 'Für dieses Angebot gibt es gerade keine Pakete.',
     acceptRulesBot: 'Nutzungsbedingungen für Discord-Bots',
     acceptSummaryBot: (fairUseOn: boolean) =>
-      `: ${fairUseOn ? `max. ${fairUse.maxSessionHours} h am Stück, ${fairUse.weeklyOfflineHours} h pro Woche offline, ` : ''}Verlängerung nach ${cycle.days} Tagen${hasRest ? ` und ${rest}` : ''}, Fair-Use-System für Bots (keine CPU-Dauerlast, aktive Nutzung), keine Selfbots, kein Spam. Hinweise zum `,
+      `: ${fairUseOn ? `max. ${fairUse.maxSessionHours} h am Stück, ${fairUse.weeklyOfflineHours} h pro Woche offline, ` : ''}kein ${cycle.days}-Tage-Zyklus und kein Ruhetag, Fair-Use-System für Bots (keine CPU-Dauerlast, aktive Nutzung), keine Selfbots, kein Spam. Hinweise zum `,
     fairTitleBot: 'Laufzeit, kurz erklärt',
     fairTextBot: (fairUseOn: boolean) =>
-      `${fairUseOn ? `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline. ` : 'Dein Bot darf durchgehend online sein. Fair bleibt es durch zwei Regeln: keine CPU-Dauerlast und kein tagelanger Leerlauf – Details in den Nutzungsbedingungen für Discord-Bots. '}Nach ${cycle.days} Tagen ${hasRest ? `und ${rest.replace(/^1 /, 'einem ')} ` : ''}verlängerst du mit einem Klick – wir erinnern dich vorher per E-Mail.`,
+      `${fairUseOn ? `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline. ` : 'Dein Bot darf durchgehend online sein. Fair bleibt es durch zwei Regeln: keine CPU-Dauerlast und kein tagelanger Leerlauf – Details in den Nutzungsbedingungen für Discord-Bots. '}Es gibt kein Ablaufdatum: Dein Bot muss nicht verlängert werden und hat keinen Ruhetag.`,
     fairTitle: 'Fair-Use, kurz erklärt',
     fairText: `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline, nach ${cycle.days} Tagen ${hasRest ? `und ${rest.replace(/^1 /, 'einem ')} ` : ''}mit einem Klick verlängern. Alles automatisch – mit Hinweis im Chat, bevor etwas passiert.`,
 
@@ -396,6 +396,7 @@ return {
       provisioning: 'Wird eingerichtet',
       expiring: 'Wird suspendiert',
       expired: `${cycle.days} Tage abgelaufen`,
+      released: 'Platz freigegeben',
       locked: 'Gesperrt',
       installing: 'Installation läuft',
       paused: 'Fair-Use-Pause',
@@ -404,12 +405,15 @@ return {
     },
     days: (n: number) => `${n} Tage`,
     expiredText: `Die ${cycle.days} Tage sind abgelaufen, der Server ist suspendiert. Deine Welt und Dateien sind gespeichert.`,
+    releasedText: 'Der Bot war längere Zeit offline, deshalb wurde sein Platz freigegeben und er ist suspendiert. Deine Dateien sind gespeichert – du kannst ihn sofort reaktivieren.',
     restBefore: `${afterRest.charAt(0).toUpperCase()}${afterRest.slice(1)} kannst du ihn ab `,
     restAfter: ' reaktivieren – wir schicken dir dann eine E-Mail.',
     deleteAt: (dt: string) => `Ohne Reaktivierung wird der Server am ${dt} automatisch gelöscht.`,
     lockedText: 'Dieser Server wurde vom Team gesperrt. Bitte wende dich an den Support.',
     pendingText: 'Sobald dein Panel-Zugang eingerichtet ist, wird dieser Server automatisch erstellt.',
     expiringText: 'Der Server wird gerade gestoppt und suspendiert – danach kannst du ihn hier reaktivieren.',
+    noEnd: 'Läuft ohne Ablaufdatum',
+    noEndHint: `Kein ${cycle.days}-Tage-Zyklus, kein Ruhetag – dein Bot muss nicht verlängert werden.`,
     provisioningText: 'Der Server wird im Panel angelegt. Das dauert meist nur wenige Sekunden.',
     runtime: 'Laufzeit',
     activeUntil: (date: string, left: string) => `Aktiv bis ${date} · noch ${left}`,
@@ -431,6 +435,7 @@ return {
     helpText: `Das alles machst du im Pterodactyl-Panel. Pausen und die ${cycle.days}-Tage-Laufzeit regelt unser System automatisch – Hinweise erscheinen vorher im Minecraft-Chat und in der Serverbeschreibung.`,
     copyAddress: 'Adresse kopieren',
     reactivate: `Reaktivieren – weitere ${cycle.days} Tage`,
+    reactivateBot: 'Bot reaktivieren',
     reactivateFailed: 'Reaktivierung fehlgeschlagen.',
     discardRequest: 'Anfrage verwerfen',
     deleteServer: 'Server löschen',
@@ -450,7 +455,7 @@ return {
 
   faq: {
     metaTitle: 'FAQ – Häufige Fragen',
-    metaDescription: 'Antworten zu CraftingHosting.free: Kosten, Panel-Zugang, Minecraft-Versionen, Discord-Bots, RAM, Fair-Use-System, 30 Tage Laufzeit und Reaktivierung.',
+    metaDescription: 'Antworten zu CraftingHosting.free: Kosten, Panel-Zugang, Minecraft-Versionen, Discord-Bots, RAM, Fair-Use-System, Laufzeit und Reaktivierung.',
     title: 'Häufige Fragen',
     intro: 'Alles Wichtige zum kostenlosen Minecraft- und Discord-Bot-Hosting von Crafting Hosting.',
     moreTitle: 'Deine Frage ist nicht dabei?',
@@ -510,8 +515,8 @@ return {
             {
               q: 'Läuft mein Discord-Bot rund um die Uhr?',
               a: ctx.discordFairUse
-                ? `Für Discord-Bots gilt dasselbe Fair-Use-System wie für Minecraft-Server: höchstens ${fairUse.maxSessionHours} Stunden am Stück und ${fairUse.weeklyOfflineHours} Stunden Offline-Zeit pro Woche. Nach ${cycle.days} Tagen verlängerst du kostenlos.`
-                : `Ja – Discord-Bots dürfen durchgehend online sein, es gibt kein Laufzeitlimit und keine Pflicht-Pausen. Stattdessen gilt ein eigenes Fair-Use-System für Bots: keine CPU-Dauerlast (bei anhaltender Volllast wird der Bot nach einer Vorwarnung kurz pausiert) und aktive Nutzung (ein Bot, der tagelang offline ist, gibt seinen Platz frei). Dazu kommt die Laufzeit von ${cycle.days} Tagen, die du kostenlos verlängerst. Die genauen Werte stehen in den Nutzungsbedingungen für Discord-Bots.`,
+                ? `Für Discord-Bots gilt dasselbe Fair-Use-System wie für Minecraft-Server: höchstens ${fairUse.maxSessionHours} Stunden am Stück und ${fairUse.weeklyOfflineHours} Stunden Offline-Zeit pro Woche. Einen ${cycle.days}-Tage-Zyklus mit Ruhetag gibt es für Bots nicht.`
+                : `Ja – Discord-Bots dürfen durchgehend online sein, es gibt kein Laufzeitlimit und keine Pflicht-Pausen. Stattdessen gilt ein eigenes Fair-Use-System für Bots: keine CPU-Dauerlast (bei anhaltender Volllast wird der Bot nach einer Vorwarnung kurz pausiert) und aktive Nutzung (ein Bot, der tagelang offline ist, gibt seinen Platz frei). Den ${cycle.days}-Tage-Zyklus mit Ruhetag gibt es für Bots nicht – sie laufen ohne Ablaufdatum. Die genauen Werte stehen in den Nutzungsbedingungen für Discord-Bots.`,
             },
             {
               q: 'Was ist bei Discord-Bots nicht erlaubt?',
@@ -585,7 +590,7 @@ return {
     discordTerms: {
       title: 'Nutzungsbedingungen für Discord-Bot-Hosting',
       short: 'Nutzungsbedingungen Discord-Bots',
-      description: `Nutzungsbedingungen für das kostenlose Discord-Bot-Hosting von CraftingHosting.free: Pakete, ${cycle.days}-Tage-Zyklus, erlaubte und unzulässige Nutzung.`,
+      description: `Nutzungsbedingungen für das kostenlose Discord-Bot-Hosting von CraftingHosting.free: Pakete, Dauerbetrieb ohne Ablaufdatum, Fair-Use-System, erlaubte und unzulässige Nutzung.`,
     },
   },
 

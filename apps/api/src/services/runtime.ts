@@ -15,7 +15,7 @@ import {
   type FairUseState,
   type PowerState,
   type ReactivationGate,
-  type StartGate,
+  type StartGate, cycleRulesFor
 } from '@chfree/shared';
 import { db } from '../db/client';
 import { serverSessions, type Server, type ServerSession, type User } from '../db/schema';
@@ -93,7 +93,7 @@ export function computeRuntimeState(server: Server, user: User, sessions: Server
     userVerified: !!user.emailVerifiedAt,
     userActive: user.status === 'active',
     now,
-    rules: cycleRules,
+    rules: cycleRulesFor(server.kind, cycleRules),
   });
   const openSession = sessions.find((s) => !s.endedAt) ?? null;
   return { fairUse, cycle, startGate, reactivation, openSession };

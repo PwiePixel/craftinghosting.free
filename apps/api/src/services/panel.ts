@@ -4,7 +4,7 @@
  *  – In-Game-/Konsolen-Hinweise per `say` (genau einmal dank dedupe_marks)
  */
 import { eq } from 'drizzle-orm';
-import { deleteAt, formatDate, formatDateTime, freeHostingConfig, localePath, reactivatableAt, restPeriodText, type Locale } from '@chfree/shared';
+import { deleteAt, formatDate, formatDateTime, freeHostingConfig, localePath, reactivatableAt, restPeriodText, type Locale, cycleRulesFor, hasCycleEnd, productHasCycle } from '@chfree/shared';
 import { env, panelPublicUrl } from '../env';
 import { affectedRows, db } from '../db/client';
 import { dedupeMarks, servers, type Server } from '../db/schema';
@@ -37,8 +37,17 @@ export const fmtDate = (d: Date | string, locale: Locale) => formatDate(d, tz, l
 
 /** Beschreibung nach Ablauf der 30 Tage – während der Ruhezeit mit Zeitpunkt der Reaktivierung. */
 function expiredDescription(server: Server, now: Date, l: Locale): string {
-  const { days, reactivationCooldownMinutes } = freeHostingConfig.cycle;
-  const base = l === 'en' ? `${brand.productName} · ${days} days expired` : `${brand.productName} · ${days} Tage abgelaufen`;
+  const { days } = freeHostingConfig.cycle;
+  // Discord-Bots haben keinen Zyklus: Sie werden nur nach langer Inaktivität freigegeben und kennen keine Ruhezeit
+  const { reactivationCooldownMinutes: baseCooldown } = freeHostingConfig.cycle;
+  const { reactivationCooldownMinutes } = cycleRulesFor(server.kind, freeHostingConfig.cycle);
+  const base = !productHasCycle(server.kind)
+    ? l === 'en'
+      ? `${brand.productName} · slot released (inactive)`
+      : `${brand.productName} · Platz freigegeben (inaktiv)`
+    : l === 'en'
+      ? `${brand.productName} · ${days} days expired`
+      : `${brand.productName} · ${days} Tage abgelaufen`;
   if (reactivationCooldownMinutes > 0 && server.suspendedAt) {
     const until = reactivatableAt(server.suspendedAt, reactivationCooldownMinutes);
     if (until > now) {
@@ -48,7 +57,7 @@ function expiredDescription(server: Server, now: Date, l: Locale): string {
         : `${base} · ${rest} – reaktivierbar ab ${fmtDateTime(until, l)} auf ${manageUrlShort(l)}`;
     }
   }
-  const del = server.suspendedAt ? deleteAt(server.suspendedAt, reactivationCooldownMinutes, freeHostingConfig.cycle.deleteAfterRestHours) : null;
+  const del = server.suspendedAt ? deleteAt(server.suspendedAt, baseCooldown, freeHostingConfig.cycle.deleteAfterRestHours) : null;
   if (del) {
     return l === 'en'
       ? `${base} – reactivate by ${fmtDateTime(del, l)} at ${manageUrlShort(l)}, otherwise it will be deleted`
@@ -87,6 +96,7 @@ export function desiredPanelDescription(server: Server, now: Date, l: Locale = '
           ? `${prefix} · Fair-use break until ${fmtDateTime(server.pausedUntil, l)} (${why})`
           : `${prefix} · Fair-Use-Pause bis ${fmtDateTime(server.pausedUntil, l)} (${why})`;
       }
+      if (!hasCycleEnd(server.cycleEndsAt)) return en ? `${prefix} · active – runs continuously` : `${prefix} · aktiv – läuft durchgehend`;
       if (!fairUseEnabled) return en ? `${prefix} · active until ${fmtDate(server.cycleEndsAt, l)}` : `${prefix} · aktiv bis ${fmtDate(server.cycleEndsAt, l)}`;
       return en
         ? `${prefix} · active until ${fmtDate(server.cycleEndsAt, l)} · max. ${fairUse.maxSessionHours} h in a row, ${fairUse.weeklyOfflineHours} h/week offline`

@@ -37,7 +37,17 @@ export default async function SiteLayout({ children, params }: { children: React
           </div>
         </div>
       )}
-      <SiteHeader mode={site.registration.mode} maintenance={site.maintenance.enabled} signedIn={signedIn} donate={site.donate.enabled} logo={site.logo} />
+      <SiteHeader
+        mode={site.registration.mode}
+        maintenance={site.maintenance.enabled}
+        signedIn={signedIn}
+        donate={site.donate.enabled}
+        logo={site.logo}
+        sections={{
+          minecraft: site.products.minecraft.enabled && site.products.minecraft.plans.length > 0,
+          discord: site.products.discord.enabled && site.products.discord.plans.length > 0,
+        }}
+      />
       <main id="inhalt">{children}</main>
       <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} logo={site.logo} />
       <CookieBanner />

@@ -163,14 +163,12 @@ async function checkInactivity(server: Server, now: Date, rules: BotFairUseSetti
   if (server.pausedUntil && server.pausedUntil > now) return false;
   const offlineMs = now.getTime() - server.powerStateAt.getTime();
   const releaseAt = new Date(server.powerStateAt.getTime() + rules.inactiveDays * DAY);
-  // Läuft die normale Laufzeit ohnehin vorher ab, greift der 30-Tage-Zyklus
-  if (releaseAt >= server.cycleEndsAt) return false;
-
   if (offlineMs >= rules.inactiveDays * DAY) {
-    // Platz freigeben: Laufzeit endet jetzt – der Zyklus-Job übernimmt (Suspendierung, Ruhezeit, Reaktivierung, Löschung)
+    // Platz freigeben: Der Bot wird suspendiert – der Zyklus-Job übernimmt (Suspendierung, Reaktivierung, Löschung).
+    // Discord-Bots haben keinen 30-Tage-Zyklus und keine Ruhezeit; reaktivieren geht sofort.
     const res = await db
       .update(servers)
-      .set({ cycleEndsAt: now })
+      .set({ status: 'expiring', expiringSince: now })
       .where(and(eq(servers.id, server.id), eq(servers.status, 'active'), eq(servers.powerState, 'offline'), eq(servers.powerStateAt, server.powerStateAt)));
     if (affectedRows(res) !== 1) return false;
     await audit({
@@ -178,8 +176,11 @@ async function checkInactivity(server: Server, now: Date, rules: BotFairUseSetti
       serverId: server.id,
       actor: 'system',
       action: 'fair_use.bot_inactive',
-      message: `Discord-Bot ${rules.inactiveDays} Tage am Stück offline – Platz freigegeben (Laufzeit vorzeitig beendet)`,
+      message: `Discord-Bot ${rules.inactiveDays} Tage am Stück offline – Platz freigegeben (Bot wird suspendiert)`,
     });
+    // Frist bis zur Löschung: dieselbe wie bei Minecraft-Servern (Ruhezeit + Reaktivierungsfrist), nur ohne Wartezeit davor
+    const { deleteAfterRestHours, reactivationCooldownMinutes } = freeHostingConfig.cycle;
+    const deleteHours = deleteAfterRestHours > 0 ? Math.round(reactivationCooldownMinutes / 60) + deleteAfterRestHours : 0;
     await notify({
       userId: server.userId,
       serverId: server.id,
@@ -187,8 +188,8 @@ async function checkInactivity(server: Server, now: Date, rules: BotFairUseSetti
       title: (l) => (en(l) ? 'Your Discord bot slot has been released' : 'Der Platz deines Discord-Bots wurde freigegeben'),
       body: (l) =>
         en(l)
-          ? `“${server.name}” was offline for ${rules.inactiveDays} days in a row. To keep free slots available for active bots, its runtime has ended early. Your files are kept for now – you can reactivate the bot at ${manageUrlShort(l)} just like after the regular ${freeHostingConfig.cycle.days} days.`
-          : `„${server.name}“ war ${rules.inactiveDays} Tage am Stück offline. Damit freie Plätze für aktive Bots bleiben, wurde die Laufzeit vorzeitig beendet. Deine Dateien bleiben vorerst erhalten – du kannst den Bot unter ${manageUrlShort(l)} reaktivieren, genau wie nach den regulären ${freeHostingConfig.cycle.days} Tagen.`,
+          ? `“${server.name}” was offline for ${rules.inactiveDays} days in a row. To keep free slots available for active bots, it has been suspended. Your files are kept for now – you can reactivate the bot right away with one click at ${manageUrlShort(l)}.${deleteHours > 0 ? ` If it is not reactivated within ${deleteHours} hours, it will be deleted automatically.` : ''}`
+          : `„${server.name}“ war ${rules.inactiveDays} Tage am Stück offline. Damit freie Plätze für aktive Bots bleiben, wurde er suspendiert. Deine Dateien bleiben vorerst erhalten – du kannst den Bot unter ${manageUrlShort(l)} sofort mit einem Klick reaktivieren.${deleteHours > 0 ? ` Ohne Reaktivierung innerhalb von ${deleteHours} Stunden wird er automatisch gelöscht.` : ''}`,
       dedupeKey: `bot-inactive:${server.id}:${server.powerStateAt.getTime()}`,
       email: true,
     });
@@ -203,8 +204,8 @@ async function checkInactivity(server: Server, now: Date, rules: BotFairUseSetti
       title: (l) => (en(l) ? 'Your Discord bot is offline' : 'Dein Discord-Bot ist offline'),
       body: (l) =>
         en(l)
-          ? `“${server.name}” has been offline for several days. Free slots are meant for bots that are actually running: if the bot is not started by ${dt(releaseAt, l)}, its slot will be released (the runtime ends early, files are kept and you can reactivate). Just start the bot in the panel to keep your slot.`
-          : `„${server.name}“ ist seit mehreren Tagen offline. Kostenlose Plätze sind für Bots gedacht, die auch laufen: Wird der Bot nicht bis ${dt(releaseAt, l)} gestartet, wird sein Platz freigegeben (die Laufzeit endet vorzeitig, Dateien bleiben erhalten und du kannst reaktivieren). Starte den Bot einfach im Panel, um deinen Platz zu behalten.`,
+          ? `“${server.name}” has been offline for several days. Free slots are meant for bots that are actually running: if the bot is not started by ${dt(releaseAt, l)}, its slot will be released (the bot is suspended, files are kept and you can reactivate it right away). Just start the bot in the panel to keep your slot.`
+          : `„${server.name}“ ist seit mehreren Tagen offline. Kostenlose Plätze sind für Bots gedacht, die auch laufen: Wird der Bot nicht bis ${dt(releaseAt, l)} gestartet, wird sein Platz freigegeben (der Bot wird suspendiert, Dateien bleiben erhalten und du kannst ihn sofort reaktivieren). Starte den Bot einfach im Panel, um deinen Platz zu behalten.`,
       dedupeKey: `bot-inactive-warning:${server.id}:${server.powerStateAt.getTime()}`,
       email: true,
     });

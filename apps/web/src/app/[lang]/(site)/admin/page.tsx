@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { ArrowUpRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   allPlans,
+  hasCycleEnd,
   localePath,
   productKinds,
   type AdminAuditDTO,
@@ -461,9 +462,10 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
                 {s.provisioningError && <p className="max-w-[240px] text-[11px] break-words text-red-300">{s.provisioningError}</p>}
               </td>
               <td className="px-3 py-2.5 whitespace-nowrap text-muted">
-                <p>bis {fmt.date(s.cycleEndsAt)}</p>
+                <p>{hasCycleEnd(s.cycleEndsAt) ? `bis ${fmt.date(s.cycleEndsAt)}` : 'ohne Ablaufdatum'}</p>
                 <p className="text-[11px] text-subtle">
-                  Zyklus {s.cycleNumber} · {s.reactivationCount}× reaktiviert
+                  {hasCycleEnd(s.cycleEndsAt) ? `Zyklus ${s.cycleNumber} · ` : ''}
+                  {s.reactivationCount}× reaktiviert
                 </p>
               </td>
               <td className="px-3 py-2.5 whitespace-nowrap text-muted">

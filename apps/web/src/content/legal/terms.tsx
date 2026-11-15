@@ -50,10 +50,11 @@ export function TermsDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>§ 4 Fair-Use, Laufzeit und Löschung</h2>
         <p>
-          Es gelten das Fair-Use-System und der {cycle.days}-Tage-Zyklus gemäß den jeweiligen Nutzungsbedingungen (
-          <Link href={localePath('de', 'rules')}>Minecraft-Server</Link>, <Link href={localePath('de', 'discordTerms')}>Discord-Bots</Link>). Nach Ablauf eines Zyklus wird
-          der Server suspendiert und kann nach der Ruhezeit reaktiviert werden. Wird er nicht innerhalb von {cycle.deleteAfterRestHours} Stunden nach dem Ende der Ruhezeit
-          reaktiviert, wird er einschließlich Welt, Dateien und Backups gelöscht.
+          Es gilt das jeweilige Fair-Use-System gemäß den Nutzungsbedingungen (<Link href={localePath('de', 'rules')}>Minecraft-Server</Link>,{' '}
+          <Link href={localePath('de', 'discordTerms')}>Discord-Bots</Link>). Für Minecraft-Server gilt zusätzlich der {cycle.days}-Tage-Zyklus: Nach Ablauf eines Zyklus
+          wird der Server suspendiert und kann nach der Ruhezeit reaktiviert werden. Wird er nicht innerhalb von {cycle.deleteAfterRestHours} Stunden nach dem Ende der
+          Ruhezeit reaktiviert, wird er einschließlich Welt, Dateien und Backups gelöscht. Discord-Bots haben keinen solchen Zyklus und keine Ruhezeit; sie laufen ohne
+          Ablaufdatum und werden nur nach längerer Inaktivität oder bei Verstößen suspendiert (siehe Nutzungsbedingungen für Discord-Bots).
         </p>
       </section>
 
@@ -166,10 +167,11 @@ export function TermsEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>§ 4 Fair use, runtime and deletion</h2>
         <p>
-          The fair-use system and the {cycle.days}-day cycle apply as described in the respective terms of use (
-          <Link href={localePath('en', 'rules')}>Minecraft servers</Link>, <Link href={localePath('en', 'discordTerms')}>Discord bots</Link>). When a cycle ends, the server is
-          suspended and can be reactivated after the rest period. If it is not reactivated within {cycle.deleteAfterRestHours} hours after the rest period ends, it is deleted
-          including world, files and backups.
+          The respective fair-use system applies as described in the terms of use (<Link href={localePath('en', 'rules')}>Minecraft servers</Link>,{' '}
+          <Link href={localePath('en', 'discordTerms')}>Discord bots</Link>). Minecraft servers are additionally subject to the {cycle.days}-day cycle: when a cycle ends,
+          the server is suspended and can be reactivated after the rest period. If it is not reactivated within {cycle.deleteAfterRestHours} hours after the rest period
+          ends, it is deleted including world, files and backups. Discord bots have no such cycle and no rest period; they run without an expiry date and are only
+          suspended after prolonged inactivity or in the event of violations (see the terms of use for Discord bots).
         </p>
       </section>
 

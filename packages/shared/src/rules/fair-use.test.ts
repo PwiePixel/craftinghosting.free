@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CycleRules, FairUseRules } from '../config/freehosting.config';
-import { computeCycle, computeFairUse, getReactivationGate, getStartGate } from './fair-use';
+import { freeHostingConfig, type CycleRules, type FairUseRules } from '../config/freehosting.config';
+import { NO_CYCLE_END, computeCycle, computeFairUse, cycleEndFor, cycleRulesFor, getReactivationGate, getStartGate, hasCycleEnd, productHasCycle } from './fair-use';
 import { restPeriodAfterText, restPeriodText } from '../format';
 import { HOUR, MINUTE, endOfWeekInZone, startOfWeekInZone } from './time';
 
@@ -231,5 +231,44 @@ describe('Ruhezeit-Texte', () => {
     expect(restPeriodText(0)).toBe('');
     expect(restPeriodAfterText(1440)).toBe('nach einem Ruhetag');
     expect(restPeriodAfterText(2880)).toBe('nach 2 Ruhetagen');
+  });
+});
+
+describe('Produkte ohne Zyklus (Discord-Bots)', () => {
+  const rules = freeHostingConfig.cycle;
+  const now = new Date('2026-06-01T12:00:00Z');
+
+  it('nur Minecraft-Server haben den 30-Tage-Zyklus', () => {
+    expect(productHasCycle('minecraft')).toBe(true);
+    expect(productHasCycle('discord')).toBe(false);
+    expect(cycleEndFor('minecraft', now, rules).getTime()).toBe(now.getTime() + rules.days * 86_400_000);
+    expect(cycleEndFor('discord', now, rules)).toEqual(NO_CYCLE_END);
+  });
+
+  it('ein Bot läuft ohne Enddatum und läuft nie ab', () => {
+    const cycle = computeCycle({ number: 1, startedAt: now, endsAt: NO_CYCLE_END, now: new Date('2031-01-01T00:00:00Z') });
+    expect(cycle.unlimited).toBe(true);
+    expect(cycle.expired).toBe(false);
+    expect(hasCycleEnd(NO_CYCLE_END)).toBe(false);
+    expect(hasCycleEnd(cycleEndFor('minecraft', now, rules))).toBe(true);
+    expect(computeCycle({ number: 1, startedAt: now, endsAt: cycleEndFor('minecraft', now, rules), now }).unlimited).toBe(false);
+  });
+
+  it('Bots haben keine Ruhezeit vor dem Reaktivieren', () => {
+    expect(cycleRulesFor('discord', rules).reactivationCooldownMinutes).toBe(0);
+    expect(cycleRulesFor('minecraft', rules).reactivationCooldownMinutes).toBe(rules.reactivationCooldownMinutes);
+    const gate = (kind: 'minecraft' | 'discord') =>
+      getReactivationGate({
+        status: 'suspended',
+        suspensionReason: 'cycle_expired',
+        suspendedAt: new Date(now.getTime() - 60_000),
+        reactivationCount: 0,
+        userVerified: true,
+        userActive: true,
+        now,
+        rules: cycleRulesFor(kind, rules),
+      });
+    expect(gate('discord').allowed).toBe(true);
+    expect(gate('minecraft').allowed).toBe(rules.reactivationCooldownMinutes === 0);
   });
 });

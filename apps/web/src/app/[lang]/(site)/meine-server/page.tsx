@@ -31,7 +31,7 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
     case 'expiring':
       return { tone: 'amber', label: t.expiring };
     case 'suspended':
-      return { tone: 'red', label: s.suspensionReason === 'cycle_expired' ? t.expired : t.locked };
+      return { tone: 'red', label: s.suspensionReason !== 'cycle_expired' ? t.locked : s.cycle.unlimited ? t.released : t.expired };
     default:
       if (s.powerState === 'installing') return { tone: 'blue', label: t.installing };
       if (s.fairUse.isPaused) return { tone: 'amber', label: t.paused };
@@ -78,7 +78,7 @@ function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; t
         {s.status === 'suspended' && s.suspensionReason === 'cycle_expired' ? (
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="max-w-md text-sm leading-relaxed text-muted">
-              {t.expiredText}
+              {s.cycle.unlimited ? t.releasedText : t.expiredText}
               {s.reactivation.reason === 'cooldown' && s.reactivation.until && (
                 <>
                   {' '}
@@ -122,13 +122,23 @@ function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; t
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
               <p className="text-[13px] text-subtle">{t.runtime}</p>
-              <p className="mt-0.5 text-sm text-gray-100">{t.activeUntil(fmt.date(s.cycle.endsAt), daysLeft)}</p>
-              <div className="mt-2 h-1 rounded-full bg-white/10">
-                <div
-                  className={s.cycle.daysRemaining <= 3 ? 'h-1 rounded-full bg-amber-400' : 'h-1 rounded-full bg-blue-500'}
-                  style={{ width: `${Math.max(2, s.cycle.remainingRatio * 100)}%` }}
-                />
-              </div>
+              {s.cycle.unlimited ? (
+                <>
+                  {/* Discord-Bots: kein 30-Tage-Zyklus, kein Ruhetag */}
+                  <p className="mt-0.5 text-sm text-gray-100">{t.noEnd}</p>
+                  <p className="mt-0.5 text-[13px] text-subtle">{t.noEndHint}</p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-0.5 text-sm text-gray-100">{t.activeUntil(fmt.date(s.cycle.endsAt), daysLeft)}</p>
+                  <div className="mt-2 h-1 rounded-full bg-white/10">
+                    <div
+                      className={s.cycle.daysRemaining <= 3 ? 'h-1 rounded-full bg-amber-400' : 'h-1 rounded-full bg-blue-500'}
+                      style={{ width: `${Math.max(2, s.cycle.remainingRatio * 100)}%` }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
             <div>
               <p className="text-[13px] text-subtle">{t.fairUse}</p>

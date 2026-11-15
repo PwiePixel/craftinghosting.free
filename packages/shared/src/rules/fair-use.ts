@@ -6,6 +6,7 @@
  * Worker-Jobs idempotent: Ein erneuter Lauf mit denselben Fakten führt
  * immer zur selben Entscheidung.
  */
+import type { ProductKind } from '../config/freehosting.config';
 import type { CycleRules, FairUseRules } from '../config/freehosting.config';
 import { DAY, HOUR, MINUTE, endOfWeekInZone, overlapMs, startOfWeekInZone } from './time';
 import type { Localized } from '../i18n';
@@ -148,9 +149,25 @@ export interface CycleState {
   /** Anteil der verbleibenden Zeit (0–1) – für den Fortschrittsbalken. */
   remainingRatio: number;
   expired: boolean;
+  /** Kein Zyklus: Der Server läuft ohne Enddatum (Discord-Bots) */
+  unlimited: boolean;
 }
 
 export function computeCycle(input: { number: number; startedAt: Date; endsAt: Date; now: Date }): CycleState {
+  if (!hasCycleEnd(input.endsAt)) {
+    return {
+      number: input.number,
+      startedAt: input.startedAt.toISOString(),
+      endsAt: input.endsAt.toISOString(),
+      totalDays: 0,
+      daysRemaining: 0,
+      secondsRemaining: 0,
+      progress: 0,
+      remainingRatio: 1,
+      expired: false,
+      unlimited: true,
+    };
+  }
   const total = Math.max(1, input.endsAt.getTime() - input.startedAt.getTime());
   const remaining = Math.max(0, input.endsAt.getTime() - input.now.getTime());
   const progress = Math.min(1, Math.max(0, 1 - remaining / total));
@@ -164,11 +181,38 @@ export function computeCycle(input: { number: number; startedAt: Date; endsAt: D
     progress,
     remainingRatio: 1 - progress,
     expired: remaining === 0,
+    unlimited: false,
   };
 }
 
 export function cycleEndFrom(start: Date, rules: CycleRules): Date {
   return new Date(start.getTime() + rules.days * DAY);
+}
+
+/**
+ * Nur Minecraft-Server haben den 30-Tage-Zyklus mit Ruhetag. Discord-Bots müssen durchgehend
+ * erreichbar sein und laufen ohne Enddatum – für sie gilt stattdessen das Bot-Fair-Use-System.
+ */
+export function productHasCycle(kind: ProductKind): boolean {
+  return kind === 'minecraft';
+}
+
+/** Zyklusende von Servern ohne Zyklus: ein Datum, das nie erreicht wird */
+export const NO_CYCLE_END = new Date(Date.UTC(9999, 0, 1));
+
+/** false = der Server läuft ohne Enddatum */
+export function hasCycleEnd(endsAt: Date | string): boolean {
+  return new Date(endsAt).getTime() < NO_CYCLE_END.getTime();
+}
+
+/** Zyklusende eines neuen bzw. reaktivierten Servers */
+export function cycleEndFor(kind: ProductKind, start: Date, rules: CycleRules): Date {
+  return productHasCycle(kind) ? cycleEndFrom(start, rules) : NO_CYCLE_END;
+}
+
+/** Zyklus-Regeln eines Produkts: ohne Zyklus gibt es auch keine Ruhezeit vor dem Reaktivieren */
+export function cycleRulesFor(kind: ProductKind, rules: CycleRules): CycleRules {
+  return productHasCycle(kind) ? rules : { ...rules, reactivationCooldownMinutes: 0 };
 }
 
 /* -------------------------------------------------------------------------- */

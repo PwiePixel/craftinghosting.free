@@ -5,7 +5,7 @@
  *  – Freischalten im Admin → Status „pending“ → Server wird erstellt, sobald der Panel-Zugang steht
  */
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { findPlan, freeHostingConfig, tierForPosition, websiteEpycSlots, type Locale } from '@chfree/shared';
+import { findPlan, freeHostingConfig, tierForPosition, websiteEpycSlots, type Locale, cycleEndFor } from '@chfree/shared';
 import { db, isUniqueViolation } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
@@ -103,7 +103,7 @@ export async function releaseWaitlist(
     const now = new Date();
     await db
       .update(servers)
-      .set({ status: 'pending', nodeTier: tier, cycleStartedAt: now, cycleEndsAt: new Date(now.getTime() + freeHostingConfig.cycle.days * 86_400_000) })
+      .set({ status: 'pending', nodeTier: tier, cycleStartedAt: now, cycleEndsAt: cycleEndFor(s.kind, now, freeHostingConfig.cycle) })
       .where(and(eq(servers.id, s.id), eq(servers.status, 'waitlist')));
     released++;
     await audit({

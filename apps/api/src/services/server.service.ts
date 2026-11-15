@@ -1,6 +1,6 @@
 import { and, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import {
-  cycleEndFrom,
+  cycleEndFor,
   deleteAt as deleteAtFor,
   formatDateTime,
   tierForPosition,
@@ -193,7 +193,7 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
       diskMb: plan.diskMb,
       cycleNumber: 1,
       cycleStartedAt: now,
-      cycleEndsAt: cycleEndFrom(now, cycleRules),
+      cycleEndsAt: cycleEndFor(plan.kind, now, cycleRules),
     });
   });
   return id;
@@ -226,7 +226,7 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
       if ((slotsLeft[p.kind] ?? 0) > 0) {
         await tx
           .update(servers)
-          .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFrom(now, cycleRules) })
+          .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFor(p.kind, now, cycleRules) })
           .where(and(eq(servers.id, p.id), eq(servers.status, 'pending')));
         activated.push(p.id);
         slotsLeft[p.kind]!--;
@@ -337,9 +337,11 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
       pausedAt: null,
       cycleNumber: server.cycleNumber + 1,
       cycleStartedAt: now,
-      cycleEndsAt: cycleEndFrom(now, cycleRules),
+      cycleEndsAt: cycleEndFor(server.kind, now, cycleRules),
       reactivationCount: server.reactivationCount + 1,
       lastReactivatedAt: now,
+      // Die Offline-Zeit zählt ab jetzt neu – sonst würde ein inaktiver Bot sofort wieder freigegeben
+      powerStateAt: now,
     })
     .where(and(eq(servers.id, server.id), eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired')));
   if (affectedRows(res) !== 1) throw Errors.conflict('state_changed', L('Der Serverstatus hat sich geändert. Bitte lade die Seite neu.', 'The server status has changed. Please reload the page.'));
