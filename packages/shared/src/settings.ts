@@ -2,6 +2,7 @@
  * Standardwerte der im Admin-Bereich änderbaren Einstellungen.
  * Gespeichert wird in der Datenbank nur, was vom Standard abweicht bzw. geändert wurde.
  */
+import { defaultServerLimits, normalizeServerLimits } from './server-limits';
 import type {
   BrandSettings,
   DomainSetting,
@@ -141,7 +142,7 @@ export function isEmailBlocked(email: string, blocklist: SiteSettings['blocklist
 export function defaultSiteSettings(): SiteSettings {
   return {
     maintenance: { enabled: false, message: { en: '', de: '' }, until: null, endedAt: null },
-    registration: { mode: 'open', maxServersPerUser: freeHostingConfig.limits.maxServersPerUser },
+    registration: { mode: 'open', limits: defaultServerLimits(freeHostingConfig.limits.maxServersPerUser) },
     // EPYC-Plätze: 0 = es gibt nur eine Hardware-Stufe (aktuell Intel Xeon)
     waitlist: { epycSlots: 0, showCounter: true, externalCount: 0, epycReserved: 0, blocks: [] },
     products: { minecraft: defaultProduct('minecraft'), discord: defaultProduct('discord') },
@@ -456,7 +457,8 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
     },
     registration: {
       mode: REG_MODES.includes(r.mode as RegistrationMode) ? (r.mode as RegistrationMode) : d.registration.mode,
-      maxServersPerUser: int(r.maxServersPerUser, d.registration.maxServersPerUser, 1, 10),
+      // Früher gab es nur „Server pro Person“ (je Angebot) – der Wert wird für beide Angebote übernommen
+      limits: normalizeServerLimits(r.limits, r.maxServersPerUser, freeHostingConfig.limits.maxServersPerUser),
     },
     waitlist: (() => {
       const blocks = normalizeBlocks(w);

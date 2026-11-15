@@ -4,7 +4,7 @@
  * Alle Angaben (Pakete, Plätze, Regeln, Standorte, Links) werden bei jedem Abruf aus den Einstellungen im
  * Admin-Bereich erzeugt – dieselbe Quelle wie die Website. So gibt es keine widersprüchlichen Zahlen.
  */
-import { formatMb, localePath, serverTypesOf, type PublicPlanDTO } from '@chfree/shared';
+import { describeServerLimits, formatMb, localePath, productKinds, serverTypesOf, type PublicPlanDTO } from '@chfree/shared';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
@@ -28,7 +28,7 @@ export async function GET() {
   const botOn = bot.enabled && bot.plans.length > 0;
   const r = s.rules;
   const bf = s.botFairUse;
-  const max = s.registration.maxServersPerUser;
+  const limitText = describeServerLimits(s.registration.limits, 'en', productKinds.filter((k) => s.products[k].enabled && s.products[k].plans.length > 0));
   const slots = (p: typeof mc) => (p.capacity === null ? 'no fixed limit' : `${p.capacity} slots in total, ${p.remaining ?? 0} currently free`);
   const restDays = r.cycle.reactivationCooldownMinutes / 1440;
 
@@ -44,7 +44,7 @@ export async function GET() {
     `- Products: ${[mcOn && 'free Minecraft servers', botOn && 'free Discord bot hosting (Python or Node.js)'].filter(Boolean).join(' and ')}.`,
     `- Management: servers are created on the website and managed in the Pterodactyl panel (${site.panelUrl}).`,
     `- Location: ${x.locationNames}. Hardware: ${x.cpus}, ${s.hardware.storage}, ${s.hardware.network}.`,
-    `- Limit: ${max} free server${max === 1 ? '' : 's'} per person and product${mcOn && botOn ? ' (for example one Minecraft server and one Discord bot)' : ''}.`,
+    `- Limit: ${limitText}`,
     `- Registration: ${s.registration.mode === 'open' ? 'open' : s.registration.mode === 'preregistration' ? 'early access – users join a waitlist and are unlocked in order' : 'currently paused'}.`,
     `- Languages: English and German.`,
     '',
@@ -126,7 +126,7 @@ export async function GET() {
     '',
     '## Frequently asked questions',
     '',
-    ...t.faq.items(max, x.faq).flatMap((item) => [`### ${item.q}`, '', item.a, '']),
+    ...t.faq.items(limitText, x.faq).flatMap((item) => [`### ${item.q}`, '', item.a, '']),
     '## Pages',
     '',
     `- [Home](${url('home')})`,

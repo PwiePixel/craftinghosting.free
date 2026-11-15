@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSiteSettings } from './settings';
-import { defaultStatusSettings, normalizeStatusSettings, rangeStateFor, statusCategory } from './status-settings';
+import { defaultStatusSettings, normalizeStatusSettings, rangeStateFor, statusBarCount, statusCategory } from './status-settings';
 
 describe('Statusseite – Einstellungen', () => {
   it('liefert ohne Angaben die eingebauten Gruppen und Komponenten', () => {
@@ -9,6 +9,19 @@ describe('Statusseite – Einstellungen', () => {
     expect(s.components.map((c) => c.id)).toEqual(['freehosting', 'website', 'api', 'pterodactyl', 'nodes']);
     expect(s.page.days).toBe(90);
     expect(normalizeSiteSettings({}).status).toEqual(s);
+  });
+
+  it('zeigt standardmäßig 90 Stunden-Balken und lässt Tage weiter zu', () => {
+    const s = normalizeStatusSettings(undefined);
+    expect([s.page.unit, s.page.hours, statusBarCount(s.page)]).toEqual(['hour', 90, 90]);
+    // Gespeicherte Einstellungen von vor der Umstellung (ohne unit) wechseln auf Stunden, die Tage bleiben erhalten
+    const old = normalizeStatusSettings({ page: { days: 30 } });
+    expect([old.page.unit, old.page.days, statusBarCount(old.page)]).toEqual(['hour', 30, 90]);
+    const day = normalizeStatusSettings({ page: { unit: 'day', days: 30, hours: 48 } });
+    expect([day.page.unit, statusBarCount(day.page)]).toEqual(['day', 30]);
+    const hours = normalizeStatusSettings({ page: { unit: 'hour', hours: 5000 } });
+    expect(statusBarCount(hours.page)).toBe(168);
+    expect(normalizeStatusSettings({ page: { unit: 'minute', hours: 1 } }).page).toMatchObject({ unit: 'hour', hours: 12 });
   });
 
   it('übernimmt alte Einstellungen, die nur einen festen Status kannten', () => {

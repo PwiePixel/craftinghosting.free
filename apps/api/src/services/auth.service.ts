@@ -6,7 +6,7 @@
  * Das Passwort des Pterodactyl-Panels wird nur an Pterodactyl übergeben und nie von uns gespeichert.
  */
 import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
-import { findPlan, isEmailBlocked, type Locale, type StartInput, type TwoFactorMethod, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
+import { findPlan, isEmailBlocked, serverLimitBlock, type Locale, type StartInput, type TwoFactorMethod, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { emailTokens, servers, users, type User } from '../db/schema';
 import { generateCode, hashCode } from '../lib/auth-crypto';
@@ -22,7 +22,7 @@ import { checkSecondFactor, type SecondFactorInput } from './two-factor.service'
 import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.service';
 import { rememberUserLocale } from './locale.service';
 import { linkExistingPanelAccount } from './provisioning.service';
-import { activatePendingServers, assertConfigAvailable, countOwnedServers, registrationClosed, savePendingServer } from './server.service';
+import { activatePendingServers, assertConfigAvailable, countOwnedServers, ownedServerRefs, registrationClosed, savePendingServer } from './server.service';
 
 type TokenType = 'verify_email' | 'login';
 
@@ -193,10 +193,10 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   }
 
   // Hat der Nutzer schon einen Server (bzw. in der Early-Access-Phase einen Wartelisten-Platz), schicken wir nur einen Anmeldecode.
-  // Das Limit gilt je Produkt (Minecraft / Discord-Bot); auf der Warteliste ist ein Platz pro Person möglich
+  // Die Grenzen gelten je Angebot, zusammen und je Paket (Admin → Einstellungen); auf der Warteliste ist ein Platz pro Person möglich
   const owned = await countOwnedServers(user.id);
-  const ownedOfKind = await countOwnedServers(user.id, findPlan(settings, input.planId)?.kind);
-  if (ownedOfKind >= settings.registration.maxServersPerUser || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
+  const limitBlock = serverLimitBlock(settings.registration.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId);
+  if (limitBlock !== null || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
     await sendCodeMail(user, 'login', (code) => loginMail(code, meta.locale)).catch(() => {
       throw mailFailed();
     });

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
-import { localePath, productKinds, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
+import { kindExhausted, localePath, productKinds, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
 import { SecurityCard } from '@/components/my/security-card';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
@@ -243,12 +243,17 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const owned = ownedServers.length;
   const mode = settings.registration.mode;
   const x = siteTexts(settings, lang);
-  // Das Limit gilt je Produkt – ein weiterer Server ist möglich, solange ein Angebot noch nicht ausgeschöpft ist
+  // Ein weiterer Server ist möglich, solange ein Angebot noch nicht ausgeschöpft ist (Grenzen je Angebot, zusammen und je Paket)
   const freeKind = productKinds.some(
     (k) =>
       settings.products[k].enabled &&
       settings.products[k].plans.length > 0 &&
-      ownedServers.filter((s) => s.kind === k).length < settings.registration.maxServersPerUser,
+      !kindExhausted(
+        settings.registration.limits,
+        ownedServers.map((s) => ({ kind: s.kind, planId: s.planId })),
+        k,
+        settings.products[k].plans.map((p) => p.id),
+      ),
   );
   const maintenance = settings.maintenance.enabled;
   // Weiteren Server anfordern: offen bis zur Obergrenze, Early Access nur ein Platz pro Person, geschlossen gar nicht

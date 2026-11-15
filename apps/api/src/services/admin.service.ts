@@ -117,7 +117,7 @@ export async function getOverview(): Promise<AdminOverviewDTO> {
     site: {
       maintenance: settings.maintenance.enabled,
       registrationMode: settings.registration.mode,
-      maxServersPerUser: settings.registration.maxServersPerUser,
+      limits: settings.registration.limits,
       waitlistConfirmed: Number(wlc?.n ?? 0),
       waitlistUnconfirmed: Number(wlu?.n ?? 0),
     },

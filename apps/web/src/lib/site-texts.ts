@@ -2,7 +2,7 @@
  * Texte, die von den Einstellungen im Admin-Bereich abhängen (Pakete, Standorte, Hardware):
  * „bis zu X GB RAM“ richtet sich nach dem größten Paket, „DE“ nach den eingestellten Standorten.
  */
-import { formatMb, locationCodes, locationNames, maxPlanMemoryMb, type Locale, type PublicSiteDTO } from '@chfree/shared';
+import { formatMb, locationCodes, locationNames, maxPlanMemoryMb, type Locale, type PublicSiteDTO, describeServerLimits } from '@chfree/shared';
 import type { FaqContext } from '@/i18n/dictionaries/de';
 
 /** RAM-Angaben einer Paketliste: „4 GB oder 6 GB“ bzw. „256 MB bis 2 GB“ */
@@ -24,6 +24,8 @@ export interface SiteTexts {
   discord: boolean;
   /** Es gibt zwei Hardware-Stufen auf der Warteliste (EPYC-Plätze > 0) */
   twoTiers: boolean;
+  /** Wie viele kostenlose Server pro Person möglich sind – als Satz */
+  limits: string;
   faq: FaqContext;
 }
 
@@ -43,6 +45,7 @@ export function siteTexts(site: PublicSiteDTO, lang: Locale): SiteTexts {
     cpus,
     discord,
     twoTiers: site.waitlist.epycSlots > 0,
+    limits: describeServerLimits(site.registration.limits, lang, [...(minecraftPlans.length > 0 ? (['minecraft'] as const) : []), ...(discord ? (['discord'] as const) : [])]),
     faq: {
       minecraftRam: ramRange(minecraftPlans, lang),
       discordRam: discord ? ramRange(discordPlans, lang) : null,

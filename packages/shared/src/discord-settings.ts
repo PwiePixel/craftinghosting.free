@@ -67,6 +67,15 @@ export interface DiscordSettings {
   maxOpenTickets: number;
   /** Mitglieder können dem Bot per Direktnachricht „!start“ schreiben und ihren Server starten */
   dmStart: boolean;
+  /** Status-Meldungen: Der Bot postet Änderungen der Statusseite in einen Kanal (gelbes Embed, Deutsch und Englisch) */
+  statusFeed: {
+    /** Kanal für die Meldungen (leer = aus) */
+    channelId: string;
+    /** Rolle, die bei jeder Meldung erwähnt wird (leer = niemand) */
+    pingRoleId: string;
+    /** Auch Zustandswechsel melden, die die automatischen Prüfungen erkennen (z. B. Panel nicht erreichbar) */
+    announceAuto: boolean;
+  };
   /** Hinweis auf der Website, warum Discord nötig ist (leer = Standardtext) */
   requiredNote: Localized;
   welcome: DiscordWelcomeSettings;
@@ -143,6 +152,7 @@ export function defaultDiscordSettings(): DiscordSettings {
     ticketCategoryId: '',
     maxOpenTickets: 2,
     dmStart: true,
+    statusFeed: { channelId: '', pingRoleId: '', announceAuto: true },
     requiredNote: { de: '', en: '' },
     welcome: defaultDiscordWelcome(),
     rolePanels: defaultDiscordRolePanels(),
@@ -176,6 +186,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
   const d = defaultDiscordSettings();
   const w = obj(i.welcome);
   const note = obj(i.requiredNote);
+  const feed = obj(i.statusFeed);
 
   const usedIds = new Set<string>();
   const rolePanels: DiscordRolePanel[] = (Array.isArray(i.rolePanels) ? i.rolePanels : d.rolePanels)
@@ -214,6 +225,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
     ticketCategoryId: snowflake(i.ticketCategoryId),
     maxOpenTickets: int(i.maxOpenTickets, d.maxOpenTickets, 1, discordLimits.maxOpenTickets),
     dmStart: bool(i.dmStart, d.dmStart),
+    statusFeed: { channelId: snowflake(feed.channelId), pingRoleId: snowflake(feed.pingRoleId), announceAuto: bool(feed.announceAuto, d.statusFeed.announceAuto) },
     requiredNote: { de: text(note.de, '', 400).trim(), en: text(note.en, '', 400).trim() },
     welcome: {
       enabled: bool(w.enabled, d.welcome.enabled),

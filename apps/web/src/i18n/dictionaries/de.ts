@@ -39,7 +39,6 @@ const delH = cycle.deleteAfterRestHours;
 const epyc = hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
 const xeon = hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
 /** „ein kostenloser Server“ / „2 kostenlose Server“ – Anzahl kommt aus den Admin-Einstellungen */
-const perPerson = (max: number) => (max === 1 ? 'ist ein kostenloser Server' : `sind ${max} kostenlose Server`);
 
 return {
   meta: {
@@ -260,8 +259,7 @@ return {
     intro: 'Wähle Paket und Software. Nach der E-Mail-Bestätigung wird dein Server automatisch im Pterodactyl-Panel angelegt.',
     hasServerTitle: 'Du hast bereits einen kostenlosen Server',
     hasServerTitleMany: 'Du hast bereits die maximale Anzahl kostenloser Server',
-    hasServerText: (max: number) =>
-      `Pro Person ${perPerson(max)} je Angebot möglich (Minecraft-Server und Discord-Bot). Verwalte ${max === 1 ? 'ihn' : 'sie'} im Panel oder sieh dir die Angebote von Crafting Hosting an.`,
+    hasServerText: (limits: string) => `${limits} Verwalte deine Server im Panel oder sieh dir die Angebote von Crafting Hosting an.`,
     closedTitle: 'Registrierung pausiert',
     closedText: 'Gerade können keine neuen Server angefordert werden. Bestehende Server laufen normal weiter. Schau bald wieder vorbei – Neuigkeiten gibt es im Discord.',
     premiumOffers: 'Premium-Angebote',
@@ -300,6 +298,7 @@ return {
     stepEmail: 'Deine E-Mail-Adresse',
     planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · bis ${cpu} % CPU`,
     soldOut: 'Aktuell ausgebucht',
+    planTaken: 'Dieses Paket hast du bereits',
     soon: 'bald',
     soonTitle: 'Bald verfügbar',
     typeGroup: 'Servertyp',
@@ -528,7 +527,7 @@ return {
     moreTitle: 'Deine Frage ist nicht dabei?',
     moreText: 'Community und Team helfen dir im Discord weiter.',
     openDiscord: 'Discord öffnen',
-    items: (max: number, ctx: FaqContext) => [
+    items: (limits: string, ctx: FaqContext) => [
       {
         q: 'Ist CraftingHosting.free wirklich kostenlos?',
         a: `Ja. Kein monatlicher Preis, keine Testphase, keine Zahlungsdaten. Damit das dauerhaft funktioniert, gelten ein Fair-Use-System und eine Laufzeit von ${cycle.days} Tagen, die du kostenlos verlängern kannst.`,
@@ -601,7 +600,7 @@ return {
         : []),
       {
         q: 'Wie viele kostenlose Server kann ich haben?',
-        a: `Pro Person ${perPerson(max)} möglich${ctx.discordRam ? ' – jeweils als Minecraft-Server und als Discord-Bot' : ''}. So bleibt genug Platz für alle.`,
+        a: `${limits} So bleibt genug Platz für alle.`,
       },
     ],
     /** `twoTiers` = es gibt EPYC-Plätze (Admin-Einstellung) – sonst läuft alles auf einer Hardware-Stufe */
@@ -624,6 +623,11 @@ return {
     daysAgo: (n: number) => `vor ${n} Tagen`,
     today: 'heute',
     uptimeHint: (n: number) => `Verfügbarkeit der letzten ${n} Tage`,
+    hours: (n: number) => `${n} Stunden`,
+    hoursAgo: (n: number) => `vor ${n} Stunden`,
+    now: 'jetzt',
+    uptimeHintHours: (n: number) => `Verfügbarkeit der letzten ${n} Stunden`,
+    historyLabelHours: (n: number) => `Verlauf der letzten ${n} Stunden`,
     uptimeNone: 'Uptime wird erfasst',
     noData: 'Keine Messdaten',
     dayUptime: (p: string) => `${p} % verfügbar`,
@@ -844,6 +848,7 @@ return {
   },
 
   early: {
+    onePerPerson: 'In der Early-Access-Phase ist ein Platz pro Person möglich.',
     badge: 'Early Access',
     kicker: 'Early Access · Erste Startphase',
     heroText: (twoTiers: boolean) =>

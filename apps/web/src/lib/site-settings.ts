@@ -6,7 +6,7 @@
  * überall sichtbar sein. Ein kurzer Zwischenspeicher im Prozess hält die Last gering.
  */
 import { connection } from 'next/server';
-import { applyRuntimeConfig, defaultBrand, defaultSiteSettings, freeHostingConfig, serverTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
+import { applyRuntimeConfig, defaultBrand, defaultServerLimits, defaultSiteSettings, freeHostingConfig, serverTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
 
 import { site } from './site';
 
@@ -33,7 +33,7 @@ function fallbackProduct(kind: ProductKind): PublicProductDTO {
 
 export const fallbackSite: PublicSiteDTO = {
   maintenance: { enabled: false, message: { en: '', de: '' }, until: null },
-  registration: { mode: 'open', maxServersPerUser: freeHostingConfig.limits.maxServersPerUser },
+  registration: { mode: 'open', limits: defaultServerLimits(freeHostingConfig.limits.maxServersPerUser) },
   waitlist: { total: null, epycSlots: 0, epycUsed: 0, epycRemaining: 0 },
   plans: [],
   products: { minecraft: fallbackProduct('minecraft'), discord: fallbackProduct('discord') },

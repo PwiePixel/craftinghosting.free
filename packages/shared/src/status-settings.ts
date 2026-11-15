@@ -22,7 +22,7 @@ import type { Localized } from './i18n';
 export type StatusSettings = SiteSettings['status'];
 
 export const statusCategories: StatusCategory[] = ['operational', 'degraded', 'maintenance', 'outage'];
-export const statusLimits = { groups: 12, components: 40, minDays: 7, maxDays: 90, corrections: 200, ranges: 50 } as const;
+export const statusLimits = { groups: 12, components: 40, minDays: 7, maxDays: 90, minHours: 12, maxHours: 168, corrections: 200, ranges: 50 } as const;
 
 /** Ordnet den Status einer Komponente einer der vier Kategorien der Legende zu (none = unbekannt) */
 export function statusCategory(status: ComponentStatus): StatusDayState {
@@ -57,7 +57,10 @@ export function defaultStatusPage(): StatusPageSettings {
   return {
     title: { de: '', en: '' },
     intro: { de: '', en: '' },
+    // Standard: 90 Balken zu je einer Stunde – der Verlauf rückt stündlich weiter
+    unit: 'hour',
     days: 90,
+    hours: 90,
     showBanner: true,
     showBars: true,
     showUptime: true,
@@ -184,11 +187,14 @@ export function normalizeStatusSettings(input: unknown, now = Date.now()): Statu
   const banners = obj(p.banners);
   const colors = obj(p.colors);
   const days = typeof p.days === 'number' || typeof p.days === 'string' ? Number(p.days) : NaN;
+  const hours = typeof p.hours === 'number' || typeof p.hours === 'string' ? Number(p.hours) : NaN;
 
   const page: StatusPageSettings = {
     title: localized(p.title, empty(), 80),
     intro: localized(p.intro, empty(), 300),
+    unit: p.unit === 'day' || p.unit === 'hour' ? p.unit : d.page.unit,
     days: Number.isFinite(days) ? Math.min(statusLimits.maxDays, Math.max(statusLimits.minDays, Math.round(days))) : d.page.days,
+    hours: Number.isFinite(hours) ? Math.min(statusLimits.maxHours, Math.max(statusLimits.minHours, Math.round(hours))) : d.page.hours,
     showBanner: bool(p.showBanner, d.page.showBanner),
     showBars: bool(p.showBars, d.page.showBars),
     showUptime: bool(p.showUptime, d.page.showUptime),
@@ -285,4 +291,9 @@ export function rangeStateFor(ranges: StatusRangeSetting[], component: string, d
     if ((r.component === '*' || r.component === component) && date >= r.from && date <= r.to && (!r.onlyEmpty || !hasData)) state = r.state;
   }
   return state;
+}
+
+/** Anzahl der Balken im Verlauf – je nach Einstellung Tage oder Stunden */
+export function statusBarCount(page: Pick<StatusPageSettings, 'unit' | 'days' | 'hours'>): number {
+  return page.unit === 'hour' ? page.hours : page.days;
 }

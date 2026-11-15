@@ -1,3 +1,4 @@
+import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { emailSchema, serverNameSchema } from '@chfree/shared';
@@ -130,10 +131,15 @@ export async function adminRoutes(app: FastifyInstance) {
     const before = await getSettings();
     const settings = await saveSettings(request.body);
     invalidatePublicSite();
+    // Wartungsmodus oder manueller Status geändert → gleich im Discord melden
+    syncStatusFeedSoon();
     const changes: string[] = [];
     if (before.maintenance.enabled !== settings.maintenance.enabled) changes.push(`Wartungsmodus ${settings.maintenance.enabled ? 'an' : 'aus'}`);
     if (before.registration.mode !== settings.registration.mode) changes.push(`Registrierung: ${settings.registration.mode}`);
-    if (before.registration.maxServersPerUser !== settings.registration.maxServersPerUser) changes.push(`Server pro Nutzer: ${settings.registration.maxServersPerUser}`);
+    if (JSON.stringify(before.registration.limits) !== JSON.stringify(settings.registration.limits)) {
+      const l = settings.registration.limits;
+      changes.push(`Server pro Nutzer: ${l.minecraft} Minecraft, ${l.discord} Discord-Bots${l.total ? `, zusammen ${l.total}` : ''}`);
+    }
     await audit({
       actor: 'admin',
       action: 'admin.settings_changed',
@@ -202,21 +208,25 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/incidents', async () => ({ incidents: await listIncidents() }));
   app.post('/admin/incidents', async (request) => {
     await createIncident(currentUser(request), incidentSchema.parse(request.body), request.ip);
+    syncStatusFeedSoon();
     return { ok: true };
   });
   app.post('/admin/incidents/:id', async (request) => {
     const { id } = idParams.parse(request.params);
     await updateIncident(currentUser(request), id, incidentSchema.parse(request.body), request.ip);
+    syncStatusFeedSoon();
     return { ok: true };
   });
   app.post('/admin/incidents/:id/resolve', async (request) => {
     const { id } = idParams.parse(request.params);
     await resolveIncident(currentUser(request), id, request.ip);
+    syncStatusFeedSoon();
     return { ok: true };
   });
   app.post('/admin/incidents/:id/delete', async (request) => {
     const { id } = idParams.parse(request.params);
     await deleteIncident(currentUser(request), id, request.ip);
+    syncStatusFeedSoon();
     return { ok: true };
   });
 

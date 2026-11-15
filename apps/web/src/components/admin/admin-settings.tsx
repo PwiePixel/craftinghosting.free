@@ -8,7 +8,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { Plus, Save, Wrench } from 'lucide-react';
-import { productKinds, type ProductKind, type RegistrationMode, type SiteSettings } from '@chfree/shared';
+import { describeServerLimits, productKinds, serverLimitBounds, type ProductKind, type RegistrationMode, type ServerLimits, type SiteSettings } from '@chfree/shared';
 import { ActionButton } from '@/components/admin/admin-actions';
 import { ProductEditor } from '@/components/admin/admin-plans';
 import { MoreSettings } from '@/components/admin/admin-settings-more';
@@ -164,6 +164,9 @@ export function SettingsForm({
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const dirty = JSON.stringify(s) !== JSON.stringify(saved);
 
+  const limits = s.registration.limits;
+  const setLimits = (value: Partial<ServerLimits>) => patch('registration', { limits: { ...limits, ...value } });
+
   function patch<K extends keyof SiteSettings>(key: K, value: Partial<SiteSettings[K]>) {
     setMessage(null);
     setS((prev) => ({ ...prev, [key]: { ...prev[key], ...value } }));
@@ -234,12 +237,40 @@ export function SettingsForm({
 
       <Section title="Registrierung" description="Legt fest, was auf „Server erstellen“ passiert. Die Texte der Website passen sich automatisch an.">
         <Segmented value={s.registration.mode} onChange={(v) => patch('registration', { mode: v })} options={reg} />
-        <Labeled
-          label="Kostenlose Server pro Person"
-          hint="Gilt im Modus „Offen“. In der Vorregistrierung ist immer ein Platz pro Person möglich. Bestehende Server bleiben bei einer Senkung erhalten."
-        >
-          <NumberInput value={s.registration.maxServersPerUser} min={1} max={10} onChange={(v) => patch('registration', { maxServersPerUser: v })} />
-        </Labeled>
+        <div>
+          <p className="text-sm font-medium text-gray-200">Kostenlose Server pro Person</p>
+          <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-subtle">
+            Gilt im Modus „Offen“. In der Vorregistrierung ist immer ein Platz pro Person möglich. Bestehende Server bleiben bei einer Senkung erhalten.
+          </p>
+          <div className="mt-4 grid gap-5 sm:grid-cols-3">
+            <Labeled label="Minecraft-Server" hint="0–10 je Person. 0 = keiner.">
+              <NumberInput value={limits.minecraft} min={0} max={serverLimitBounds.perKind} onChange={(minecraft) => setLimits({ minecraft })} />
+            </Labeled>
+            <Labeled label="Discord-Bots" hint="0–10 je Person. 0 = keiner.">
+              <NumberInput value={limits.discord} min={0} max={serverLimitBounds.perKind} onChange={(discord) => setLimits({ discord })} />
+            </Labeled>
+            <Labeled label="Zusammen höchstens" hint="Obergrenze über beide Angebote. 0 = keine zusätzliche Grenze.">
+              <NumberInput value={limits.total} min={0} max={serverLimitBounds.total} onChange={(total) => setLimits({ total })} />
+            </Labeled>
+          </div>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <Toggle
+              checked={limits.uniquePlan.minecraft}
+              onChange={(minecraft) => setLimits({ uniquePlan: { ...limits.uniquePlan, minecraft } })}
+              label="Jedes Minecraft-Paket nur einmal"
+              hint="Zum Beispiel ein 4-GB- und ein 6-GB-Server, aber nicht zweimal 4 GB."
+            />
+            <Toggle
+              checked={limits.uniquePlan.discord}
+              onChange={(discord) => setLimits({ uniquePlan: { ...limits.uniquePlan, discord } })}
+              label="Jedes Discord-Bot-Paket nur einmal"
+              hint="Ausgeschaltet darf dasselbe Bot-Paket mehrfach gewählt werden."
+            />
+          </div>
+          <p className="mt-4 rounded-lg border border-line bg-black/20 px-3.5 py-2.5 text-sm text-muted">
+            <span className="text-gray-200">So steht es auf der Website:</span> {describeServerLimits(limits, 'de')}
+          </p>
+        </div>
       </Section>
 
       <Section

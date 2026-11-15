@@ -3,6 +3,7 @@
  *  – discord-secrets:     Bot-Token und Client-Secret, zusätzlich feldverschlüsselt (nie im Klartext, nie an den Browser)
  *  – discord-state:       Laufzeitdaten, die der Bot selbst pflegt (Einladungslink, Ticket-Kategorie, Verbindungsstatus)
  *  – discord-maintenance: Sicherung der Kanal-Berechtigungen, solange /wartung aktiv ist
+ *  – discord-status-feed: zuletzt gemeldeter Stand der Statusseite (damit jede Änderung genau einmal gepostet wird)
  */
 import { eq } from 'drizzle-orm';
 import { db, writeTx } from '../db/client';
@@ -67,6 +68,8 @@ export interface DiscordState {
   setupAt: string | null;
   /** Letzter Fehler beim Vergeben der Customer-Rolle (null = zuletzt hat es geklappt) */
   roleError: { at: string; message: string } | null;
+  /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
+  statusFeedError: { at: string; message: string } | null;
   /** Dauerverbindung des Bots (für Willkommensnachricht, Auto-Rollen, Befehle, Buttons) */
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
 }
@@ -81,6 +84,7 @@ const defaultState = (): DiscordState => ({
   commandsAt: null,
   setupAt: null,
   roleError: null,
+  statusFeedError: null,
   gateway: { status: 'off', at: new Date(0).toISOString(), error: null },
 });
 
@@ -129,4 +133,32 @@ export async function getDiscordMaintenance(): Promise<DiscordMaintenance | null
 export async function saveDiscordMaintenance(value: DiscordMaintenance | null): Promise<void> {
   if (value) await writeRow(MAINTENANCE, value);
   else await db.delete(settingsTable).where(eq(settingsTable.key, MAINTENANCE));
+}
+
+/* ------------------------------------------------------------ Status-Meldungen */
+
+const STATUS_FEED = 'discord-status-feed';
+
+/** Zuletzt im Discord gemeldeter Stand der Statusseite */
+export interface StatusFeedState {
+  /** false = noch nie abgeglichen – der erste Lauf merkt sich nur den Stand und postet nichts */
+  initialized: boolean;
+  /** Wartungsmodus der Website */
+  maintenance: boolean;
+  incidents: Record<string, { state: 'active' | 'scheduled' | 'resolved'; updatedAt: string }>;
+  /**
+   * Je Komponente: gemeldeter Zustand; `pending`/`seen` zählen, wie oft ein neuer Zustand schon gemessen wurde;
+   * `covered` = der Zustand wurde bereits durch eine Meldung oder den Wartungsmodus erklärt.
+   */
+  components: Record<string, { announced: string; pending?: string; seen?: number; covered?: boolean }>;
+}
+
+export const emptyStatusFeedState = (): StatusFeedState => ({ initialized: false, maintenance: false, incidents: {}, components: {} });
+
+export async function getStatusFeedState(): Promise<StatusFeedState> {
+  return { ...emptyStatusFeedState(), ...((await readRow<Partial<StatusFeedState>>(STATUS_FEED).catch(() => null)) ?? {}) };
+}
+
+export async function saveStatusFeedState(value: StatusFeedState): Promise<void> {
+  await writeRow(STATUS_FEED, value);
 }

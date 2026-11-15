@@ -51,7 +51,7 @@ describe('Warteliste & Einstellungen', () => {
 
   it('ergänzt und prüft gespeicherte Einstellungen', () => {
     const s = normalizeSiteSettings({ registration: { mode: 'preregistration', maxServersPerUser: '2' }, stats: { uptime: { value: 120 } }, status: { overrides: { api: 'degraded', x: 'kaputt' } } });
-    expect(s.registration).toEqual({ mode: 'preregistration', maxServersPerUser: 2 });
+    expect(s.registration).toEqual({ mode: 'preregistration', limits: { minecraft: 2, discord: 2, total: 0, uniquePlan: { minecraft: false, discord: false } } });
     expect(s.stats.uptime.value).toBe(100);
     expect(s.status.overrides).toEqual({ api: 'degraded' });
     expect(s.maintenance.enabled).toBe(false);

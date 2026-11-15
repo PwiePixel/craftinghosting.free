@@ -16,7 +16,6 @@ const reminders = cycle.reminderDaysBefore.map((d) => (d === 1 ? '1 day' : `${d}
 const delH = cycle.deleteAfterRestHours;
 const epyc = hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
 const xeon = hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
-const perPerson = (max: number) => (max === 1 ? 'One free server is' : `${max} free servers are`);
 
 return {
   meta: {
@@ -234,8 +233,7 @@ return {
     intro: 'Choose your plan and software. After you confirm your email, your server is created automatically in the Pterodactyl panel.',
     hasServerTitle: 'You already have a free server',
     hasServerTitleMany: 'You already have the maximum number of free servers',
-    hasServerText: (max: number) =>
-      `${perPerson(max)} possible per person and offer (Minecraft server and Discord bot). Manage ${max === 1 ? 'it' : 'them'} in the panel or take a look at the Crafting Hosting plans.`,
+    hasServerText: (limits: string) => `${limits} Manage your servers in the panel or take a look at the Crafting Hosting plans.`,
     closedTitle: 'Registration paused',
     closedText: 'New servers cannot be requested right now. Existing servers keep running as usual. Check back soon – news is posted on Discord.',
     premiumOffers: 'Premium plans',
@@ -273,6 +271,7 @@ return {
     stepEmail: 'Your email address',
     planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · up to ${cpu} % CPU`,
     soldOut: 'Currently fully booked',
+    planTaken: 'You already have this plan',
     soon: 'soon',
     soonTitle: 'Coming soon',
     typeGroup: 'Server type',
@@ -499,7 +498,7 @@ return {
     moreTitle: 'Your question is not listed?',
     moreText: 'The community and the team will help you on Discord.',
     openDiscord: 'Open Discord',
-    items: (max: number, ctx: FaqContext) => [
+    items: (limits: string, ctx: FaqContext) => [
       {
         q: 'Is CraftingHosting.free really free?',
         a: `Yes. No monthly price, no trial period, no payment details. To keep it that way, a fair-use system and a runtime of ${cycle.days} days apply, which you can renew for free.`,
@@ -572,7 +571,7 @@ return {
         : []),
       {
         q: 'How many free servers can I have?',
-        a: `${perPerson(max)} possible per person${ctx.discordRam ? ' – each as a Minecraft server and as a Discord bot' : ''}. That way there is enough room for everyone.`,
+        a: `${limits} That way there is enough room for everyone.`,
       },
     ],
     earlyItem: (twoTiers: boolean) => ({
@@ -594,6 +593,11 @@ return {
     daysAgo: (n: number) => `${n} days ago`,
     today: 'today',
     uptimeHint: (n: number) => `Availability over the last ${n} days`,
+    hours: (n: number) => `${n} hours`,
+    hoursAgo: (n: number) => `${n} hours ago`,
+    now: 'now',
+    uptimeHintHours: (n: number) => `Availability over the last ${n} hours`,
+    historyLabelHours: (n: number) => `History of the last ${n} hours`,
     uptimeNone: 'Uptime is being recorded',
     noData: 'No data',
     dayUptime: (p: string) => `${p} % available`,
@@ -804,6 +808,7 @@ return {
   },
 
   early: {
+    onePerPerson: 'During early access one slot per person is possible.',
     badge: 'Early access',
     kicker: 'Early access · First launch phase',
     heroText: (twoTiers: boolean) =>

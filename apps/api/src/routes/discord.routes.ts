@@ -1,3 +1,4 @@
+import { sendStatusFeedTest } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { and, count, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -192,6 +193,21 @@ export async function discordAdminRoutes(app: FastifyInstance) {
   });
 
   app.post('/admin/discord/sync-roles', strict(6, '10 minutes'), async () => syncCustomerRoles({ all: true, limit: 2000 }));
+
+  /** Testnachricht in den Status-Kanal (mit den gerade eingegebenen, evtl. noch nicht gespeicherten IDs) */
+  app.post('/admin/discord/status-test', strict(20, '10 minutes'), async (request) => {
+    const body = z
+      .object({ channelId: z.string().refine(isSnowflake, 'Bitte eine gültige Kanal-ID angeben.'), pingRoleId: z.string().refine((v) => v === '' || isSnowflake(v), 'Bitte eine gültige Rollen-ID angeben.').default('') })
+      .parse(request.body);
+    const cfg = await discordConfig();
+    if (!cfg.botReady) throw new ApiError(409, 'discord_not_ready', L('Die Discord-Anbindung ist noch nicht eingerichtet.', 'The Discord integration is not set up yet.'));
+    try {
+      await sendStatusFeedTest(body.channelId, body.pingRoleId);
+    } catch (err) {
+      throw new ApiError(502, 'discord_error', L(discordErrorText(err), discordErrorText(err)));
+    }
+    return { ok: true };
+  });
 
   /** Rollen-Panel oder Ticket-Panel in einen Kanal posten */
   app.post('/admin/discord/send-panel', strict(30, '10 minutes'), async (request) => {

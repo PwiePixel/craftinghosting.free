@@ -35,6 +35,15 @@ describe('Discord-Einstellungen', () => {
     ]);
   });
 
+  it('prüft die Angaben zu den Status-Meldungen', () => {
+    expect(normalizeDiscordSettings(undefined).statusFeed).toEqual({ channelId: '', pingRoleId: '', announceAuto: true });
+    expect(normalizeDiscordSettings({ statusFeed: { channelId: ' 423456789012345678 ', pingRoleId: 'keine-id', announceAuto: false } }).statusFeed).toEqual({
+      channelId: '423456789012345678',
+      pingRoleId: '',
+      announceAuto: false,
+    });
+  });
+
   it('füllt die Platzhalter der Willkommensnachricht', () => {
     expect(fillDiscordTemplate('Welcome to **{server}**, {user}! {unbekannt}', { server: 'CraftingHosting', user: 'nick' })).toBe('Welcome to **CraftingHosting**, nick! {unbekannt}');
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111, 166].map(ordinalEn)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th', '166th']);

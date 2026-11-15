@@ -4,6 +4,7 @@
 import type { PlanConfig, ProductKind } from './config/freehosting.config';
 import type { ChatSettings } from './chat-settings';
 import type { DiscordSettings } from './discord-settings';
+import type { ServerLimits } from './server-limits';
 import type { Localized } from './i18n';
 import type {
   CycleState,
@@ -117,10 +118,10 @@ export type StatusDayState = 'operational' | 'degraded' | 'maintenance' | 'outag
 export type StatusCategory = Exclude<StatusDayState, 'none'>;
 
 export interface StatusDayDTO {
-  /** Kalendertag (YYYY-MM-DD, Zeitzone der Website) */
+  /** Kalendertag (YYYY-MM-DD, Zeitzone der Website) – bei Stunden-Balken der Beginn der Stunde (ISO-Zeit) */
   date: string;
   state: StatusDayState;
-  /** Verfügbarkeit an diesem Tag in Prozent (null = keine Messdaten) */
+  /** Verfügbarkeit in diesem Zeitabschnitt (Tag bzw. Stunde) in Prozent (null = keine Messdaten) */
   uptime: number | null;
 }
 
@@ -168,8 +169,12 @@ export interface StatusPageSettings {
   /** Überschrift und Einleitung (leer = Standardtext) */
   title: Localized;
   intro: Localized;
-  /** Länge des Verlaufs in Tagen (7–90) */
+  /** Was ein Balken im Verlauf zeigt: day = ein Kalendertag · hour = eine Stunde */
+  unit: 'day' | 'hour';
+  /** Länge des Verlaufs in Tagen (7–90) – gilt bei unit = day */
   days: number;
+  /** Länge des Verlaufs in Stunden (12–168) – gilt bei unit = hour */
+  hours: number;
   showBanner: boolean;
   showBars: boolean;
   showUptime: boolean;
@@ -256,7 +261,7 @@ export interface AdminJobDTO {
 }
 
 export interface AdminOverviewDTO {
-  site: { maintenance: boolean; registrationMode: RegistrationMode; maxServersPerUser: number; waitlistConfirmed: number; waitlistUnconfirmed: number };
+  site: { maintenance: boolean; registrationMode: RegistrationMode; limits: ServerLimits; waitlistConfirmed: number; waitlistUnconfirmed: number };
   /** Belegung je Produkt (Minecraft / Discord-Bots) */
   products: { kind: ProductKind; enabled: boolean; count: number; reserved: number; capacity: number | null }[];
   users: { total: number; verified: number; locked: number; admins: number; newLast7Days: number };
@@ -366,7 +371,8 @@ export interface SiteSettings {
   registration: {
     /** open = Server direkt erstellen · preregistration = Warteliste (Early Access) · closed = keine Anmeldungen */
     mode: RegistrationMode;
-    maxServersPerUser: number;
+    /** Wie viele kostenlose Server eine Person haben darf – je Angebot, zusammen und je Paket */
+    limits: ServerLimits;
   };
   waitlist: {
     /** Die ersten N Plätze der Warteliste bekommen einen Server auf dem AMD EPYC, danach Intel Xeon */
@@ -635,7 +641,7 @@ export interface WaitlistInfo {
 /** Öffentliche Einstellungen + Kennzahlen für die Website */
 export interface PublicSiteDTO {
   maintenance: { enabled: boolean; message: { en: string; de: string }; until: string | null };
-  registration: { mode: RegistrationMode; maxServersPerUser: number };
+  registration: { mode: RegistrationMode; limits: ServerLimits };
   waitlist: { total: number | null; epycSlots: number; epycUsed: number; epycRemaining: number };
   /** Belegung aller Pakete (beide Produkte) */
   plans: PlanAvailabilityDTO[];
@@ -917,6 +923,8 @@ export interface AdminDiscordDTO {
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
   /** Letzter Fehler beim Vergeben der Customer-Rolle */
   roleError: { at: string; message: string } | null;
+  /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
+  statusFeedError: { at: string; message: string } | null;
   linkedUsers: number;
 }
 

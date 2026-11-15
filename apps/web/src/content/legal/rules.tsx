@@ -1,4 +1,4 @@
-import { formatMb, freeHostingConfig, localePath, restPeriodText, type PublicSiteDTO } from '@chfree/shared';
+import { describeServerLimits, formatMb, freeHostingConfig, localePath, productKinds, restPeriodText, type PublicSiteDTO } from '@chfree/shared';
 import Link from 'next/link';
 
 const { fairUse, cycle } = freeHostingConfig;
@@ -7,7 +7,7 @@ const hasRestFn = () => cycle.reactivationCooldownMinutes > 0;
 const delHFn = () => cycle.deleteAfterRestHours;
 
 export function RulesDe({ site }: { site: PublicSiteDTO }) {
-  const max = site.registration.maxServersPerUser;
+  const offeredKinds = productKinds.filter((k) => site.products[k].enabled);
   const { plans } = site.products.minecraft;
   // Zwei Hardware-Stufen gibt es nur, solange EPYC-Plätze vergeben werden
   const twoTiers = site.waitlist.epycSlots > 0;
@@ -18,7 +18,7 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>1. Kostenlose Server</h2>
         <p>
-          Pro Person {max === 1 ? 'ist derzeit ein kostenloser Server' : `sind derzeit ${max} kostenlose Server`} erlaubt (das Limit gilt je Angebot – Minecraft-Server und Discord-Bots zählen getrennt). Verfügbare Pakete:{' '}
+          {describeServerLimits(site.registration.limits, 'de', offeredKinds)} Verfügbare Pakete:{' '}
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'de')} RAM, ${formatMb(p.diskMb, 'de')} NVMe)`).join(', ')}. Alle Ressourcen werden fair geteilt; die Angaben sind
           Obergrenzen und keine garantierte Dauerleistung.
         </p>
@@ -101,7 +101,7 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
 }
 
 export function RulesEn({ site }: { site: PublicSiteDTO }) {
-  const max = site.registration.maxServersPerUser;
+  const offeredKinds = productKinds.filter((k) => site.products[k].enabled);
   const { plans } = site.products.minecraft;
   // Zwei Hardware-Stufen gibt es nur, solange EPYC-Plätze vergeben werden
   const twoTiers = site.waitlist.epycSlots > 0;
@@ -112,7 +112,7 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>1. Free servers</h2>
         <p>
-          {max === 1 ? 'One free server is' : `${max} free servers are`} currently allowed per person (the limit applies per offer – Minecraft servers and Discord bots count separately). Available plans:{' '}
+          {describeServerLimits(site.registration.limits, 'en', offeredKinds)} Available plans:{' '}
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'en')} RAM, ${formatMb(p.diskMb, 'en')} NVMe)`).join(', ')}. All resources are shared fairly; the values stated
           are upper limits, not guaranteed sustained performance.
         </p>

@@ -7,5 +7,6 @@ export * from './format';
 export * from './i18n';
 export * from './settings';
 export * from './status-settings';
+export * from './server-limits';
 export * from './discord-settings';
 export * from './chat-settings';

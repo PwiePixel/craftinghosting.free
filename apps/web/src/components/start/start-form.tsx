@@ -43,6 +43,7 @@ export function StartForm({
   initialPlan,
   initialKind,
   blockedKinds = [],
+  takenPlans = [],
   userEmail,
   early = false,
   newsletterOption = false,
@@ -53,6 +54,8 @@ export function StartForm({
   initialKind?: ProductKind;
   /** Produkte, bei denen der Nutzer sein Limit schon erreicht hat */
   blockedKinds?: ProductKind[];
+  /** Pakete, die der Nutzer schon hat und nicht noch einmal wählen kann (Einstellung „jedes Paket nur einmal“) */
+  takenPlans?: string[];
   userEmail?: string;
   /** Häkchen „Newsletter abonnieren“ anbieten (Admin-Einstellung; nur ohne Anmeldung) */
   newsletterOption?: boolean;
@@ -77,7 +80,7 @@ export function StartForm({
   const bot = kind === 'discord';
   const plans = products[kind].plans;
   const serverTypes = serverTypesOf(kind);
-  const planOk = (id: string, k: ProductKind = kind) => products[k].plans.find((a) => a.id === id)?.available ?? false;
+  const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false);
   const typeOk = (id: string, k: ProductKind = kind) => products[k].serverTypes.find((a) => a.id === id)?.available ?? true;
 
   const defaultPlan = (k: ProductKind) => {
@@ -224,7 +227,7 @@ export function StartForm({
                 <span className="mt-1 block text-[13px] text-muted">
                   {s.planSpecs(formatMb(p.memoryMb, lang), formatMb(p.diskMb, lang), p.cpuPercent)}
                 </span>
-                {!ok && <span className="mt-1 block text-[13px] text-amber-300">{s.soldOut}</span>}
+                {!ok && <span className="mt-1 block text-[13px] text-amber-300">{takenPlans.includes(p.id) ? s.planTaken : s.soldOut}</span>}
                 {ok && p.capacity != null && p.remaining != null && (
                   <span className="mt-1 block text-[13px] text-emerald-300">
                     {t.home.planLeft(p.remaining.toLocaleString(intlLocale(lang)), p.capacity.toLocaleString(intlLocale(lang)))}

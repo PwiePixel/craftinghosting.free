@@ -263,12 +263,44 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
           placeholder={{ de: 'Aktueller Zustand aller Systeme hinter CraftingHosting.free.', en: 'Current state of all systems behind CraftingHosting.free.' }}
           onChange={(intro) => setP({ intro })}
         />
-        <Labeled label="Zeitraum des Verlaufs (Tage)" hint={`${statusLimits.minDays}–${statusLimits.maxDays} Tage. So viele Balken zeigt jede Komponente; die Prozentzahl gilt für denselben Zeitraum.`} className="max-w-xs">
-          <NumberInput value={page.days} min={statusLimits.minDays} max={statusLimits.maxDays} onChange={(days) => setP({ days })} />
-        </Labeled>
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-gray-200">Ein Balken im Verlauf steht für</p>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['hour', 'eine Stunde', 'Der Verlauf rückt jede Stunde weiter.'],
+                ['day', 'einen Tag', 'Der Verlauf rückt jeden Tag weiter.'],
+              ] as const
+            ).map(([unit, label, hint]) => (
+              <button
+                key={unit}
+                type="button"
+                onClick={() => setP({ unit })}
+                aria-pressed={page.unit === unit}
+                className={cn('rounded-lg border px-3.5 py-2 text-left text-sm transition-colors', page.unit === unit ? 'border-blue-400/60 bg-blue-500/10 text-white' : 'border-line-strong text-muted hover:text-white')}
+              >
+                <span className="block font-medium">{label}</span>
+                <span className="block text-[12px] text-subtle">{hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {page.unit === 'hour' ? (
+          <Labeled
+            label="Zeitraum des Verlaufs (Stunden)"
+            hint={`${statusLimits.minHours}–${statusLimits.maxHours} Stunden. So viele Balken zeigt jede Komponente – bei 90 also die letzten 90 Stunden. Die Prozentzahl wird über genau diesen Zeitraum berechnet. Gemessen wird weiter alle 5 Minuten; der laufende Balken zeigt eine Störung sofort.`}
+            className="max-w-md"
+          >
+            <NumberInput value={page.hours} min={statusLimits.minHours} max={statusLimits.maxHours} onChange={(hours) => setP({ hours })} />
+          </Labeled>
+        ) : (
+          <Labeled label="Zeitraum des Verlaufs (Tage)" hint={`${statusLimits.minDays}–${statusLimits.maxDays} Tage. So viele Balken zeigt jede Komponente; die Prozentzahl gilt für denselben Zeitraum.`} className="max-w-md">
+            <NumberInput value={page.days} min={statusLimits.minDays} max={statusLimits.maxDays} onChange={(days) => setP({ days })} />
+          </Labeled>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Toggle checked={page.showBanner} onChange={(showBanner) => setP({ showBanner })} label="Banner mit Gesamtzustand" hint="Die farbige Zeile ganz oben, z. B. „Alle Systeme laufen normal“." />
-          <Toggle checked={page.showBars} onChange={(showBars) => setP({ showBars })} label="Tagesbalken" hint="Ein Balken pro Tag und Komponente." />
+          <Toggle checked={page.showBars} onChange={(showBars) => setP({ showBars })} label="Verlaufsbalken" hint="Ein Balken pro Stunde bzw. Tag und Komponente." />
           <Toggle checked={page.showUptime} onChange={(showUptime) => setP({ showUptime })} label="Verfügbarkeit in Prozent" hint="Die Zahl unter den Balken, z. B. 99,97 %." />
           <Toggle checked={page.showLegend} onChange={(showLegend) => setP({ showLegend })} label="Legende" hint="Erklärt die Farben unter den Gruppen." />
           <Toggle checked={page.showLatency} onChange={(showLatency) => setP({ showLatency })} label="Antwortzeit" hint="Zeigt die gemessene Antwortzeit in Millisekunden neben dem Status." />
@@ -491,9 +523,9 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
         </Button>
       </Section>
 
-      <HistoryRanges drafts={drafts} days={page.days} colors={page.colors} ranges={ranges} onChange={setRanges} />
+      <HistoryRanges drafts={drafts} days={page.unit === 'hour' ? Math.ceil(page.hours / 24) + 1 : page.days} colors={page.colors} ranges={ranges} onChange={setRanges} />
 
-      <HistoryCorrections drafts={drafts} days={page.days} colors={page.colors} history={history} onChange={setHistory} />
+      <HistoryCorrections drafts={drafts} days={page.unit === 'hour' ? Math.ceil(page.hours / 24) + 1 : page.days} colors={page.colors} history={history} onChange={setHistory} />
 
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-[#0d1017]/95 px-4 py-3 shadow-xl backdrop-blur">
         <Button onClick={onSave} loading={pending} disabled={!dirty} icon={<Save />}>

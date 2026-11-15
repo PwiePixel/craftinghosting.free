@@ -6,12 +6,14 @@
  * Mit STATUS_PROVIDER=static melden alle Prüfungen „operational“ (z. B. für Wartung der Checks).
  * Darüber liegen: Wartungsmodus der Website, Vorfälle/Wartungen und der manuelle Status je Komponente.
  * Verlauf und Uptime kommen aus dem Status-Verlauf (Job „status-history“, alle 5 Minuten).
+ * Ein Balken steht je nach Einstellung für einen Kalendertag oder für eine Stunde (dann rückt der Verlauf stündlich weiter).
  */
 import { count, desc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
 import {
   freeHostingConfig,
   getTimeZoneOffset,
   rangeStateFor,
+  statusBarCount,
   statusCategory,
   type ComponentStatus,
   type SiteSettings,
@@ -236,51 +238,61 @@ async function relevantIncidents(now: Date): Promise<StatusIncidentDTO[]> {
 /* ------------------------------------------------------------ Verlauf */
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const HISTORY_DAYS = 90;
 
-interface DayCounts {
+type BarUnit = 'day' | 'hour';
+
+interface BucketCounts {
   total: number;
   outage: number;
   degraded: number;
   maintenance: number;
 }
-type History = Map<string, Map<number, DayCounts>>;
+/** Komponente → Abschnitt (Tag bzw. Stunde, fortlaufend gezählt) → Messungen */
+type History = Map<string, Map<number, BucketCounts>>;
 
-let historyCache: { at: number; offset: number; value: History } | null = null;
+let historyCache: { at: number; key: string; value: History } | null = null;
 
-/** Messungen der letzten 90 Tage je Komponente und Kalendertag (Zeitzone der Website), 5 Minuten Cache. */
-async function loadHistory(offset: number, today: number): Promise<History> {
-  if (historyCache && historyCache.offset === offset && Date.now() - historyCache.at < 5 * 60_000) return historyCache.value;
-  const day = sql<number>`cast((${statusChecks.checkedAt} + ${sql.raw(String(offset))}) / ${sql.raw(String(DAY_MS))} as integer)`;
+/**
+ * Messungen je Komponente und Abschnitt, 5 Minuten Cache.
+ * Tage folgen der Zeitzone der Website (`offset`), Stunden sind die vollen Stunden der Uhr.
+ */
+async function loadHistory(unit: BarUnit, offset: number, current: number, bars: number): Promise<History> {
+  const key = `${unit}:${offset}:${current}:${bars}`;
+  if (historyCache && historyCache.key === key && Date.now() - historyCache.at < 5 * 60_000) return historyCache.value;
+  const size = unit === 'hour' ? HOUR_MS : DAY_MS;
+  const shift = unit === 'hour' ? 0 : offset;
+  const bucket = sql<number>`cast((${statusChecks.checkedAt} + ${sql.raw(String(shift))}) / ${sql.raw(String(size))} as integer)`;
   const rows = await db
-    .select({ component: statusChecks.component, day, status: statusChecks.status, n: count() })
+    .select({ component: statusChecks.component, bucket, status: statusChecks.status, n: count() })
     .from(statusChecks)
-    .where(gte(statusChecks.checkedAt, new Date((today - HISTORY_DAYS + 1) * DAY_MS - offset)))
-    .groupBy(statusChecks.component, day, statusChecks.status);
+    .where(gte(statusChecks.checkedAt, new Date((current - bars + 1) * size - shift)))
+    .groupBy(statusChecks.component, bucket, statusChecks.status);
   const value: History = new Map();
   for (const r of rows) {
     const category = statusCategory(r.status);
     if (category === 'none') continue;
-    let days = value.get(r.component);
-    if (!days) value.set(r.component, (days = new Map()));
-    let c = days.get(Number(r.day));
-    if (!c) days.set(Number(r.day), (c = { total: 0, outage: 0, degraded: 0, maintenance: 0 }));
+    let buckets = value.get(r.component);
+    if (!buckets) value.set(r.component, (buckets = new Map()));
+    let c = buckets.get(Number(r.bucket));
+    if (!c) buckets.set(Number(r.bucket), (c = { total: 0, outage: 0, degraded: 0, maintenance: 0 }));
     const n = Number(r.n);
     c.total += n;
     if (category !== 'operational') c[category] += n;
   }
-  historyCache = { at: Date.now(), offset, value };
+  historyCache = { at: Date.now(), key, value };
   return value;
 }
 
-const DAY_SEVERITY: StatusDayState[] = ['none', 'operational', 'maintenance', 'degraded', 'outage'];
+const BAR_SEVERITY: StatusDayState[] = ['none', 'operational', 'maintenance', 'degraded', 'outage'];
 const round2 = (v: number) => Math.floor(v * 100) / 100;
 
 /**
- * Farbe eines Tages: Ein einzelner Aussetzer (eine Messung, 5 Minuten) färbt den Tag nicht um.
- * Ab zwei Messungen mit Ausfall ist der Tag rot, ab zwei auffälligen Messungen orange.
+ * Farbe eines Abschnitts: Ein einzelner Aussetzer (eine Messung, 5 Minuten) färbt ihn nicht um.
+ * Ab zwei Messungen mit Ausfall ist er rot, ab zwei auffälligen Messungen orange.
  */
-function dayState(c: DayCounts | undefined): StatusDayState {
+function bucketState(c: BucketCounts | undefined): StatusDayState {
   if (!c || c.total === 0) return 'none';
   if (c.outage >= 2) return 'outage';
   if (c.outage + c.degraded >= 2) return 'degraded';
@@ -288,36 +300,44 @@ function dayState(c: DayCounts | undefined): StatusDayState {
   return 'operational';
 }
 
-function buildDays(
+/**
+ * Baut die Balken einer Komponente und die Verfügbarkeit über genau diesen Zeitraum
+ * (Durchschnitt aller Abschnitte mit Daten – bei 90 Stunden-Balken also die letzten 90 Stunden).
+ */
+function buildBars(
   component: string,
-  measured: Map<number, DayCounts> | undefined,
+  measured: Map<number, BucketCounts> | undefined,
   corrections: Record<string, StatusCategory> | undefined,
   ranges: StatusRangeSetting[],
-  today: number,
-  days: number,
-  current: ComponentStatus,
+  unit: BarUnit,
+  offset: number,
+  current: number,
+  count: number,
+  status: ComponentStatus,
 ): { days: StatusDayDTO[]; uptime: number | null } {
   const out: StatusDayDTO[] = [];
   let sum = 0;
   let withData = 0;
-  for (let idx = today - days + 1; idx <= today; idx++) {
-    const date = new Date(idx * DAY_MS).toISOString().slice(0, 10);
+  for (let idx = current - count + 1; idx <= current; idx++) {
+    // Kalendertag des Abschnitts (Zeitzone der Website) – Korrekturen und nachgetragene Zeiträume gelten tageweise
+    const day = unit === 'hour' ? new Date(idx * HOUR_MS + offset).toISOString().slice(0, 10) : new Date(idx * DAY_MS).toISOString().slice(0, 10);
+    const date = unit === 'hour' ? new Date(idx * HOUR_MS).toISOString() : day;
     const c = measured?.get(idx);
-    let state = dayState(c);
+    let state = bucketState(c);
     let uptime = c && c.total > 0 ? ((c.total - c.outage) / c.total) * 100 : null;
     // Aus dem Admin-Bereich: nachgetragener Zeitraum, darüber die Korrektur eines einzelnen Tages
     // (z. B. Zeit vor Beginn der Messung, Fehlalarm oder nachgetragener Ausfall)
-    const fixed = corrections?.[date] ?? rangeStateFor(ranges, component, date, uptime !== null);
+    const fixed = corrections?.[day] ?? rangeStateFor(ranges, component, day, uptime !== null);
     if (fixed) {
       state = fixed;
-      // „Ausfall“ färbt den Tag rot, die Prozentzahl folgt weiter den Messungen (ohne Messung zählt der Tag als ausgefallen).
-      // Jeder andere Zustand erklärt den Tag für verfügbar.
+      // „Ausfall“ färbt den Abschnitt rot, die Prozentzahl folgt weiter den Messungen (ohne Messung zählt er als ausgefallen).
+      // Jeder andere Zustand erklärt ihn für verfügbar.
       uptime = fixed === 'outage' ? (uptime ?? 0) : 100;
     }
-    // Heute zählt zusätzlich der aktuelle Zustand – ein laufender Ausfall ist sofort sichtbar
-    if (idx === today) {
-      const now = statusCategory(current);
-      if (DAY_SEVERITY.indexOf(now) > DAY_SEVERITY.indexOf(state)) state = now;
+    // Im laufenden Abschnitt zählt zusätzlich der aktuelle Zustand – ein laufender Ausfall ist sofort sichtbar
+    if (idx === current) {
+      const now = statusCategory(status);
+      if (BAR_SEVERITY.indexOf(now) > BAR_SEVERITY.indexOf(state)) state = now;
       if (uptime === null && now !== 'none') uptime = now === 'outage' ? 0 : 100;
     }
     if (uptime !== null) {
@@ -345,8 +365,11 @@ async function compose(fresh: boolean, withHistory: boolean): Promise<Composed> 
   const active = incidents.filter((i) => i.state === 'active');
 
   const offset = getTimeZoneOffset(now, freeHostingConfig.fairUse.timezone);
-  const today = Math.floor((now.getTime() + offset) / DAY_MS);
-  const history = withHistory ? await loadHistory(offset, today).catch(() => new Map() as History) : null;
+  // Ein Balken = ein Kalendertag (Zeitzone der Website) oder eine Stunde
+  const unit: BarUnit = cfg.page.unit;
+  const bars = statusBarCount(cfg.page);
+  const current = unit === 'hour' ? Math.floor(now.getTime() / HOUR_MS) : Math.floor((now.getTime() + offset) / DAY_MS);
+  const history = withHistory ? await loadHistory(unit, offset, current, bars).catch(() => new Map() as History) : null;
 
   const components: StatusComponentDTO[] = cfg.components.map((c) => {
     // Reihenfolge (spätere Regel gewinnt): automatische Prüfung → Wartungsmodus → Meldungen → manueller Status
@@ -362,7 +385,7 @@ async function compose(fresh: boolean, withHistory: boolean): Promise<Composed> 
     // Manueller Status aus dem Admin-Bereich hat immer Vorrang
     const override = cfg.overrides[c.id];
     if (override && override !== 'auto') status = override;
-    const h = history ? buildDays(c.id, history.get(c.id), cfg.history[c.id], cfg.ranges, today, cfg.page.days, status) : { days: [], uptime: null };
+    const h = history ? buildBars(c.id, history.get(c.id), cfg.history[c.id], cfg.ranges, unit, offset, current, bars, status) : { days: [], uptime: null };
     return {
       id: c.id,
       group: c.group,
@@ -398,6 +421,11 @@ async function compose(fresh: boolean, withHistory: boolean): Promise<Composed> 
 /** Status für die Statusseite (automatische Prüfung max. 30 s alt, Angaben aus dem Admin sofort) */
 export async function getStatus(): Promise<StatusDTO> {
   return (await compose(false, true)).dto;
+}
+
+/** Aktueller Stand ohne Verlauf – Grundlage für die Status-Meldungen im Discord */
+export async function getStatusOverview(): Promise<StatusDTO> {
+  return (await compose(false, false)).dto;
 }
 
 /** Speichert den aktuellen Status im Verlauf (Grundlage für Tagesbalken und Uptime). */

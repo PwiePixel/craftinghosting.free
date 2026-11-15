@@ -1,4 +1,4 @@
-import { formatMb, freeHostingConfig, localePath, locationNames, type PublicSiteDTO } from '@chfree/shared';
+import { describeServerLimits, formatMb, freeHostingConfig, localePath, locationNames, productKinds, type PublicSiteDTO } from '@chfree/shared';
 import Link from 'next/link';
 
 const { fairUse, cycle, serverTypes } = freeHostingConfig;
@@ -9,7 +9,7 @@ const delHFn = () => (cycle.deleteAfterRestHours > 0 ? Math.round(cycle.reactiva
 const runtimes = serverTypes.filter((t) => t.kind === 'discord').map((t) => t.name);
 
 export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
-  const max = site.registration.maxServersPerUser;
+  const offeredKinds = productKinds.filter((k) => site.products[k].enabled);
   const { plans, fairUse: fairUseEnabled } = site.products.discord;
   const bf = site.botFairUse;
   const location = locationNames(site.hardware.locations, 'de') || 'Deutschland';
@@ -36,8 +36,8 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>2. Pakete und Ressourcen</h2>
         <p>
-          Pro Person {max === 1 ? 'ist derzeit ein kostenloser Server' : `sind derzeit ${max} kostenlose Server`} erlaubt; das Limit gilt je Angebot, ein
-          Discord-Bot ist also zusätzlich zu einem Minecraft-Server möglich. {plans.length > 0 ? 'Verfügbare Pakete für Discord-Bots:' : 'Derzeit sind keine Pakete für Discord-Bots verfügbar.'}
+          {describeServerLimits(site.registration.limits, 'de', offeredKinds)}{' '}
+          {plans.length > 0 ? 'Verfügbare Pakete für Discord-Bots:' : 'Derzeit sind keine Pakete für Discord-Bots verfügbar.'}
         </p>
         {plans.length > 0 && (
           <ul>
@@ -205,7 +205,7 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
 }
 
 export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
-  const max = site.registration.maxServersPerUser;
+  const offeredKinds = productKinds.filter((k) => site.products[k].enabled);
   const { plans, fairUse: fairUseEnabled } = site.products.discord;
   const bf = site.botFairUse;
   const location = locationNames(site.hardware.locations, 'en') || 'Germany';
@@ -232,7 +232,7 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>2. Plans and resources</h2>
         <p>
-          {max === 1 ? 'One free server is' : `${max} free servers are`} currently allowed per person; the limit applies per offer, so a Discord bot is possible in addition to a Minecraft server.{' '}
+          {describeServerLimits(site.registration.limits, 'en', offeredKinds)}{' '}
           {plans.length > 0 ? 'Available plans for Discord bots:' : 'There are currently no plans available for Discord bots.'}
         </p>
         {plans.length > 0 && (

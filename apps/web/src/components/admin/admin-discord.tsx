@@ -139,6 +139,38 @@ function SendToChannel({ kind, panelId, disabled, hint }: { kind: 'roles' | 'tic
   );
 }
 
+/** Testnachricht in den Status-Kanal senden (mit den gerade eingegebenen IDs) */
+function StatusFeedTest({ channelId, pingRoleId, disabled }: { channelId: string; pingRoleId: string; disabled?: boolean }) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<Message>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="secondary"
+        size="sm"
+        icon={<Send />}
+        loading={pending}
+        disabled={disabled || channelId.length < 15}
+        onClick={async () => {
+          setPending(true);
+          setMessage(null);
+          try {
+            await api('/admin/discord/status-test', { body: { channelId, pingRoleId } });
+            setMessage({ ok: true, text: 'Testnachricht gesendet.' });
+          } catch (err) {
+            setMessage({ ok: false, text: errorText(err) });
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        Testnachricht senden
+      </Button>
+      <Note message={message} />
+    </div>
+  );
+}
+
 export function DiscordAdmin({ settings, status: initialStatus }: { settings: SiteSettings; status: AdminDiscordDTO }) {
   const router = useRouter();
   const [d, setD] = useState<DiscordSettings>(settings.discord);
@@ -552,6 +584,36 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           </Labeled>
         </div>
         <SendToChannel kind="tickets" disabled={!status.botReady} hint="Oder im Kanal selbst: /ticketpanel" />
+      </Section>
+
+      <Section
+        title="Status-Meldungen"
+        description="Der Bot postet jede Änderung der Statusseite als gelbes Embed auf Deutsch und Englisch in einen Kanal: neue Störungen und Hinweise, angekündigte Wartungsarbeiten, ihren Beginn, Aktualisierungen und das Ende – außerdem den Wartungsmodus der Website. So sind Statusseite und Discord immer auf demselben Stand."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Labeled label="Status-Kanal" hint="Kanal-ID. Leer = keine Status-Meldungen. Der Bot braucht dort die Rechte „Nachrichten senden“ und „Links einbetten“.">
+            <IdInput value={d.statusFeed.channelId} onChange={(channelId) => set({ statusFeed: { ...d.statusFeed, channelId } })} placeholder="Kanal-ID" />
+          </Labeled>
+          <Labeled label="Rolle erwähnen (optional)" hint="Rollen-ID, z. B. eure „Status“-Rolle aus dem Rollen-Panel. Sie wird bei jeder Meldung erwähnt.">
+            <IdInput value={d.statusFeed.pingRoleId} onChange={(pingRoleId) => set({ statusFeed: { ...d.statusFeed, pingRoleId } })} placeholder="Rollen-ID" />
+          </Labeled>
+        </div>
+        <Toggle
+          checked={d.statusFeed.announceAuto}
+          onChange={(announceAuto) => set({ statusFeed: { ...d.statusFeed, announceAuto } })}
+          label="Auch automatisch erkannte Zustandswechsel melden"
+          hint="Zum Beispiel „Pterodactyl Panel: Betriebsbereit → Ausfall“. Gemeldet wird erst, wenn zwei Messungen hintereinander (10 Minuten) dasselbe zeigen – so gibt es keine Fehlalarme. Von Hand gesetzte Zustände erscheinen sofort."
+        />
+        <StatusFeedTest channelId={d.statusFeed.channelId} pingRoleId={d.statusFeed.pingRoleId} disabled={!status.botReady} />
+        {status.statusFeedError && d.statusFeed.channelId && (
+          <p className="text-sm text-red-300">
+            Die letzte Status-Meldung konnte nicht gesendet werden: {status.statusFeedError.message} – bitte Kanal-ID und Rechte des Bots prüfen.
+          </p>
+        )}
+        <p className="text-[13px] text-subtle">
+          Meldungen legst du unter „Statusseite“ an. Eine Wartung mit Beginn in der Zukunft wird sofort als „angekündigt“ gepostet und zum Startzeitpunkt noch einmal als „hat begonnen“.
+          Beim ersten Einschalten merkt sich der Bot nur den aktuellen Stand – gepostet wird ab der nächsten Änderung.
+        </p>
       </Section>
 
       <Section

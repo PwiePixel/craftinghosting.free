@@ -20,7 +20,7 @@ export default async function FaqPage({ params }: Props) {
   const t = getDict(lang).faq;
   const settings = await getSite();
   const x = siteTexts(settings, lang);
-  const items = [...(settings.registration.mode === 'preregistration' ? [t.earlyItem(x.twoTiers)] : []), ...t.items(settings.registration.maxServersPerUser, x.faq)];
+  const items = [...(settings.registration.mode === 'preregistration' ? [t.earlyItem(x.twoTiers)] : []), ...t.items(x.limits, x.faq)];
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',

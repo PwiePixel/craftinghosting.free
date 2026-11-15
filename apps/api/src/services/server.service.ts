@@ -14,6 +14,11 @@ import {
   reactivationBlockMessages,
   type Locale,
   type ServerDTO,
+  describeServerLimits,
+  serverLimitBlock,
+  type OwnedServerRef,
+  type ServerLimitBlock,
+  type ServerLimits,
 } from '@chfree/shared';
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
@@ -209,30 +214,27 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
   // Discord-Pflicht: Die Anfrage bleibt offen, bis das Konto verknüpft und der Nutzer Mitglied des Discord-Servers ist
   if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
-  const max = await maxServersPerUser();
+  const limits = (await getSettings()).registration.limits;
   await writeTx(async (tx) => {
     const pending = await tx
       .select()
       .from(servers)
       .where(and(eq(servers.userId, user.id), eq(servers.status, 'pending')))
       .orderBy(desc(servers.createdAt));
-    const ownedRows = await tx
-      .select({ kind: servers.kind, n: count() })
+    // Grenzen je Angebot, zusammen und je Paket – z. B. ein Minecraft-Server UND zwei Discord-Bots
+    const owned: OwnedServerRef[] = await tx
+      .select({ kind: servers.kind, planId: servers.planId })
       .from(servers)
-      .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])))
-      .groupBy(servers.kind);
-    // Das Limit gilt je Produkt: z. B. ein Minecraft-Server UND ein Discord-Bot
-    const slotsLeft: Record<string, number> = {};
-    for (const kind of ['minecraft', 'discord'] as const) slotsLeft[kind] = Math.max(0, max - Number(ownedRows.find((r) => r.kind === kind)?.n ?? 0));
+      .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])));
     const now = new Date();
     for (const p of pending) {
-      if ((slotsLeft[p.kind] ?? 0) > 0) {
+      if (serverLimitBlock(limits, owned, p.kind, p.planId) === null) {
         await tx
           .update(servers)
           .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFor(p.kind, now, cycleRules) })
           .where(and(eq(servers.id, p.id), eq(servers.status, 'pending')));
         activated.push(p.id);
-        slotsLeft[p.kind]!--;
+        owned.push({ kind: p.kind, planId: p.planId });
       } else {
         await tx.delete(servers).where(and(eq(servers.id, p.id), eq(servers.status, 'pending')));
       }
@@ -257,23 +259,27 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
   return activated;
 }
 
-async function maxServersPerUser(): Promise<number> {
-  return (await getSettings()).registration.maxServersPerUser;
+/** Server (ohne offene Anfragen und Wartelisten-Plätze), die auf die Grenzen angerechnet werden */
+export async function ownedServerRefs(userId: string): Promise<OwnedServerRef[]> {
+  return db
+    .select({ kind: servers.kind, planId: servers.planId })
+    .from(servers)
+    .where(and(eq(servers.userId, userId), inArray(servers.status, [...OWNED_STATUSES])));
 }
 
-export const serverLimitReached = (max: number) =>
-  Errors.conflict(
-    'server_limit_reached',
-    max === 1
-      ? L(
-          'Du hast davon bereits einen kostenlosen Server. Pro Account ist aktuell ein Minecraft-Server und ein Discord-Bot möglich.',
-          'You already have a free server of this kind. One Minecraft server and one Discord bot per account are currently possible.',
-        )
-      : L(
-          `Du hast davon bereits ${max} kostenlose Server – mehr sind pro Account und Produkt aktuell nicht möglich.`,
-          `You already have ${max} free servers of this kind – that is the current maximum per account and product.`,
-        ),
-  );
+/** Meldung, warum kein weiterer Server möglich ist – passend zur Grenze, die greift */
+export const serverLimitReached = (block: ServerLimitBlock, limits: ServerLimits, kind: ProductKind) => {
+  const all = L(describeServerLimits(limits, 'de'), describeServerLimits(limits, 'en'));
+  const message =
+    block === 'plan'
+      ? L(`Dieses Paket hast du bereits – jedes Paket ist pro Account nur einmal möglich. Wähle ein anderes Paket. ${all.de}`, `You already have this plan – each plan can only be used once per account. Please choose another plan. ${all.en}`)
+      : block === 'total'
+        ? L(`Du hast bereits die maximale Anzahl kostenloser Server (${limits.total}). ${all.de}`, `You already have the maximum number of free servers (${limits.total}). ${all.en}`)
+        : kind === 'discord'
+          ? L(`Du hast bereits die maximale Anzahl an Discord-Bots. ${all.de}`, `You already have the maximum number of Discord bots. ${all.en}`)
+          : L(`Du hast bereits die maximale Anzahl an Minecraft-Servern. ${all.de}`, `You already have the maximum number of Minecraft servers. ${all.en}`);
+  return Errors.conflict('server_limit_reached', message);
+};
 
 export const registrationClosed = () =>
   Errors.conflict(
@@ -290,13 +296,14 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
   await assertConfigAvailable(input);
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
-  const max = settings.registration.maxServersPerUser;
+  const limits = settings.registration.limits;
   const kind = findPlan(settings, input.planId)?.kind ?? 'minecraft';
-  if ((await countOwnedServers(user.id, kind)) >= max) throw serverLimitReached(max);
+  const block = serverLimitBlock(limits, await ownedServerRefs(user.id), kind, input.planId);
+  if (block) throw serverLimitReached(block, limits, kind);
   if (settings.registration.mode === 'preregistration') {
     // Early Access: angemeldete Nutzer kommen direkt (bestätigt) auf die Warteliste – ein Platz pro Person
     if (await hasWaitlistEntry(user.id)) throw alreadyOnWaitlist();
-    if ((await countOwnedServers(user.id)) > 0) throw serverLimitReached(1);
+    if ((await countOwnedServers(user.id)) > 0) throw Errors.conflict('server_limit_reached', L('In der Early-Access-Phase ist ein Platz pro Person möglich – du hast bereits einen Server.', 'During early access one slot per person is possible – you already have a server.'));
     const id = await savePendingServer(user.id, input, 'waitlist');
     await confirmWaitlist(user.id);
     const [entry] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);

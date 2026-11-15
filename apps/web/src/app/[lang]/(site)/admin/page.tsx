@@ -284,7 +284,7 @@ function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: Site
             <Stat label="Wartungsmodus" value={o.site.maintenance ? 'an' : 'aus'} tone={o.site.maintenance ? 'amber' : undefined} />
             <div>
               <p className="text-base font-semibold text-white">{MODE_LABEL[o.site.registrationMode]}</p>
-              <p className="mt-0.5 text-[13px] text-subtle">Registrierung · max. {o.site.maxServersPerUser} pro Person</p>
+              <p className="mt-0.5 text-[13px] text-subtle">Registrierung · max. {o.site.limits.minecraft} Minecraft-Server und {o.site.limits.discord} Bots pro Person{o.site.limits.total > 0 ? `, zusammen ${o.site.limits.total}` : ''}</p>
             </div>
             <Stat label="auf der Warteliste" value={o.site.waitlistConfirmed} />
             <Stat label="Warteliste unbestätigt" value={o.site.waitlistUnconfirmed} />

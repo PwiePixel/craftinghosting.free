@@ -228,7 +228,7 @@ export default async function HomePage({ params }: Props) {
   const early = mode === 'preregistration';
   const closed = mode === 'closed';
   const ctaLabel = early ? t.early.cta : t.common.startFree;
-  const faqItems = [...(early ? [t.faq.earlyItem(x.twoTiers)] : []), ...t.faq.items(settings.registration.maxServersPerUser, x.faq)];
+  const faqItems = [...(early ? [t.faq.earlyItem(x.twoTiers)] : []), ...t.faq.items(x.limits, x.faq)];
   return (
     <>
       <JsonLd lang={lang} plans={[...minecraftPlans, ...discordPlans]} settings={settings} />

@@ -129,7 +129,7 @@ function IncidentCard({ i, names, color, muted = false }: { i: StatusIncidentDTO
   );
 }
 
-/** Ein Balken pro Tag; beim Überfahren/Antippen erscheinen Datum, Zustand und Verfügbarkeit des Tages. */
+/** Ein Balken pro Tag bzw. Stunde; beim Überfahren/Antippen erscheinen Zeitpunkt, Zustand und Verfügbarkeit des Abschnitts. */
 function DayBars({ c, page }: { c: StatusComponentDTO; page: StatusPageSettings }) {
   const lang = useLang();
   const t = useDict().status;
@@ -139,7 +139,14 @@ function DayBars({ c, page }: { c: StatusComponentDTO; page: StatusPageSettings 
   const count = c.days.length;
 
   const stateLabel = (state: StatusDayState) => (state === 'none' ? t.noData : page.labels[state][lang]);
-  const dateLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(intlLocale(lang), { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const hourly = page.unit === 'hour';
+  const time = (d: Date) => d.toLocaleTimeString(intlLocale(lang), { hour: '2-digit', minute: '2-digit' });
+  // Tag: Datum · Stunde: Datum und Zeitspanne in der Zeitzone des Besuchers
+  const dateLabel = (date: string) => {
+    if (!hourly) return new Date(`${date}T12:00:00Z`).toLocaleDateString(intlLocale(lang), { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    const from = new Date(date);
+    return `${from.toLocaleDateString(intlLocale(lang), { day: 'numeric', month: 'short' })}, ${time(from)} – ${time(new Date(from.getTime() + 3_600_000))}`;
+  };
 
   return (
     <div className="relative mt-4" onMouseLeave={() => setHover(null)}>
@@ -157,7 +164,7 @@ function DayBars({ c, page }: { c: StatusComponentDTO; page: StatusPageSettings 
           {day.uptime !== null && page.showUptime && <p className="mt-0.5 text-subtle">{t.dayUptime(pct(day.uptime))}</p>}
         </div>
       )}
-      <div className="flex h-9 items-stretch gap-px sm:gap-[3px]" role="img" aria-label={`${t.historyLabel(count)}${c.uptime !== null ? ` – ${pct(c.uptime)} %` : ''}`}>
+      <div className="flex h-9 items-stretch gap-px sm:gap-[3px]" role="img" aria-label={`${hourly ? t.historyLabelHours(count) : t.historyLabel(count)}${c.uptime !== null ? ` – ${pct(c.uptime)} %` : ''}`}>
         {c.days.map((d, i) => (
           <span
             key={d.date}
@@ -182,6 +189,7 @@ function ComponentRow({ c, page }: { c: StatusComponentDTO; page: StatusPageSett
   const color = category === 'none' ? undefined : page.colors[category];
   const subtitle = c.subtitle[lang];
   const showHistory = page.showBars && c.days.length > 0;
+  const hourly = page.unit === 'hour';
 
   return (
     <li className="px-5 py-5">
@@ -199,11 +207,11 @@ function ComponentRow({ c, page }: { c: StatusComponentDTO; page: StatusPageSett
       {showHistory && <DayBars c={c} page={page} />}
       {(showHistory || page.showUptime) && (
         <div className="mt-2.5 grid grid-cols-3 items-center text-[13px] text-subtle">
-          <span>{showHistory ? t.daysAgo(c.days.length) : ''}</span>
-          <span className="text-center font-semibold text-gray-200" title={t.uptimeHint(page.days)}>
+          <span>{showHistory ? (hourly ? t.hoursAgo(c.days.length) : t.daysAgo(c.days.length)) : ''}</span>
+          <span className="text-center font-semibold text-gray-200" title={hourly ? t.uptimeHintHours(page.hours) : t.uptimeHint(page.days)}>
             {page.showUptime ? (c.uptime !== null ? `${pct(c.uptime)} %` : <span className="font-normal text-subtle">{t.uptimeNone}</span>) : ''}
           </span>
-          <span className="text-right">{showHistory ? t.today : ''}</span>
+          <span className="text-right">{showHistory ? (hourly ? t.now : t.today) : ''}</span>
         </div>
       )}
     </li>
@@ -311,7 +319,7 @@ export function StatusBoard({ initial }: { initial: StatusDTO | null }) {
                   <Icon className="size-[18px] text-muted" aria-hidden />
                   {g.name[lang]}
                 </h2>
-                {page.showBars && <span className="text-sm text-subtle">{t.days(page.days)}</span>}
+                {page.showBars && <span className="text-sm text-subtle">{page.unit === 'hour' ? t.hours(page.hours) : t.days(page.days)}</span>}
               </header>
               <ul className="divide-y divide-line">
                 {items.map((c) => (

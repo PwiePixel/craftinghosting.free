@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
-import { isProductKind, localePath, productKinds, type ServerDTO } from '@chfree/shared';
+import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, takenPlanIds, type ServerDTO } from '@chfree/shared';
 import { StartForm } from '@/components/start/start-form';
 import { ButtonLink } from '@/components/ui/button';
 import { getDict, resolveLang } from '@/i18n';
@@ -41,7 +41,7 @@ export default async function StartPage({ params, searchParams }: Props) {
   // /start?type=discord öffnet direkt das Discord-Bot-Formular
   const initialKind = isProductKind(query.type) ? query.type : undefined;
   const mode = settings.registration.mode;
-  const max = settings.registration.maxServersPerUser;
+  const limits = settings.registration.limits;
   const early = mode === 'preregistration';
 
   let servers: ServerDTO[] = [];
@@ -51,9 +51,11 @@ export default async function StartPage({ params, searchParams }: Props) {
   }
   const ownedServers = servers.filter((srv) => srv.status !== 'pending' && srv.status !== 'waitlist');
   const owned = ownedServers.length;
-  // Das Limit gilt je Produkt: ein Minecraft-Server UND ein Discord-Bot sind möglich
   const offered = productKinds.filter((k) => settings.products[k].enabled && settings.products[k].plans.length > 0);
-  const blockedKinds = productKinds.filter((k) => ownedServers.filter((srv) => srv.kind === k).length >= max);
+  // Grenzen aus dem Admin-Bereich: je Angebot, zusammen und – falls eingestellt – jedes Paket nur einmal
+  const ownedRefs = ownedServers.map((srv) => ({ kind: srv.kind, planId: srv.planId }));
+  const blockedKinds = productKinds.filter((k) => kindExhausted(limits, ownedRefs, k, settings.products[k].plans.map((p) => p.id)));
+  const takenPlans = productKinds.flatMap((k) => takenPlanIds(limits, ownedRefs, k));
   const allBlocked = offered.length > 0 && offered.every((k) => blockedKinds.includes(k));
   const waitlistEntry = servers.find((srv) => srv.status === 'waitlist' && srv.waitlist);
 
@@ -93,7 +95,7 @@ export default async function StartPage({ params, searchParams }: Props) {
     );
   } else if (allBlocked || (early && owned > 0)) {
     content = (
-      <InfoCard title={max === 1 || early ? s.hasServerTitle : s.hasServerTitleMany} text={s.hasServerText(early ? 1 : max)}>
+      <InfoCard title={owned <= 1 || early ? s.hasServerTitle : s.hasServerTitleMany} text={s.hasServerText(early ? t.early.onePerPerson : describeServerLimits(limits, lang, offered))}>
         {myServersButton}
         {premiumButton}
       </InfoCard>
@@ -105,6 +107,7 @@ export default async function StartPage({ params, searchParams }: Props) {
         initialPlan={initialPlan}
         initialKind={initialKind}
         blockedKinds={early ? [] : blockedKinds}
+        takenPlans={early ? [] : takenPlans}
         userEmail={me?.user.email}
         early={early}
         newsletterOption={settings.newsletter.signupCheckbox}
