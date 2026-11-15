@@ -57,6 +57,13 @@
       "when": 1794747878096,
       "tag": "0007_boosts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794750659061,
+      "tag": "0008_pending_deadline",
+      "breakpoints": true
     }
   ]
 }

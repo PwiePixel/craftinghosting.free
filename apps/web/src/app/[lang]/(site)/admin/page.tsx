@@ -9,7 +9,9 @@ import {
   productKinds,
   type AdminAuditDTO,
   type AdminChatDTO,
+  type AdminAbuseDTO,
   type AdminDiscordDTO,
+  type AdminDiscordWaitingDTO,
   type PendingReason,
   type AdminMailDTO,
   type AdminOverviewDTO,
@@ -33,6 +35,7 @@ import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
 import { ChatAdmin } from '@/components/admin/admin-chat';
+import { AbuseManager, AdminMessageForm, DiscordReminder } from '@/components/admin/admin-mails';
 import { DiscordAdmin } from '@/components/admin/admin-discord';
 import { IncidentForm, IncidentList } from '@/components/admin/admin-status';
 import { StatusPageEditor } from '@/components/admin/admin-status-page';
@@ -77,6 +80,7 @@ const TABS = [
   { id: 'users', label: 'Nutzer' },
   { id: 'logs', label: 'Protokoll' },
   { id: 'mails', label: 'E-Mails' },
+  { id: 'abuse', label: 'Abuse' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
@@ -540,9 +544,17 @@ function LogsTab({ list, fmt }: { list: AdminAuditDTO[]; fmt: ReturnType<typeof 
   );
 }
 
-function MailsTab({ list, me, o, fmt }: { list: AdminMailDTO[]; me: string; o: AdminOverviewDTO | null; fmt: ReturnType<typeof formatters> }) {
+function MailsTab({ list, me, o, fmt, waiting }: { list: AdminMailDTO[]; me: string; o: AdminOverviewDTO | null; fmt: ReturnType<typeof formatters>; waiting: AdminDiscordWaitingDTO | null }) {
   return (
     <div className="space-y-5">
+      {waiting && (
+        <Card title="Erinnerung: Discord-Konto verbinden">
+          <DiscordReminder initial={waiting} />
+        </Card>
+      )}
+      <Card title="E-Mail an bestimmte Nutzer">
+        <AdminMessageForm />
+      </Card>
       <Card title="Versand testen">
         <p className="mb-4 text-sm text-muted">
           Schickt eine Testmail über den eingestellten Mailserver{o?.system.smtpTarget ? ` (${o.system.smtpTarget})` : ''}. Bei Fehlern steht hier die Ursache.
@@ -824,7 +836,13 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'mails') {
     const res = await apiServer<{ mails: AdminMailDTO[] }>('/admin/mails', lang);
     failed = !res.ok;
-    if (res.ok) content = <MailsTab list={res.data.mails} me={user.email} o={overview?.ok ? overview.data.overview : null} fmt={fmt} />;
+    const waiting = await apiServer<AdminDiscordWaitingDTO>('/admin/mails/discord-waiting', lang);
+    if (res.ok) content = <MailsTab list={res.data.mails} me={user.email} o={overview?.ok ? overview.data.overview : null} fmt={fmt} waiting={waiting.ok ? waiting.data : null} />;
+  }
+  if (tab === 'abuse') {
+    const res = await apiServer<{ abuse: AdminAbuseDTO }>('/admin/abuse', lang);
+    failed = !res.ok;
+    if (res.ok) content = <AbuseManager initial={res.data.abuse} />;
   }
 
   return (

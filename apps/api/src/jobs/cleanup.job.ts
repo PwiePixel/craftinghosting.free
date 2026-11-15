@@ -2,6 +2,7 @@
  * Job: Aufräumen – abgelaufene Sessions/Tokens, nie bestätigte Anfragen,
  * alte Job-Läufe, alte Laufzeit- und Protokolldaten.
  */
+import { expireDiscordWaiting } from '../services/admin-mail.service';
 import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm';
 import { affectedRows, db } from '../db/client';
 import { auditLogs, consentLogs, dedupeMarks, emailTokens, jobRuns, notifications, serverSessions, servers, users } from '../db/schema';
@@ -40,6 +41,8 @@ export const cleanupJob: JobDefinition = {
       affectedRows(await db.delete(servers).where(and(eq(servers.status, 'pending'), lt(servers.cycleStartedAt, ago(14))))) +
       // nie bestätigte Wartelisten-Anfragen (ohne Platz)
       affectedRows(await db.delete(servers).where(and(eq(servers.status, 'waitlist'), isNull(servers.waitlistPosition), lt(servers.createdAt, ago(14)))));
+    // Anfragen, die trotz Erinnerung weiter auf die Discord-Verbindung warten, nach Ablauf der Frist löschen
+    const discordExpired = await expireDiscordWaiting().catch(() => 0);
     await pruneStatusChecks();
     // Unterhaltungen aus dem Support-Chat nach Ablauf der Aufbewahrungsfrist löschen
     await pruneChats().catch(() => 0);
@@ -50,6 +53,6 @@ export const cleanupJob: JobDefinition = {
     const logs = affectedRows(await db.delete(auditLogs).where(lt(auditLogs.createdAt, ago(90))));
     // Nachweise zum Cookie-Hinweis (IP verschlüsselt) ebenfalls nur 90 Tage
     const consents = affectedRows(await db.delete(consentLogs).where(lt(consentLogs.createdAt, ago(90))));
-    return { authSessions, tokens, unverified, pending, runs, sessions, notes, marks, logs, consents };
+    return { authSessions, tokens, unverified, pending, discordExpired, runs, sessions, notes, marks, logs, consents };
   },
 };

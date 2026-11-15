@@ -167,7 +167,10 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord }: { s: ServerD
         ) : s.status === 'suspended' ? (
           <p className="text-sm text-muted">{t.lockedText}</p>
         ) : s.status === 'pending' ? (
-          <p className="text-sm text-muted">{discordWait ? d.discord.pendingBlocked : t.pendingText}</p>
+          <div>
+            <p className="text-sm text-muted">{discordWait ? d.discord.pendingBlocked : t.pendingText}</p>
+            {s.pendingDeadlineAt && <p className="mt-1.5 text-sm text-amber-300">{d.discord.pendingDeadline(fmt.dateTime(s.pendingDeadlineAt))}</p>}
+          </div>
         ) : s.status === 'provisioning' || s.status === 'provisioning_failed' || s.status === 'expiring' ? (
           <p className="text-sm text-muted">
             {s.status === 'expiring' ? t.expiringText : t.provisioningText}

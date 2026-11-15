@@ -761,6 +761,7 @@ return {
     failed: 'That did not work. Please try again.',
     pendingStatus: 'Waiting for Discord',
     pendingBlocked: 'Your server will be set up as soon as your Discord account is connected and you are a member of our Discord server.',
+    pendingDeadline: (date: string) => `Connect your Discord account by ${date} – otherwise this request is deleted automatically.`,
     noteTitle: 'Requirement: member of our Discord server',
     noteText:
       'To use our free services you need to be on our Discord server. After signing up you connect your Discord account and join automatically – only then is your server set up.',

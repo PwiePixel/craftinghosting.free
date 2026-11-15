@@ -1,3 +1,4 @@
+import { listAbuse, listDiscordWaiting, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -53,6 +54,27 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/users', async (request) => listUsersAdmin(listQuery.parse(request.query)));
   app.get('/admin/audit', async (request) => listAudit(listQuery.parse(request.query)));
   app.get('/admin/mails', async () => ({ mails: await listMailProblems() }));
+
+  /** Accounts, deren Server noch auf die Discord-Verbindung wartet */
+  app.get('/admin/mails/discord-waiting', async () => listDiscordWaiting());
+  /** Erinnerung an alle Wartenden – setzt die Frist, nach der die Anfrage gelöscht wird */
+  app.post('/admin/mails/discord-reminder', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
+    const { days } = z.object({ days: z.number().int().min(1).max(30).default(7) }).parse(request.body ?? {});
+    return { ...(await sendDiscordReminders(currentUser(request), days, request.ip)), waiting: await listDiscordWaiting() };
+  });
+  /** Nachricht an ausgewählte Nutzer */
+  const localizedMail = (max: number) => z.object({ de: z.string().max(max).default(''), en: z.string().max(max).default('') });
+  app.post('/admin/mails/send', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (request) => {
+    const body = z.object({ emails: z.array(z.string().trim().max(254)).min(1).max(500), subject: localizedMail(150), body: localizedMail(5000) }).parse(request.body);
+    return sendAdminMessage(currentUser(request), body, request.ip);
+  });
+
+  /* -------------------------------------------------------------- Abuse */
+  app.get('/admin/abuse', async () => ({ abuse: await listAbuse() }));
+  app.post('/admin/abuse', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (request) => {
+    const body = z.object({ email: emailSchema, reason: z.string().max(40), note: localizedMail(3000).default({ de: '', en: '' }), suspend: z.boolean().default(false) }).parse(request.body);
+    return { ...(await sendAbuseMail(currentUser(request), body, request.ip)), abuse: await listAbuse() };
+  });
 
   /**
    * Alle Server auf einmal sperren, entsperren oder löschen – Admin-Konten und die angegebenen Konten sind ausgenommen.

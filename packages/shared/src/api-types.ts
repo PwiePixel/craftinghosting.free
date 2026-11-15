@@ -71,6 +71,8 @@ export interface VerifyResult {
 export interface ServerDTO {
   id: string;
   name: string;
+  /** Offene Anfrage, die auf die Discord-Verbindung wartet: Zeitpunkt, zu dem sie gelöscht wird (null = keine Frist) */
+  pendingDeadlineAt: string | null;
   /** Minecraft-Server oder Discord-Bot */
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
@@ -347,6 +349,17 @@ export interface AdminAuditDTO {
   userEmail: string | null;
   serverId: string | null;
   ip: string | null;
+}
+
+/** Accounts, deren Server noch auf die Discord-Verbindung wartet (Admin → E-Mails) */
+export interface AdminDiscordWaitingDTO {
+  users: { userId: string; email: string; servers: string[]; reason: 'discord_not_linked' | 'discord_not_member'; deadline: string | null }[];
+}
+
+/** Abuse-Bereich: versendete Abuse-Mails (von Hand und automatisch) und die Gründe für neue */
+export interface AdminAbuseDTO {
+  reasons: { id: string; label: string }[];
+  mails: { id: string; createdAt: string; userEmail: string; type: string; manual: boolean; title: string; body: string; emailStatus: string; emailLastError: string | null; serverName: string | null }[];
 }
 
 export interface AdminMailDTO {

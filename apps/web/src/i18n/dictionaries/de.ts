@@ -794,6 +794,7 @@ return {
     failed: 'Das hat nicht geklappt. Bitte versuche es erneut.',
     pendingStatus: 'Wartet auf Discord',
     pendingBlocked: 'Dein Server wird eingerichtet, sobald dein Discord-Konto verbunden und du Mitglied auf unserem Discord-Server bist.',
+    pendingDeadline: (date: string) => `Verbinde dein Discord-Konto bis zum ${date} – sonst wird diese Anfrage automatisch gelöscht.`,
     /** Kurzer Hinweis auf Startseite und beim Erstellen */
     noteTitle: 'Voraussetzung: Mitglied auf unserem Discord-Server',
     noteText:
