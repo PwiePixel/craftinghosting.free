@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "CraftingHosting.free API + Worker (Fastify, Drizzle/MariaDB, Pterodactyl)",
+  "description": "CraftingHosting.free API + Worker (Fastify, Drizzle/SQLite verschlüsselt, Pterodactyl)",
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "worker:dev": "tsx watch --clear-screen=false src/worker.ts",
@@ -23,11 +23,11 @@
     "@fastify/cors": "^11.1.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^11.2.0",
+    "@libsql/client": "^0.18.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.0",
     "fastify": "^5.6.1",
     "fastify-plugin": "^5.1.0",
-    "mysql2": "^3.15.3",
     "nodemailer": "^10.0.10",
     "pino": "^10.0.0",
     "zod": "^4.1.12"

@@ -14,6 +14,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ['privacy', 0.2, 'yearly'],
     ['terms', 0.2, 'yearly'],
     ['rules', 0.3, 'yearly'],
+    ['discordTerms', 0.3, 'yearly'],
+    ['donate', 0.4, 'monthly'],
     ['cookies', 0.1, 'yearly'],
   ];
   return pages.flatMap(([key, priority, changeFrequency]) =>

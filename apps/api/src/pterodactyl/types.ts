@@ -43,8 +43,27 @@ export interface PteroEgg {
 export interface PteroNode {
   id: number;
   name: string;
+  fqdn: string;
   maintenanceMode: boolean;
   locationId: number;
+  memoryMb: number;
+  diskMb: number;
+}
+
+export interface PteroLocation {
+  id: number;
+  short: string;
+  long: string;
+}
+
+/** Egg aus der Übersicht aller Nests (für die automatische Erkennung im Admin-Bereich) */
+export interface PteroEggSummary {
+  nestId: number;
+  nestName: string;
+  eggId: number;
+  name: string;
+  description: string;
+  dockerImages: string[];
 }
 
 export interface CreateServerSpec {
@@ -58,7 +77,10 @@ export interface CreateServerSpec {
   environment: Record<string, string>;
   limits: { memory: number; swap: number; disk: number; io: number; cpu: number };
   featureLimits: { databases: number; allocations: number; backups: number };
+  /** Automatische Platzierung über Locations (wenn keine feste Allokation angegeben ist) */
   locationIds: number[];
+  /** Feste Allokation auf einer bestimmten Node – hat Vorrang vor den Locations */
+  allocationId?: number;
   startOnCompletion: boolean;
 }
 
@@ -103,6 +125,13 @@ export interface PterodactylGateway {
 
   getEgg(nestId: number, eggId: number): Promise<PteroEgg>;
   listNodes(): Promise<PteroNode[]>;
+  listLocations(): Promise<PteroLocation[]>;
+  /** Alle Eggs aller Nests */
+  listEggs(): Promise<PteroEggSummary[]>;
+  /** Freie Allokationen (Ports) einer Node: Anzahl und die erste freie ID */
+  freeAllocations(nodeId: number): Promise<{ count: number; firstId: number | null }>;
+  /** Prüft den Client-API-Key */
+  pingClient(): Promise<void>;
 
   getResources(identifier: string): Promise<PteroResources>;
   sendPowerSignal(identifier: string, signal: PowerAction): Promise<void>;

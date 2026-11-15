@@ -4,7 +4,7 @@
  */
 import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm';
 import { affectedRows, db } from '../db/client';
-import { auditLogs, dedupeMarks, emailTokens, jobRuns, notifications, serverSessions, servers, users } from '../db/schema';
+import { auditLogs, consentLogs, dedupeMarks, emailTokens, jobRuns, notifications, serverSessions, servers, users } from '../db/schema';
 import { deleteExpiredSessions } from '../services/session.service';
 import { pruneStatusChecks } from '../services/status.service';
 import type { JobDefinition } from './types';
@@ -44,7 +44,9 @@ export const cleanupJob: JobDefinition = {
     const sessions = affectedRows(await db.delete(serverSessions).where(and(isNotNull(serverSessions.endedAt), lt(serverSessions.endedAt, ago(90)))));
     const notes = affectedRows(await db.delete(notifications).where(lt(notifications.createdAt, ago(180))));
     const marks = affectedRows(await db.delete(dedupeMarks).where(lt(dedupeMarks.createdAt, ago(30))));
-    const logs = affectedRows(await db.delete(auditLogs).where(lt(auditLogs.createdAt, ago(365))));
-    return { authSessions, tokens, unverified, pending, runs, sessions, notes, marks, logs };
+    const logs = affectedRows(await db.delete(auditLogs).where(lt(auditLogs.createdAt, ago(90))));
+    // Nachweise zum Cookie-Hinweis (IP verschlüsselt) ebenfalls nur 90 Tage
+    const consents = affectedRows(await db.delete(consentLogs).where(lt(consentLogs.createdAt, ago(90))));
+    return { authSessions, tokens, unverified, pending, runs, sessions, notes, marks, logs, consents };
   },
 };

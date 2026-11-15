@@ -1,1 +1,0 @@
-ALTER TABLE `users` ADD `locale` enum('de','en') DEFAULT 'de' NOT NULL;

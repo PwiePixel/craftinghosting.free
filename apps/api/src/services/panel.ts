@@ -12,6 +12,7 @@ import { resolveText, type LText } from '../lib/text';
 import { pterodactyl } from '../pterodactyl';
 import { getUserLocale } from './locale.service';
 import { isOnline } from './runtime';
+import { getSettings } from './settings.service';
 
 const { fairUse, brand } = { fairUse: freeHostingConfig.fairUse, brand: freeHostingConfig.brand };
 const tz = fairUse.timezone;
@@ -57,7 +58,7 @@ function expiredDescription(server: Server, now: Date, l: Locale): string {
 }
 
 /** Beschreibung, die im Panel unter dem Servernamen erscheint. */
-export function desiredPanelDescription(server: Server, now: Date, l: Locale = 'de'): string {
+export function desiredPanelDescription(server: Server, now: Date, l: Locale = 'de', fairUseEnabled = true): string {
   const prefix = brand.productName;
   const en = l === 'en';
   switch (server.status) {
@@ -81,6 +82,7 @@ export function desiredPanelDescription(server: Server, now: Date, l: Locale = '
           ? `${prefix} · Fair-use break until ${fmtDateTime(server.pausedUntil, l)} (${why})`
           : `${prefix} · Fair-Use-Pause bis ${fmtDateTime(server.pausedUntil, l)} (${why})`;
       }
+      if (!fairUseEnabled) return en ? `${prefix} · active until ${fmtDate(server.cycleEndsAt, l)}` : `${prefix} · aktiv bis ${fmtDate(server.cycleEndsAt, l)}`;
       return en
         ? `${prefix} · active until ${fmtDate(server.cycleEndsAt, l)} · max. ${fairUse.maxSessionHours} h in a row, ${fairUse.weeklyOfflineHours} h/week offline`
         : `${prefix} · aktiv bis ${fmtDate(server.cycleEndsAt, l)} · max. ${fairUse.maxSessionHours} h am Stück, ${fairUse.weeklyOfflineHours} h/Woche offline`;
@@ -93,7 +95,8 @@ export function desiredPanelDescription(server: Server, now: Date, l: Locale = '
 export async function syncPanelDescription(server: Server, now = new Date()): Promise<boolean> {
   if (!server.pteroServerId) return false;
   const locale = await getUserLocale(server.userId);
-  const desired = desiredPanelDescription(server, now, locale).slice(0, 255);
+  const fairUseEnabled = (await getSettings()).products[server.kind].fairUse;
+  const desired = desiredPanelDescription(server, now, locale, fairUseEnabled).slice(0, 255);
   if (desired === server.panelDescription) return false;
   await pterodactyl().updateServerDescription(server.pteroServerId, desired);
   await db.update(servers).set({ panelDescription: desired }).where(eq(servers.id, server.id));
@@ -115,8 +118,10 @@ export async function trySyncPanelDescription(serverId: string): Promise<void> {
  * in der Sprache des Server-Besitzers. Nur wenn der Server läuft (sonst sieht ihn niemand).
  */
 export async function sayOnce(server: Server, key: string, message: LText): Promise<boolean> {
+  // `say` ist ein Minecraft-Befehl – Discord-Bots bekommen Hinweise per E-Mail und in der Panel-Beschreibung
+  if (server.kind !== 'minecraft') return false;
   if (!server.pteroIdentifier || !isOnline(server.powerState)) return false;
-  const res = await db.insert(dedupeMarks).ignore().values({ key: `say:${server.id}:${key}`.slice(0, 191) });
+  const res = await db.insert(dedupeMarks).values({ key: `say:${server.id}:${key}`.slice(0, 191) }).onConflictDoNothing();
   if (affectedRows(res) !== 1) return false;
   const locale = await getUserLocale(server.userId);
   const text = `[${brand.productName}] ${resolveText(message, locale)}`.replace(/[\r\n]+/g, ' ').slice(0, 250);

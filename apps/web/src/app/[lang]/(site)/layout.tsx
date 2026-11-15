@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CookieBanner } from '@/components/layout/cookie-banner';
 import { SiteFooter } from '@/components/layout/site-footer';
 import { SiteHeader } from '@/components/layout/site-header';
 import { getDict, resolveLang } from '@/i18n';
@@ -19,9 +20,10 @@ export default async function SiteLayout({ children, params }: { children: React
       >
         {t.common.skipToContent}
       </a>
-      <SiteHeader mode={site.registration.mode} maintenance={site.maintenance.enabled} signedIn={signedIn} />
+      <SiteHeader mode={site.registration.mode} maintenance={site.maintenance.enabled} signedIn={signedIn} donate={site.donate.enabled} />
       <main id="inhalt">{children}</main>
-      <SiteFooter lang={lang} />
+      <SiteFooter lang={lang} donate={site.donate.enabled} />
+      <CookieBanner />
     </>
   );
 }

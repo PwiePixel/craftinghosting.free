@@ -8,6 +8,8 @@ import {
   type BackupScheduleSpec,
   type CreateServerSpec,
   type PteroEgg,
+  type PteroEggSummary,
+  type PteroLocation,
   type PteroNode,
   type PteroResources,
   type PteroServer,
@@ -163,7 +165,10 @@ export class PterodactylHttpClient implements PterodactylGateway {
       environment: spec.environment,
       limits: spec.limits,
       feature_limits: spec.featureLimits,
-      deploy: { locations: spec.locationIds, dedicated_ip: false, port_range: [] },
+      // Feste Node (Allokation) oder automatische Platzierung über Locations
+      ...(spec.allocationId
+        ? { allocation: { default: spec.allocationId } }
+        : { deploy: { locations: spec.locationIds, dedicated_ip: false, port_range: [] } }),
       start_on_completion: spec.startOnCompletion,
     });
     // Allokation nachladen (Create-Antwort enthält sie nicht immer)
@@ -219,9 +224,57 @@ export class PterodactylHttpClient implements PterodactylGateway {
     return (res.data as Json[]).map((n) => ({
       id: n.attributes.id,
       name: n.attributes.name,
+      fqdn: n.attributes.fqdn ?? '',
       maintenanceMode: !!n.attributes.maintenance_mode,
       locationId: n.attributes.location_id,
+      memoryMb: n.attributes.memory ?? 0,
+      diskMb: n.attributes.disk ?? 0,
     }));
+  }
+
+  async listLocations(): Promise<PteroLocation[]> {
+    const res = await this.request('application', 'GET', '/locations?per_page=100');
+    return (res.data as Json[]).map((l) => ({ id: l.attributes.id, short: l.attributes.short ?? '', long: l.attributes.long ?? '' }));
+  }
+
+  async listEggs(): Promise<PteroEggSummary[]> {
+    const res = await this.request('application', 'GET', '/nests?include=eggs&per_page=100');
+    const out: PteroEggSummary[] = [];
+    for (const nest of res.data as Json[]) {
+      for (const egg of (nest.attributes.relationships?.eggs?.data ?? []) as Json[]) {
+        const a = egg.attributes;
+        out.push({
+          nestId: nest.attributes.id,
+          nestName: nest.attributes.name ?? '',
+          eggId: a.id,
+          name: a.name ?? '',
+          description: a.description ?? '',
+          dockerImages: a.docker_images ? Object.keys(a.docker_images) : a.docker_image ? [a.docker_image] : [],
+        });
+      }
+    }
+    return out;
+  }
+
+  async freeAllocations(nodeId: number): Promise<{ count: number; firstId: number | null }> {
+    let count = 0;
+    let firstId: number | null = null;
+    // Höchstens 20 Seiten à 500 Allokationen – reicht für 10 000 Ports je Node
+    for (let page = 1; page <= 20; page++) {
+      const res = await this.request('application', 'GET', `/nodes/${nodeId}/allocations?per_page=500&page=${page}`);
+      for (const a of res.data as Json[]) {
+        if (a.attributes.assigned) continue;
+        count++;
+        firstId ??= a.attributes.id as number;
+      }
+      const pagination = res.meta?.pagination;
+      if (!pagination || pagination.current_page >= pagination.total_pages) break;
+    }
+    return { count, firstId };
+  }
+
+  async pingClient(): Promise<void> {
+    await this.request('client', 'GET', '/');
   }
 
   async getResources(identifier: string): Promise<PteroResources> {

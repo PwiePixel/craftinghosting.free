@@ -1,14 +1,17 @@
 import { formatMb, freeHostingConfig, localePath, restPeriodText, type PublicSiteDTO } from '@chfree/shared';
 import Link from 'next/link';
 
-const { fairUse, cycle, plans, hardware } = freeHostingConfig;
+const { fairUse, cycle } = freeHostingConfig;
 const hasRest = cycle.reactivationCooldownMinutes > 0;
 const delH = cycle.deleteAfterRestHours;
-const epyc = hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
-const xeon = hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
 
 export function RulesDe({ site }: { site: PublicSiteDTO }) {
   const max = site.registration.maxServersPerUser;
+  const { plans } = site.products.minecraft;
+  // Zwei Hardware-Stufen gibt es nur, solange EPYC-Plätze vergeben werden
+  const twoTiers = site.waitlist.epycSlots > 0;
+  const epyc = site.hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
+  const xeon = site.hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
   return (
     <>
       <section>
@@ -20,8 +23,8 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
         </p>
         <p>
           In der ersten Startphase (Early Access) sichern sich Nutzer zunächst einen Platz auf der Warteliste (ein Platz pro Person). Die Plätze werden der Reihe nach
-          freigeschaltet; die ersten Plätze erhalten einen Server auf {epyc}, alle weiteren auf {xeon}. Verlässt jemand die Warteliste, rücken die folgenden Plätze nach. Der{' '}
-          {cycle.days}-Tage-Zyklus beginnt mit der Freischaltung.
+          freigeschaltet{twoTiers ? `; die ersten Plätze erhalten einen Server auf ${epyc}, alle weiteren auf ${xeon}` : ''}. Verlässt jemand die Warteliste, rücken die
+          folgenden Plätze nach. Der {cycle.days}-Tage-Zyklus beginnt mit der Freischaltung.
         </p>
       </section>
 
@@ -75,6 +78,10 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
           <li>Weitergabe, Verkauf oder Vermietung kostenloser Server bzw. Wartelisten-Plätze an Dritte</li>
           <li>Verstöße gegen die Minecraft-EULA von Mojang/Microsoft, z. B. unzulässige Bezahl-Vorteile</li>
         </ul>
+        <p>
+          Für Discord-Bots gibt es ein eigenes Angebot mit eigenen Paketen – dafür gelten die{' '}
+          <Link href={localePath('de', 'discordTerms')}>Nutzungsbedingungen für Discord-Bot-Hosting</Link>.
+        </p>
         <p>Bei Verstößen kann der Server ohne Vorankündigung gesperrt werden. Gesperrte Server lassen sich nicht selbst reaktivieren.</p>
       </section>
 
@@ -88,6 +95,11 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
 
 export function RulesEn({ site }: { site: PublicSiteDTO }) {
   const max = site.registration.maxServersPerUser;
+  const { plans } = site.products.minecraft;
+  // Zwei Hardware-Stufen gibt es nur, solange EPYC-Plätze vergeben werden
+  const twoTiers = site.waitlist.epycSlots > 0;
+  const epyc = site.hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
+  const xeon = site.hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
   return (
     <>
       <section>
@@ -98,9 +110,9 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
           are upper limits, not guaranteed sustained performance.
         </p>
         <p>
-          During the first launch phase (early access), users first secure a spot on the waitlist (one spot per person). The spots are unlocked one after another; the first
-          spots get a server on {epyc}, all further spots on {xeon}. If someone leaves the waitlist, the following spots move up. The {cycle.days}-day cycle starts when the
-          spot is unlocked.
+          During the first launch phase (early access), users first secure a spot on the waitlist (one spot per person). The spots are unlocked one after another
+          {twoTiers ? `; the first spots get a server on ${epyc}, all further spots on ${xeon}` : ''}. If someone leaves the waitlist, the following spots move up. The{' '}
+          {cycle.days}-day cycle starts when the spot is unlocked.
         </p>
       </section>
 
@@ -153,6 +165,10 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
           <li>Passing on, selling or renting free servers or waitlist spots to third parties</li>
           <li>Violations of the Minecraft EULA of Mojang/Microsoft, e.g. prohibited pay-to-win advantages</li>
         </ul>
+        <p>
+          Discord bots have their own offer with their own plans – the <Link href={localePath('en', 'discordTerms')}>terms of use for Discord bot hosting</Link> apply to
+          them.
+        </p>
         <p>In case of violations, the server may be suspended without prior notice. Servers suspended by the team cannot be reactivated by the user.</p>
       </section>
 

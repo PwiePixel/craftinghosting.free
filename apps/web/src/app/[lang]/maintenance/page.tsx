@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ArrowUpRight, Wrench } from 'lucide-react';
 import { localePath } from '@chfree/shared';
 import { Logo } from '@/components/brand/logo';
+import { CookieBanner } from '@/components/layout/cookie-banner';
 import { MaintenanceLangSwitch, MaintenanceWatcher } from '@/components/maintenance/maintenance-bits';
 import { ButtonLink } from '@/components/ui/button';
 import { formatters, getDict, resolveLang } from '@/i18n';
@@ -88,6 +89,7 @@ export default async function MaintenancePage({ params }: Props) {
           </nav>
         </div>
       </footer>
+      <CookieBanner />
     </div>
   );
 }

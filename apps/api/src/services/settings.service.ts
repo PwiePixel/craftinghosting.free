@@ -9,12 +9,18 @@ import {
   defaultSiteSettings,
   freeHostingConfig,
   normalizeSiteSettings,
+  productKinds,
+  serverTypesOf,
   websiteEpycSlots,
   type PlanAvailabilityDTO,
+  type ProductKind,
+  type PublicProductDTO,
   type PublicSiteDTO,
   type SiteSettings,
   type WaitlistBlock,
 } from '@chfree/shared';
+import { getEggMapping } from '../config/pterodactyl.config';
+import { env } from '../env';
 import { db } from '../db/client';
 import { servers, settings as settingsTable, statusChecks, users } from '../db/schema';
 
@@ -41,7 +47,7 @@ export async function getSettings(): Promise<SiteSettings> {
         ...value,
         waitlist: { ...value.waitlist, blocks: value.waitlist.blocks.map((b) => (b.after === null ? { ...b, after, at: b.at ?? at } : b)) },
       });
-      await db.insert(settingsTable).values({ key: KEY, value }).onDuplicateKeyUpdate({ set: { value } });
+      await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
     }
     cache = { value, at: Date.now() };
     return value;
@@ -60,7 +66,7 @@ export async function saveSettings(next: unknown, opts: { blocks?: WaitlistBlock
   const value = normalizeSiteSettings({ ...input, waitlist: { ...((input.waitlist as object) ?? {}), blocks } });
   if (before.maintenance.enabled && !value.maintenance.enabled) value.maintenance.endedAt = new Date().toISOString();
   else value.maintenance.endedAt = before.maintenance.endedAt;
-  await db.insert(settingsTable).values({ key: KEY, value }).onDuplicateKeyUpdate({ set: { value } });
+  await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
   cache = { value, at: Date.now() };
   return value;
 }
@@ -164,18 +170,59 @@ export const CAPACITY_STATUSES = ['provisioning', 'provisioning_failed', 'active
  * `extra` zählt zusätzliche Server je Paket mit (z. B. freigeschaltete, noch nicht erstellte).
  */
 export async function planAvailability(s?: SiteSettings, extra: Record<string, number> = {}): Promise<PlanAvailabilityDTO[]> {
+  return (await capacityState(s, extra)).plans;
+}
+
+export interface ProductCapacity {
+  capacity: number | null;
+  used: number;
+  remaining: number | null;
+  available: boolean;
+}
+
+/**
+ * Belegung je Produkt (Minecraft / Discord-Bots) und je Paket. Ein Paket ist nur verfügbar, wenn es aktiv ist,
+ * das Produkt angeboten wird und sowohl im Paket als auch im Produkt noch Plätze frei sind.
+ */
+export async function capacityState(
+  s?: SiteSettings,
+  extra: Record<string, number> = {},
+): Promise<{ products: Record<ProductKind, ProductCapacity>; plans: (PlanAvailabilityDTO & { kind: ProductKind })[] }> {
   const settings = s ?? (await getSettings());
   const rows = await db
-    .select({ planId: servers.planId, n: count() })
+    .select({ kind: servers.kind, planId: servers.planId, n: count() })
     .from(servers)
     .where(inArray(servers.status, [...CAPACITY_STATUSES]))
-    .groupBy(servers.planId);
-  return freeHostingConfig.plans.map((p) => {
-    const cfg = settings.plans[p.id] ?? { capacity: p.capacity, reserved: 0 };
-    const used = Number(rows.find((r) => r.planId === p.id)?.n ?? 0) + cfg.reserved + (extra[p.id] ?? 0);
-    const remaining = cfg.capacity === null ? null : Math.max(0, cfg.capacity - used);
-    return { id: p.id, capacity: cfg.capacity, used, remaining, available: remaining === null || remaining > 0 };
-  });
+    .groupBy(servers.kind, servers.planId);
+  const products = {} as Record<ProductKind, ProductCapacity>;
+  const plans: (PlanAvailabilityDTO & { kind: ProductKind })[] = [];
+  for (const kind of productKinds) {
+    const product = settings.products[kind];
+    // Auch Server entfernter Pakete belegen weiter einen Platz des Produkts
+    const servers_ = rows.filter((r) => r.kind === kind).reduce((sum, r) => sum + Number(r.n), 0);
+    const extras = product.plans.reduce((sum, p) => sum + (extra[p.id] ?? 0), 0);
+    const used = servers_ + product.reserved + extras;
+    const remaining = product.capacity === null ? null : Math.max(0, product.capacity - used);
+    const open = product.enabled && (remaining === null || remaining > 0);
+    products[kind] = { capacity: product.capacity, used, remaining, available: open };
+    for (const p of product.plans) {
+      const planUsed = Number(rows.find((r) => r.planId === p.id)?.n ?? 0) + p.reserved + (extra[p.id] ?? 0);
+      let planRemaining = p.capacity === null ? null : Math.max(0, p.capacity - planUsed);
+      if (planRemaining !== null && remaining !== null) planRemaining = Math.min(planRemaining, remaining);
+      plans.push({ id: p.id, kind, capacity: p.capacity, used: planUsed, remaining: planRemaining, available: p.enabled && open && (planRemaining === null || planRemaining > 0) });
+    }
+  }
+  return { products, plans };
+}
+
+/**
+ * Ist ein Servertyp bestellbar? Es braucht ein Egg – und Discord-Bots zusätzlich eine eigene Node
+ * (Admin → Pterodactyl), damit sie nie auf den Minecraft-Nodes landen.
+ */
+export function serverTypeAvailable(serverType: string, settings: SiteSettings): boolean {
+  if (!getEggMapping(serverType, settings)) return false;
+  const kind = serverTypesOf('discord').some((t) => t.id === serverType) ? 'discord' : 'minecraft';
+  return kind === 'minecraft' || env.PTERODACTYL_MODE === 'mock' || settings.products.discord.nodeIds.length > 0;
 }
 
 let publicCache: { value: PublicSiteDTO; at: number } | null = null;
@@ -185,6 +232,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
   if (publicCache && Date.now() - publicCache.at < 10_000) return publicCache.value;
   const s = await getSettings();
   const wl = await waitlistCounts(s);
+  const capacity = await capacityState(s);
   let stats: PublicSiteDTO['stats'] = null;
   if (s.stats.show) {
     const [u] = await db.select({ n: count() }).from(users).where(isNotNull(users.emailVerifiedAt));
@@ -204,7 +252,28 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
       epycUsed: wl.epycUsed,
       epycRemaining: wl.epycRemaining,
     },
-    plans: await planAvailability(s),
+    plans: capacity.plans.map(({ kind: _kind, ...p }) => p),
+    products: Object.fromEntries(
+      productKinds.map((kind): [ProductKind, PublicProductDTO] => {
+        const p = s.products[kind];
+        const c = capacity.products[kind];
+        return [
+          kind,
+          {
+            kind,
+            enabled: p.enabled,
+            fairUse: p.fairUse,
+            ...c,
+            plans: p.plans
+              .filter((plan) => plan.enabled)
+              .map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, ...capacity.plans.find((a) => a.id === plan.id)! })),
+            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s) })),
+          },
+        ];
+      }),
+    ) as PublicSiteDTO['products'],
+    hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
+    donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
     stats,
   };
   publicCache = { value, at: Date.now() };

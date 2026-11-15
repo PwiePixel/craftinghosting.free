@@ -52,8 +52,12 @@ export interface ServerRuntimeState {
   openSession: ServerSession | null;
 }
 
-export function computeRuntimeState(server: Server, user: User, sessions: ServerSession[], now: Date): ServerRuntimeState {
-  const fairUse = computeFairUse({
+/**
+ * `fairUseEnabled = false`: Für dieses Produkt gilt kein Fair-Use-System (z. B. Discord-Bots im Dauerbetrieb) –
+ * es gibt dann weder Laufzeitlimit noch Wochen-Offline-Zeit, nur der 30-Tage-Zyklus zählt.
+ */
+export function computeRuntimeState(server: Server, user: User, sessions: ServerSession[], now: Date, fairUseEnabled = true): ServerRuntimeState {
+  const computed = computeFairUse({
     now,
     sessions: sessions.map((s) => ({ startedAt: s.startedAt, endedAt: s.endedAt })),
     online: isOnline(server.powerState),
@@ -61,6 +65,19 @@ export function computeRuntimeState(server: Server, user: User, sessions: Server
     pauseReason: server.pauseReason,
     rules: fairUseRules,
   });
+  const fairUse: FairUseState = fairUseEnabled
+    ? computed
+    : {
+        ...computed,
+        sessionRemainingSeconds: null,
+        sessionLimitReached: false,
+        weeklyOfflineRemainingSeconds: 0,
+        weeklyOfflineFulfilled: true,
+        weeklyOfflineDeadline: null,
+        mustGoOfflineForWeek: false,
+        autoStopAt: null,
+        autoStopReason: null,
+      };
   const cycle = computeCycle({
     number: server.cycleNumber,
     startedAt: server.cycleStartedAt,

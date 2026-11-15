@@ -5,6 +5,7 @@ import { getDict, resolveLang } from '@/i18n';
 import { pageMetadata } from '@/lib/seo';
 import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
+import { siteTexts } from '@/lib/site-texts';
 
 type Props = { params: Promise<{ lang: string }> };
 
@@ -18,7 +19,8 @@ export default async function FaqPage({ params }: Props) {
   const lang = await resolveLang(params);
   const t = getDict(lang).faq;
   const settings = await getSite();
-  const items = [...(settings.registration.mode === 'preregistration' ? [t.earlyItem] : []), ...t.items(settings.registration.maxServersPerUser)];
+  const x = siteTexts(settings, lang);
+  const items = [...(settings.registration.mode === 'preregistration' ? [t.earlyItem(x.twoTiers)] : []), ...t.items(settings.registration.maxServersPerUser, x.faq)];
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',

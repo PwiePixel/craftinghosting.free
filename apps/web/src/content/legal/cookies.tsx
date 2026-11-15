@@ -31,8 +31,12 @@ export function CookiesDe() {
       <section>
         <h2>Kurz gesagt</h2>
         <p>
-          CraftingHosting.free verwendet ausschließlich technisch notwendige Cookies. Es gibt kein Tracking, keine Analyse- und keine Marketing-Cookies. Deshalb zeigen wir kein
-          Cookie-Banner (§ 25 Abs. 2 Nr. 2 TDDDG). Sollten wir jemals Analyse-Werkzeuge einsetzen, fragen wir vorher ausdrücklich nach deiner Einwilligung.
+          CraftingHosting.free verwendet ausschließlich technisch notwendige Cookies. Es gibt kein Tracking, keine Analyse- und keine Marketing-Cookies. Eine Einwilligung ist
+          dafür nicht erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Sollten wir jemals Analyse-Werkzeuge einsetzen, fragen wir vorher ausdrücklich nach deiner Einwilligung.
+        </p>
+        <p>
+          Beim ersten Besuch zeigen wir einen kurzen Hinweis. Wenn du ihn bestätigst, protokollieren wir die Bestätigung (Zeitpunkt, verschlüsselte IP-Adresse, verschlüsselte
+          Browser-Kennung), um sie nachweisen zu können.
         </p>
       </section>
       <section>
@@ -42,6 +46,7 @@ export function CookiesDe() {
           rows={[
             ['chf_session', 'Hält dich nach dem Login angemeldet (HttpOnly, Secure, SameSite=Lax)', 'bis zum Schließen des Browsers, spätestens 30 Minuten nach der letzten Aktivität bzw. 12 Stunden nach der Anmeldung'],
             ['chf_lang', 'Speichert deine Sprachwahl – wird nur gesetzt, wenn du die Sprache umschaltest', '12 Monate'],
+            ['chf_consent', 'Speichert, dass du den Cookie-Hinweis gesehen und bestätigt hast', '12 Monate'],
           ]}
         />
       </section>
@@ -59,8 +64,12 @@ export function CookiesEn() {
       <section>
         <h2>In short</h2>
         <p>
-          CraftingHosting.free only uses technically necessary cookies. There is no tracking and there are no analytics or marketing cookies. That is why we do not show a
-          cookie banner (§ 25 (2) no. 2 TDDDG). Should we ever use analytics tools, we will explicitly ask for your consent first.
+          CraftingHosting.free only uses technically necessary cookies. There is no tracking and there are no analytics or marketing cookies. No consent is required for
+          this (§ 25 (2) no. 2 TDDDG). Should we ever use analytics tools, we will explicitly ask for your consent first.
+        </p>
+        <p>
+          On your first visit we show a short notice. When you confirm it, we log the confirmation (time, encrypted IP address, encrypted browser identifier) to be able to
+          prove it.
         </p>
       </section>
       <section>
@@ -70,6 +79,7 @@ export function CookiesEn() {
           rows={[
             ['chf_session', 'Keeps you signed in after login (HttpOnly, Secure, SameSite=Lax)', 'until you close the browser, at the latest 30 minutes after your last activity or 12 hours after signing in'],
             ['chf_lang', 'Stores your language choice – only set when you switch the language', '12 months'],
+            ['chf_consent', 'Stores that you have seen and confirmed the cookie notice', '12 months'],
           ]}
         />
       </section>

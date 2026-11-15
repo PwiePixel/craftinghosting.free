@@ -18,6 +18,7 @@ import { audit } from '../services/audit.service';
 import { notify } from '../services/notification.service';
 import { fmtDateTime, minutesText, sayOnce, trySyncPanelDescription, warningStep } from '../services/panel';
 import { computeRuntimeState, isOnline, loadWeekSessions } from '../services/runtime';
+import { getSettings } from '../services/settings.service';
 import { mapLimit, type JobDefinition } from './types';
 
 const { fairUse: rules, cycle: cycleRules } = freeHostingConfig;
@@ -83,18 +84,21 @@ export const enforceFairUseJob: JobDefinition = {
   intervalMs: 60_000,
   leaseMs: 5 * 60_000,
   async run({ now, log }) {
-    const rows = await db
+    const settings = await getSettings();
+    const all = await db
       .select({ server: servers, user: users })
       .from(servers)
       .innerJoin(users, eq(users.id, servers.userId))
       .where(and(eq(servers.status, 'active'), or(inArray(servers.powerState, ['starting', 'running', 'stopping']), isNotNull(servers.pausedUntil))));
+    // Produkte ohne Fair-Use-System (z. B. Discord-Bots im Dauerbetrieb) werden übersprungen – offene Pausen laufen aber noch aus
+    const rows = all.filter(({ server }) => settings.products[server.kind].fairUse || server.pausedUntil !== null);
 
     const stats = { checked: 0, sessionLimit: 0, weeklyOffline: 0, pauseViolations: 0, warnings: 0, chat: 0, pausesCleared: 0 };
 
     await mapLimit(rows, 5, async ({ server, user }) => {
       stats.checked++;
       const sessions = await loadWeekSessions(server.id, now);
-      const { fairUse, openSession } = computeRuntimeState(server, user, sessions, now);
+      const { fairUse, openSession } = computeRuntimeState(server, user, sessions, now, settings.products[server.kind].fairUse);
 
       // Abgelaufene Pause aufräumen (+ Panel-Beschreibung zurücksetzen)
       if (server.pausedUntil && server.pausedUntil <= now) {

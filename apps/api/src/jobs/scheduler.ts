@@ -15,7 +15,7 @@ export async function runJobOnce(job: JobDefinition, log: JobLogger): Promise<'r
   const startedAt = new Date();
   let runId: number | undefined;
   try {
-    const [res] = await db.insert(jobRuns).values({ job: job.name, status: 'running', startedAt }).$returningId();
+    const [res] = await db.insert(jobRuns).values({ job: job.name, status: 'running', startedAt }).returning({ id: jobRuns.id });
     runId = res?.id;
     const stats = await job.run({ now: new Date(), log });
     if (runId) await db.update(jobRuns).set({ status: 'success', finishedAt: new Date(), stats }).where(eq(jobRuns.id, runId));

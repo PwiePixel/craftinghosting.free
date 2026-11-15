@@ -3,8 +3,20 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, MailCheck } from 'lucide-react';
-import { createServerSchema, formatMb, freeHostingConfig, intlLocale, localePath, startSchema, tr } from '@chfree/shared';
+import { ArrowLeft, Bot, Check, MailCheck, Pickaxe } from 'lucide-react';
+import {
+  createServerSchema,
+  formatMb,
+  freeHostingConfig,
+  intlLocale,
+  localePath,
+  productKinds,
+  serverTypesOf,
+  startSchema,
+  tr,
+  type ProductKind,
+  type PublicSiteDTO,
+} from '@chfree/shared';
 import { Button } from '@/components/ui/button';
 import { Alert, Field } from '@/components/ui/primitives';
 import { useDict, useLang } from '@/i18n/client';
@@ -12,10 +24,6 @@ import { api } from '@/lib/api/client';
 import { useForm } from '@/lib/use-form';
 import { cn } from '@/lib/utils';
 
-export interface Availability {
-  plans: { id: string; available: boolean; capacity?: number | null; remaining?: number | null }[];
-  serverTypes: { id: string; available: boolean }[];
-}
 
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
@@ -30,13 +38,19 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 
 export function StartForm({
-  availability,
+  products,
   initialPlan,
+  initialKind,
+  blockedKinds = [],
   userEmail,
   early = false,
 }: {
-  availability: Availability | null;
+  /** Produkte mit Paketen und Verfügbarkeit – kommen aus dem Admin-Bereich */
+  products: PublicSiteDTO['products'];
   initialPlan?: string;
+  initialKind?: ProductKind;
+  /** Produkte, bei denen der Nutzer sein Limit schon erreicht hat */
+  blockedKinds?: ProductKind[];
   userEmail?: string;
   /** Vorregistrierung (Early Access): Platz auf der Warteliste statt sofortiger Erstellung */
   early?: boolean;
@@ -46,14 +60,42 @@ export function StartForm({
   const t = useDict();
   const s = t.start;
   const e = t.early;
-  const { plans, serverTypes } = freeHostingConfig;
-  const planOk = (id: string) => availability?.plans.find((a) => a.id === id)?.available ?? true;
-  const typeOk = (id: string) => availability?.serverTypes.find((a) => a.id === id)?.available ?? true;
+  // Angebotene Produkte (aktiv und mit mindestens einem Paket)
+  const kinds = productKinds.filter((k) => products[k].enabled && products[k].plans.length > 0);
+  const kindOk = (k: ProductKind) => !blockedKinds.includes(k);
+  const startKind: ProductKind =
+    kinds.find((k) => kindOk(k) && products[k].plans.some((p) => p.id === initialPlan)) ??
+    (initialKind && kinds.includes(initialKind) && kindOk(initialKind) ? initialKind : undefined) ??
+    kinds.find(kindOk) ??
+    kinds[0] ??
+    'minecraft';
+  const [kind, setKind] = useState<ProductKind>(startKind);
+  const bot = kind === 'discord';
+  const plans = products[kind].plans;
+  const serverTypes = serverTypesOf(kind);
+  const planOk = (id: string, k: ProductKind = kind) => products[k].plans.find((a) => a.id === id)?.available ?? false;
+  const typeOk = (id: string, k: ProductKind = kind) => products[k].serverTypes.find((a) => a.id === id)?.available ?? true;
 
-  const firstType = serverTypes.find((t) => t.recommended && typeOk(t.id)) ?? serverTypes.find((t) => typeOk(t.id)) ?? serverTypes[0]!;
-  const [planId, setPlanId] = useState(initialPlan && planOk(initialPlan) ? initialPlan : (plans.find((p) => p.highlighted && planOk(p.id)) ?? plans[0]!).id);
+  const defaultPlan = (k: ProductKind) => {
+    const list = products[k].plans;
+    return (list.find((p) => p.highlighted && p.available) ?? list.find((p) => p.available) ?? list[0])?.id ?? '';
+  };
+  const defaultType = (k: ProductKind) => {
+    const list = serverTypesOf(k);
+    return list.find((t) => t.recommended && typeOk(t.id, k)) ?? list.find((t) => typeOk(t.id, k)) ?? list[0]!;
+  };
+  const firstType = defaultType(startKind);
+  const [planId, setPlanId] = useState(initialPlan && planOk(initialPlan, startKind) ? initialPlan : defaultPlan(startKind));
   const [typeId, setTypeId] = useState(firstType.id);
   const [version, setVersion] = useState(firstType.defaultVersion);
+  function switchKind(k: ProductKind) {
+    if (k === kind) return;
+    const type = defaultType(k);
+    setKind(k);
+    setPlanId(defaultPlan(k));
+    setTypeId(type.id);
+    setVersion(type.defaultVersion);
+  }
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [accept, setAccept] = useState(false);
@@ -61,8 +103,10 @@ export function StartForm({
 
   const loggedIn = !!userEmail;
   const form = useForm(loggedIn ? createServerSchema : startSchema);
-  const type = useMemo(() => serverTypes.find((t) => t.id === typeId)!, [serverTypes, typeId]);
-  const plan = plans.find((p) => p.id === planId)!;
+  const type = useMemo(() => serverTypes.find((t) => t.id === typeId) ?? serverTypes[0]!, [serverTypes, typeId]);
+  const plan = plans.find((p) => p.id === planId);
+  // Schrittnummern: Die Produktwahl erscheint nur, wenn es beide Angebote gibt
+  const offset = kinds.length > 1 ? 1 : 0;
 
   const values = { planId, serverType: typeId, version, name, email, acceptTerms: accept || undefined };
 
@@ -119,7 +163,39 @@ export function StartForm({
     >
       {form.error && <Alert tone="error">{form.error}</Alert>}
 
-      <Step n={1} title={s.stepPlan}>
+      {kinds.length > 1 && (
+        <Step n={1} title={s.stepProduct}>
+          <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={s.stepProduct}>
+            {kinds.map((k) => {
+              const selected = k === kind;
+              const ok = kindOk(k);
+              const Icon = k === 'discord' ? Bot : Pickaxe;
+              return (
+                <label
+                  key={k}
+                  className={cn(
+                    'relative flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition-colors',
+                    selected ? 'border-blue-500 bg-blue-500/[0.06]' : 'border-line-strong hover:border-white/25',
+                    !ok && 'cursor-not-allowed opacity-50',
+                  )}
+                >
+                  <input type="radio" name="kind" className="sr-only" checked={selected} disabled={!ok} onChange={() => switchKind(k)} />
+                  <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg', selected ? 'bg-blue-500/15 text-blue-300' : 'bg-white/[0.05] text-muted')}>
+                    <Icon className="size-[18px]" aria-hidden />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-medium text-white">{s.products[k].name}</span>
+                    <span className="block text-[13px] text-muted">{ok ? s.products[k].text : s.hasServerTitle}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </Step>
+      )}
+
+      <Step n={1 + offset} title={s.stepPlan}>
+        {plans.length === 0 && <p className="text-sm text-muted">{s.noPlans}</p>}
         <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={s.stepPlan}>
           {plans.map((p) => {
             const ok = planOk(p.id);
@@ -144,22 +220,19 @@ export function StartForm({
                   {s.planSpecs(formatMb(p.memoryMb, lang), formatMb(p.diskMb, lang), p.cpuPercent)}
                 </span>
                 {!ok && <span className="mt-1 block text-[13px] text-amber-300">{s.soldOut}</span>}
-                {ok && (() => {
-                  const a = availability?.plans.find((x) => x.id === p.id);
-                  return a?.capacity != null && a.remaining != null ? (
-                    <span className="mt-1 block text-[13px] text-emerald-300">
-                      {t.home.planLeft(a.remaining.toLocaleString(intlLocale(lang)), a.capacity.toLocaleString(intlLocale(lang)))}
-                    </span>
-                  ) : null;
-                })()}
+                {ok && p.capacity != null && p.remaining != null && (
+                  <span className="mt-1 block text-[13px] text-emerald-300">
+                    {t.home.planLeft(p.remaining.toLocaleString(intlLocale(lang)), p.capacity.toLocaleString(intlLocale(lang)))}
+                  </span>
+                )}
               </label>
             );
           })}
         </div>
       </Step>
 
-      <Step n={2} title={s.stepSoftware}>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label={s.typeGroup}>
+      <Step n={2 + offset} title={bot ? s.stepRuntime : s.stepSoftware}>
+        <div className={cn('grid grid-cols-2 gap-2', bot ? 'sm:max-w-sm' : 'sm:grid-cols-5')} role="radiogroup" aria-label={bot ? s.runtimeGroup : s.typeGroup}>
           {serverTypes.map((type_) => {
             const ok = typeOk(type_.id);
             const selected = type_.id === typeId;
@@ -191,26 +264,31 @@ export function StartForm({
           })}
         </div>
         <p className="mt-2 text-[13px] text-subtle">{tr(type.description, lang)}</p>
-        <div className="mt-4 max-w-xs">
-          <Field label={s.version} htmlFor="version" error={form.fieldErrors.version}>
-            <select id="version" value={version} onChange={(e) => setVersion(e.target.value)} className="input">
-              {type.versions.map((v) => (
-                <option key={v} value={v}>
-                  {v === 'latest' ? t.common.latestVersion : v}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        {form.fieldErrors.serverType && <p className="mt-2 text-sm text-red-400">{form.fieldErrors.serverType}</p>}
+        {bot ? (
+          <p className="mt-2 text-[13px] text-subtle">{s.runtimeHint}</p>
+        ) : (
+          <div className="mt-4 max-w-xs">
+            <Field label={s.version} htmlFor="version" error={form.fieldErrors.version}>
+              <select id="version" value={version} onChange={(e) => setVersion(e.target.value)} className="input">
+                {type.versions.map((v) => (
+                  <option key={v} value={v}>
+                    {v === 'latest' ? t.common.latestVersion : v}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        )}
       </Step>
 
-      <Step n={3} title={s.stepName}>
-        <Field label={s.nameLabel} htmlFor="name" error={form.fieldErrors.name} hint={s.nameHint}>
+      <Step n={3 + offset} title={s.stepName}>
+        <Field label={s.nameLabel} htmlFor="name" error={form.fieldErrors.name} hint={bot ? s.nameHintBot : s.nameHint}>
           <input id="name" className="input" value={name} maxLength={freeHostingConfig.limits.serverNameMaxLength} onChange={(e) => setName(e.target.value)} />
         </Field>
       </Step>
 
-      <Step n={4} title={loggedIn ? s.stepAccount : s.stepEmail}>
+      <Step n={4 + offset} title={loggedIn ? s.stepAccount : s.stepEmail}>
         {loggedIn ? (
           <p className="text-sm text-muted">
             {s.loggedInAs} <span className="text-white">{userEmail}</span>. {early ? e.loggedInHint : s.loggedInHint}
@@ -231,10 +309,10 @@ export function StartForm({
               {s.acceptTerms}
             </Link>
             {s.acceptAnd}
-            <Link href={localePath(lang, 'rules')} target="_blank" className="text-gray-200 underline underline-offset-4 hover:text-white">
-              {s.acceptRules}
+            <Link href={localePath(lang, bot ? 'discordTerms' : 'rules')} target="_blank" className="text-gray-200 underline underline-offset-4 hover:text-white">
+              {bot ? s.acceptRulesBot : s.acceptRules}
             </Link>
-            {s.acceptSummary}
+            {bot ? s.acceptSummaryBot(products.discord.fairUse) : s.acceptSummary}
             <Link href={localePath(lang, 'privacy')} target="_blank" className="text-gray-200 underline underline-offset-4 hover:text-white">
               {s.acceptPrivacy}
             </Link>
@@ -243,8 +321,8 @@ export function StartForm({
         </label>
         {form.fieldErrors.acceptTerms && <p className="mt-2 text-sm text-red-400">{form.fieldErrors.acceptTerms}</p>}
 
-        <Button type="submit" size="lg" loading={form.pending} className="mt-6 w-full sm:w-auto">
-          {early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan.name) : s.submit}
+        <Button type="submit" size="lg" loading={form.pending} disabled={!plan} className="mt-6 w-full sm:w-auto">
+          {early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}
         </Button>
       </div>
     </form>

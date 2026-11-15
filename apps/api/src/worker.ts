@@ -4,7 +4,7 @@
  * Job zur selben Zeit nur einmal läuft.
  */
 import pino from 'pino';
-import { pool } from './db/client';
+import { closeDb } from './db/client';
 import { env, isProd } from './env';
 import { startScheduler } from './jobs/scheduler';
 import { verifySmtpOnStartup } from './services/mail/mailer';
@@ -21,7 +21,7 @@ void verifySmtpOnStartup({ info: (m) => logger.info(m), warn: (m) => logger.warn
 const shutdown = async (signal: string) => {
   logger.info(`${signal} empfangen – beende laufende Jobs …`);
   await scheduler.stop();
-  await pool.end();
+  await closeDb();
   process.exit(0);
 };
 process.on('SIGINT', () => void shutdown('SIGINT'));

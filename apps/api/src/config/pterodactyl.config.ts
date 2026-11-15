@@ -20,11 +20,13 @@
  * ============================================================================
  */
 
+import { getServerType, type EggRef, type SiteSettings } from '@chfree/shared';
+
 export interface EggMapping {
   nestId: number;
   eggId: number;
-  /** Egg-Variable, die die Minecraft-Version steuert */
-  versionVariable: string;
+  /** Egg-Variable, die die Minecraft-Version steuert (Discord-Bots: keine) */
+  versionVariable?: string;
   /** Optional: fester Docker-Image-Eintrag, sonst Standard des Eggs */
   dockerImage?: string;
   /** Optional: zusätzliche/überschriebene Egg-Variablen */
@@ -62,10 +64,50 @@ function fromEnv(type: string): EggMapping | null | undefined {
   };
 }
 
-export function getEggMapping(serverType: string): EggMapping | null {
+/**
+ * Egg für einen Servertyp. Reihenfolge:
+ *  1. Zuordnung aus dem Admin-Bereich (Admin → Pterodactyl, automatisch erkannte Eggs)
+ *  2. .env (PTERODACTYL_EGG_<TYP>)
+ *  3. Standardwerte oben (nur Minecraft)
+ */
+export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 'products'>): EggMapping | null {
+  const kind = getServerType(serverType)?.kind;
+  const chosen = kind ? settings?.products[kind].eggs[serverType] : undefined;
+  if (chosen) {
+    return {
+      nestId: chosen.nestId,
+      eggId: chosen.eggId,
+      versionVariable: kind === 'minecraft' ? process.env[`PTERODACTYL_EGG_${serverType.toUpperCase()}_VERSION_VAR`] || versionVariables[serverType] : undefined,
+    };
+  }
   const override = fromEnv(serverType);
-  if (override !== undefined) return override;
+  if (override !== undefined) return override && kind === 'discord' ? { ...override, versionVariable: undefined } : override;
   return defaults[serverType] ?? null;
+}
+
+/** Erkennt passende Eggs anhand ihres Namens (Vorschlag für den Admin-Bereich) */
+const eggPatterns: Record<string, RegExp[]> = {
+  paper: [/^paper$/i, /paper/i],
+  purpur: [/purpur/i],
+  vanilla: [/vanilla/i],
+  fabric: [/fabric/i],
+  forge: [/^forge/i, /(?<!neo)forge/i],
+  python: [/discord.*py|py.*discord/i, /generic.*python|python.*generic/i, /python/i],
+  nodejs: [/discord.*(js|node)/i, /generic.*node|node.*generic/i, /node\.?js/i],
+};
+
+export function suggestEggs(eggs: { nestId: number; eggId: number; name: string }[]): Record<string, EggRef> {
+  const out: Record<string, EggRef> = {};
+  for (const [type, patterns] of Object.entries(eggPatterns)) {
+    for (const pattern of patterns) {
+      const hit = eggs.find((e) => pattern.test(e.name));
+      if (hit) {
+        out[type] = { nestId: hit.nestId, eggId: hit.eggId, name: hit.name };
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 export const pterodactylConfig = {

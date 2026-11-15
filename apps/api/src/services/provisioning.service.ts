@@ -8,7 +8,7 @@
  *    parallele Läufe (API + Worker) überspringen sich gegenseitig.
  */
 import { and, eq, inArray } from 'drizzle-orm';
-import { getPlan, getServerType } from '@chfree/shared';
+import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
 import { getEggMapping, pterodactylConfig } from '../config/pterodactyl.config';
 import { env, panelPublicUrl } from '../env';
 import { affectedRows, db } from '../db/client';
@@ -19,6 +19,7 @@ import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { getUserLocale } from './locale.service';
 import { desiredPanelDescription } from './panel';
+import { getSettings } from './settings.service';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
 
@@ -29,6 +30,32 @@ function locationsFor(tier: Server['nodeTier']): number[] {
   if (tiered.length) return tiered;
   const general = ids(env.PTERODACTYL_LOCATION_IDS);
   return general.length ? general : [1];
+}
+
+/**
+ * Feste Node für ein Produkt (Admin → Pterodactyl): sucht auf den zugewiesenen Nodes eine freie Allokation.
+ * Die Node mit den meisten freien Ports gewinnt – so verteilen sich die Server gleichmäßig.
+ * Rückgabe null = keine Node zugewiesen → automatische Platzierung über die Locations.
+ */
+async function pickAllocation(server: Server, settings: SiteSettings): Promise<number | null> {
+  const nodeIds = settings.products[server.kind].nodeIds;
+  if (nodeIds.length === 0) {
+    if (server.kind === 'discord' && env.PTERODACTYL_MODE === 'live') {
+      throw new Error('Für Discord-Bots ist noch keine Node zugewiesen (Admin → Pterodactyl)');
+    }
+    return null;
+  }
+  const ptero = pterodactyl();
+  const nodes = await ptero.listNodes();
+  let best: { id: number; count: number } | null = null;
+  for (const nodeId of nodeIds) {
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node || node.maintenanceMode) continue;
+    const free = await ptero.freeAllocations(nodeId);
+    if (free.firstId !== null && (!best || free.count > best.count)) best = { id: free.firstId, count: free.count };
+  }
+  if (!best) throw new Error(`Keine freie Allokation (Port) auf den zugewiesenen Nodes (${nodeIds.join(', ')}) – bitte im Panel Allokationen anlegen`);
+  return best.id;
 }
 
 const eggCache = new Map<string, { egg: PteroEgg; at: number }>();
@@ -50,12 +77,12 @@ function errorFields(err: PterodactylError): string {
  * Verknüpft ein bereits vorhandenes Panel-Konto mit derselben (bestätigten)
  * E-Mail-Adresse – z. B. bestehende CraftingHosting-Kunden.
  */
-export async function linkExistingPanelAccount(user: User): Promise<boolean> {
+export async function linkExistingPanelAccount(user: User, ip?: string): Promise<boolean> {
   if (user.pteroUserId) return true;
   const existing = await pterodactyl().findUserByEmail(user.email);
   if (!existing) return false;
   await db.update(users).set({ pteroUserId: existing.id, pteroUsername: existing.username }).where(eq(users.id, user.id));
-  await audit({ userId: user.id, actor: 'system', action: 'panel.linked', message: `Bestehendes Panel-Konto verknüpft (${existing.username})` });
+  await audit({ userId: user.id, actor: 'system', action: 'panel.linked', message: `Bestehendes Panel-Konto verknüpft (${existing.username})`, ip });
   return true;
 }
 
@@ -63,7 +90,7 @@ export async function linkExistingPanelAccount(user: User): Promise<boolean> {
  * Legt das Panel-Konto mit dem vom Nutzer gewählten Passwort an.
  * Das Passwort wird ausschließlich an Pterodactyl übergeben und nirgends gespeichert.
  */
-export async function createPanelAccount(user: User, username: string, password: string): Promise<{ existing: boolean }> {
+export async function createPanelAccount(user: User, username: string, password: string, ip?: string): Promise<{ existing: boolean }> {
   if (user.pteroUserId) return { existing: true };
   const ptero = pterodactyl();
   const externalId = `${pterodactylConfig.externalIdPrefix.user}${user.id}`;
@@ -96,6 +123,7 @@ export async function createPanelAccount(user: User, username: string, password:
     actor: 'user',
     action: existing ? 'panel.linked' : 'panel.created',
     message: existing ? `Bestehendes Panel-Konto verknüpft (${panelUser.username})` : `Panel-Konto angelegt (${panelUser.username})`,
+    ip,
   });
   return { existing };
 }
@@ -105,7 +133,7 @@ function formatAddress(p: PteroServer): string | null {
   return `${p.allocation.alias || p.allocation.ip}:${p.allocation.port}`;
 }
 
-export async function provisionServer(serverId: string, actor: 'user' | 'system'): Promise<'active' | 'failed' | 'skipped'> {
+export async function provisionServer(serverId: string, actor: 'user' | 'system', ip?: string): Promise<'active' | 'failed' | 'skipped'> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server || (server.status !== 'provisioning' && server.status !== 'provisioning_failed')) return 'skipped';
 
@@ -126,14 +154,15 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
   if (affectedRows(claim) !== 1) return 'skipped';
 
   try {
-    const plan = getPlan(server.planId);
+    const settings = await getSettings();
+    const plan = findPlan(settings, server.planId);
     const type = getServerType(server.serverType);
-    const egg = getEggMapping(server.serverType);
-    if (!plan || !type || !egg) throw new Error(`Konfiguration für ${server.planId}/${server.serverType} fehlt`);
+    const egg = getEggMapping(server.serverType, settings);
+    if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
 
     const ptero = pterodactyl();
     const externalId = `${pterodactylConfig.externalIdPrefix.server}${server.id}`;
-    const description = desiredPanelDescription({ ...server, status: 'active' }, new Date(), await getUserLocale(server.userId));
+    const description = desiredPanelDescription({ ...server, status: 'active' }, new Date(), await getUserLocale(server.userId), settings.products[server.kind].fairUse);
 
     let pServer = await ptero.findServerByExternalId(externalId);
     if (!pServer) {
@@ -141,7 +170,9 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
       const environment: Record<string, string> = {};
       for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
       Object.assign(environment, egg.environment ?? {});
-      environment[egg.versionVariable] = server.version;
+      // Minecraft: Version setzen · Discord-Bots: Standardwerte des Eggs (Startdatei, requirements.txt …)
+      if (egg.versionVariable) environment[egg.versionVariable] = server.version;
+      const allocationId = await pickAllocation(server, settings);
 
       pServer = await ptero.createServer({
         externalId,
@@ -152,9 +183,11 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         dockerImage: egg.dockerImage || eggInfo.dockerImage,
         startup: eggInfo.startup,
         environment,
-        limits: { memory: plan.memoryMb, swap: plan.swapMb, disk: plan.diskMb, io: plan.ioWeight, cpu: plan.cpuPercent },
-        featureLimits: { databases: plan.databases, allocations: plan.allocations, backups: plan.backups },
+        // Ressourcen aus dem Snapshot des Servers – das Paket kann inzwischen geändert oder entfernt worden sein
+        limits: { memory: server.memoryMb, swap: plan?.swapMb ?? 0, disk: server.diskMb, io: plan?.ioWeight ?? 500, cpu: server.cpuPercent },
+        featureLimits: { databases: plan?.databases ?? 0, allocations: plan?.allocations ?? 1, backups: plan?.backups ?? 0 },
         locationIds: locationsFor(server.nodeTier),
+        ...(allocationId ? { allocationId } : {}),
         startOnCompletion: pterodactylConfig.startOnCompletion,
       });
     }
@@ -182,6 +215,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         action: 'server.provisioned',
         message: `Server in Pterodactyl angelegt (#${pServer.id})`,
         meta: { pteroServerId: pServer.id, identifier: pServer.identifier },
+        ip,
       });
     }
     return 'active';
@@ -224,7 +258,8 @@ export async function runPostProvision(server: Server): Promise<boolean> {
   if (server.postProvisionDone || !server.pteroIdentifier || server.status !== 'active') return false;
   if (server.powerState === 'installing' || server.powerState === 'unknown') return false;
   let scheduleId: number | null = server.backupScheduleId;
-  const plan = getPlan(server.planId);
+  const plan = findPlan(await getSettings(), server.planId);
+  const bot = server.kind === 'discord';
   if (pterodactylConfig.backupSchedule.enabled && !scheduleId && plan && plan.backups > 0) {
     scheduleId = await pterodactyl().createBackupSchedule(server.pteroIdentifier, pterodactylConfig.backupSchedule);
   }
@@ -244,8 +279,21 @@ export async function runPostProvision(server: Server): Promise<boolean> {
       userId: server.userId,
       serverId: server.id,
       type: 'server.ready',
-      title: L('Dein Minecraft-Server ist bereit', 'Your Minecraft server is ready'),
-      body: L(
+      title: bot ? L('Dein Discord-Bot-Server ist bereit', 'Your Discord bot server is ready') : L('Dein Minecraft-Server ist bereit', 'Your Minecraft server is ready'),
+      body: bot
+        ? L(
+            [
+              `„${server.name}“ ist fertig eingerichtet. Lade jetzt im Pterodactyl-Panel den Code deines Bots hoch (Dateimanager oder SFTP), trage unter „Startup“ deine Startdatei ein und starte den Server.`,
+              `Panel: ${panelPublicUrl} · Anmeldung mit deiner E-Mail-Adresse und deinem Panel-Passwort.`,
+              'Tipp: Bewahre deinen Bot-Token nur in einer .env- oder Konfigurationsdatei auf dem Server auf und teile ihn mit niemandem.',
+            ].join('\n'),
+            [
+              `“${server.name}” has been set up. Now upload your bot’s code in the Pterodactyl panel (file manager or SFTP), enter your start file under “Startup” and start the server.`,
+              `Panel: ${panelPublicUrl} · Sign in with your email address and your panel password.`,
+              'Tip: keep your bot token only in a .env or config file on the server and never share it.',
+            ].join('\n'),
+          )
+        : L(
         [
           `„${server.name}“ ist fertig installiert. Starte ihn jetzt im Pterodactyl-Panel – dort findest du Konsole, Dateien, Plugins und Backups.`,
           `Panel: ${panelPublicUrl} · Anmeldung mit deiner E-Mail-Adresse und deinem Panel-Passwort.`,

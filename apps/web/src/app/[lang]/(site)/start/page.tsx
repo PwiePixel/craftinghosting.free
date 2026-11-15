@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
-import { getPlan, localePath, type ServerDTO } from '@chfree/shared';
-import { StartForm, type Availability } from '@/components/start/start-form';
+import { isProductKind, localePath, productKinds, type ServerDTO } from '@chfree/shared';
+import { StartForm } from '@/components/start/start-form';
 import { ButtonLink } from '@/components/ui/button';
 import { getDict, resolveLang } from '@/i18n';
-import { apiPublic, apiServer, getCurrentUser } from '@/lib/api/server';
+import { apiServer, getCurrentUser } from '@/lib/api/server';
 import { pageMetadata } from '@/lib/seo';
 import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
+import { siteTexts } from '@/lib/site-texts';
 
 type Props = { params: Promise<{ lang: string }>; searchParams: Promise<Record<string, string | undefined>> };
 
@@ -33,8 +34,11 @@ export default async function StartPage({ params, searchParams }: Props) {
   const s = t.start;
   const e = t.early;
   const query = await searchParams;
-  const initialPlan = query.plan && getPlan(query.plan) ? query.plan : undefined;
-  const [me, meta, settings] = await Promise.all([getCurrentUser(), apiPublic<{ availability: Availability }>('/meta', 0), getSite()]);
+  const [me, settings] = await Promise.all([getCurrentUser(), getSite()]);
+  const x = siteTexts(settings, lang);
+  const initialPlan = query.plan && settings.plans.some((p) => p.id === query.plan) ? query.plan : undefined;
+  // /start?type=discord öffnet direkt das Discord-Bot-Formular
+  const initialKind = isProductKind(query.type) ? query.type : undefined;
   const mode = settings.registration.mode;
   const max = settings.registration.maxServersPerUser;
   const early = mode === 'preregistration';
@@ -44,7 +48,12 @@ export default async function StartPage({ params, searchParams }: Props) {
     const res = await apiServer<{ servers: ServerDTO[] }>('/servers', lang);
     if (res.ok) servers = res.data.servers;
   }
-  const owned = servers.filter((srv) => srv.status !== 'pending' && srv.status !== 'waitlist').length;
+  const ownedServers = servers.filter((srv) => srv.status !== 'pending' && srv.status !== 'waitlist');
+  const owned = ownedServers.length;
+  // Das Limit gilt je Produkt: ein Minecraft-Server UND ein Discord-Bot sind möglich
+  const offered = productKinds.filter((k) => settings.products[k].enabled && settings.products[k].plans.length > 0);
+  const blockedKinds = productKinds.filter((k) => ownedServers.filter((srv) => srv.kind === k).length >= max);
+  const allBlocked = offered.length > 0 && offered.every((k) => blockedKinds.includes(k));
   const waitlistEntry = servers.find((srv) => srv.status === 'waitlist' && srv.waitlist);
 
   const myServersButton = <ButtonLink href={localePath(lang, 'myServers')}>{t.common.myServers}</ButtonLink>;
@@ -75,13 +84,13 @@ export default async function StartPage({ params, searchParams }: Props) {
           </div>
           <div>
             <dt className="text-subtle">{e.hardwareLabel}</dt>
-            <dd className="mt-0.5 text-xl font-semibold text-white">{e.tiers[w.tier]}</dd>
+            <dd className="mt-0.5 text-xl font-semibold text-white">{x.twoTiers ? e.tiers[w.tier] : x.cpus}</dd>
           </div>
         </dl>
         {myServersButton}
       </InfoCard>
     );
-  } else if (owned >= max || (early && owned > 0)) {
+  } else if (allBlocked || (early && owned > 0)) {
     content = (
       <InfoCard title={max === 1 || early ? s.hasServerTitle : s.hasServerTitleMany} text={s.hasServerText(early ? 1 : max)}>
         {myServersButton}
@@ -89,7 +98,16 @@ export default async function StartPage({ params, searchParams }: Props) {
       </InfoCard>
     );
   } else {
-    content = <StartForm availability={meta.ok ? meta.data.availability : null} initialPlan={initialPlan} userEmail={me?.user.email} early={early} />;
+    content = (
+      <StartForm
+        products={settings.products}
+        initialPlan={initialPlan}
+        initialKind={initialKind}
+        blockedKinds={early ? [] : blockedKinds}
+        userEmail={me?.user.email}
+        early={early}
+      />
+    );
   }
 
   return (
@@ -108,7 +126,7 @@ export default async function StartPage({ params, searchParams }: Props) {
           <div className="lg:sticky lg:top-24">
             <p className="text-sm font-semibold text-white">{s.asideTitle}</p>
             <ul className="mt-4 space-y-3 text-sm text-muted">
-              {s.asidePoints.map((point) => (
+              {s.asidePoints(x.cpus, x.locationNames, x.locationCount).map((point) => (
                 <li key={point} className="flex gap-2.5">
                   <Check className="mt-0.5 size-4 shrink-0 text-blue-400" aria-hidden />
                   {point}
@@ -119,6 +137,14 @@ export default async function StartPage({ params, searchParams }: Props) {
               <p className="text-sm font-semibold text-white">{s.fairTitle}</p>
               <p className="mt-2 text-sm leading-relaxed text-muted">{s.fairText}</p>
             </div>
+            {x.discord && (
+              <div className="mt-8 border-t border-line pt-6">
+                <p className="text-sm font-semibold text-white">
+                  {s.products.discord.name}: {s.fairTitleBot}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-muted">{s.fairTextBot(settings.products.discord.fairUse)}</p>
+              </div>
+            )}
             {early && settings.waitlist.epycSlots > 0 && (
               <div className="mt-8 border-t border-line pt-6">
                 <p className="text-sm font-semibold text-white">{e.badge}</p>

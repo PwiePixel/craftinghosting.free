@@ -1,33 +1,12 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1790671670567,
+      "version": "6",
+      "when": 1794710986606,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1790676186120,
-      "tag": "0001_user_locale",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1790776115060,
-      "tag": "0002_site_settings_waitlist_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1790781029232,
-      "tag": "0003_end_old_sessions",
       "breakpoints": true
     }
   ]

@@ -10,3 +10,7 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 coverage/
+data/
+*.db
+*.db-wal
+*.db-shm

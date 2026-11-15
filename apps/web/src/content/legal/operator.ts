@@ -11,5 +11,5 @@ export const operator = {
   phone: '+49 22676569938-400',
   email: 'imprint@crafting.host',
   /** Stand des Impressums */
-  updated: { de: 'September 2026', en: 'September 2026' },
+  updated: { de: 'November 2026', en: 'November 2026' },
 };

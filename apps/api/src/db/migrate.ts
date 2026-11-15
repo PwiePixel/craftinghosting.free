@@ -5,8 +5,9 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/mysql2/migrator';
-import { db, pool } from './client';
+import { migrate } from 'drizzle-orm/libsql/migrator';
+import { env } from '../env';
+import { closeDb, db } from './client';
 
 function findMigrationsFolder(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -18,14 +19,15 @@ function findMigrationsFolder(): string {
 
 async function main() {
   const migrationsFolder = findMigrationsFolder();
+  console.log(`[migrate] Datenbank: ${env.DATABASE_PATH}`);
   console.log(`[migrate] Wende Migrationen aus ${migrationsFolder} an …`);
   await migrate(db, { migrationsFolder });
   console.log('[migrate] Fertig.');
-  await pool.end();
+  await closeDb();
 }
 
 main().catch(async (err) => {
   console.error('[migrate] Fehlgeschlagen:', err);
-  await pool.end().catch(() => {});
+  await closeDb().catch(() => {});
   process.exit(1);
 });

@@ -10,7 +10,7 @@ import { localePath, type Locale, type StartInput, type UserDTO, type VerifyNext
 import { env } from '../env';
 import { affectedRows, db } from '../db/client';
 import { emailTokens, servers, users, type User } from '../db/schema';
-import { generateToken, sha256, uuid } from '../lib/crypto';
+import { encryptField, generateToken, sha256, uuid } from '../lib/crypto';
 import { Errors, L } from '../lib/errors';
 import { isAdmin } from '../plugins/auth';
 import { audit } from './audit.service';
@@ -130,7 +130,10 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   let user = await findUserByEmail(input.email);
   if (!user) {
     const id = uuid();
-    await db.insert(users).ignore().values({ id, email: input.email, acceptedTermsAt: new Date(), locale: meta.locale });
+    await db
+      .insert(users)
+      .values({ id, email: input.email, acceptedTermsAt: new Date(), locale: meta.locale, registrationIp: encryptField(meta.ip?.slice(0, 64)) })
+      .onConflictDoNothing();
     user = await findUserByEmail(input.email);
     if (!user) throw new Error('Benutzer konnte nicht angelegt werden');
     await audit({ userId: user.id, actor: 'user', action: 'account.created', message: 'Server angefordert – Konto angelegt', ip: meta.ip });
@@ -180,7 +183,11 @@ export async function verifyToken(
 ): Promise<{ user: User; next: VerifyNext; existingPanelAccount: boolean; waitlist: WaitlistInfo | null }> {
   const { userId } = await consumeToken(token);
   await db.update(users).set({ emailVerifiedAt: new Date(), lastLoginAt: new Date() }).where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
-  await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
+  // IP des letzten Logins – nur verschlüsselt gespeichert
+  await db
+    .update(users)
+    .set({ lastLoginAt: new Date(), ...(meta.ip ? { lastLoginIp: encryptField(meta.ip.slice(0, 64)) } : {}) })
+    .where(eq(users.id, userId));
   let user = await getUser(userId);
   if (user.status !== 'active') {
     throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));
@@ -200,7 +207,7 @@ export async function verifyToken(
   let existingPanelAccount = false;
   if (!user.pteroUserId && (pending.length > 0 || waitlist)) {
     // Kunden mit bestehendem Panel-Konto (gleiche, jetzt bestätigte E-Mail) direkt verknüpfen
-    existingPanelAccount = await linkExistingPanelAccount(user).catch(() => false);
+    existingPanelAccount = await linkExistingPanelAccount(user, meta.ip).catch(() => false);
     user = await getUser(userId);
   }
 

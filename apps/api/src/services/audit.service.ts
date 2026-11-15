@@ -1,5 +1,6 @@
 import { db } from '../db/client';
 import { auditLogs } from '../db/schema';
+import { encryptField } from '../lib/crypto';
 
 export interface AuditInput {
   userId?: string | null;
@@ -21,7 +22,8 @@ export async function audit(input: AuditInput): Promise<void> {
       action: input.action,
       message: input.message.slice(0, 500),
       meta: input.meta ?? null,
-      ip: input.ip ?? null,
+      // IP-Adressen werden nur verschlüsselt gespeichert
+      ip: encryptField(input.ip?.slice(0, 64)),
     });
   } catch (err) {
     console.error('[audit] Schreiben fehlgeschlagen', err);

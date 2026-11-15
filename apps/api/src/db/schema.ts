@@ -1,45 +1,36 @@
 /**
- * Datenbankschema (MariaDB / MySQL) – Drizzle ORM.
+ * Datenbankschema (SQLite, verschlüsselte Datei über libSQL) – Drizzle ORM.
  * Migrationen erzeugen: npm run db:generate  ·  anwenden: npm run db:migrate
  *
- * Alle Zeitstempel werden in UTC gespeichert.
+ * Alle Zeitstempel werden als Millisekunden seit 1970 (UTC) gespeichert.
+ * IP-Adressen und User-Agents werden zusätzlich feldweise verschlüsselt (lib/crypto.ts → encryptField).
  */
 import { sql } from 'drizzle-orm';
-import {
-  bigint,
-  boolean,
-  datetime,
-  index,
-  int,
-  json,
-  mysqlEnum,
-  mysqlTable,
-  text,
-  tinyint,
-  uniqueIndex,
-  varchar,
-} from 'drizzle-orm/mysql-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-const ts = (name: string) => datetime(name, { mode: 'date', fsp: 3 });
+const ts = (name: string) => integer(name, { mode: 'timestamp_ms' });
 const now = () => new Date();
 
 /* ------------------------------------------------------------------ users */
 
-export const users = mysqlTable(
+export const users = sqliteTable(
   'users',
   {
-    id: varchar('id', { length: 36 }).primaryKey(),
-    email: varchar('email', { length: 254 }).notNull(),
-    role: mysqlEnum('role', ['user', 'admin']).notNull().default('user'),
-    status: mysqlEnum('status', ['active', 'locked']).notNull().default('active'),
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    role: text('role', { enum: ['user', 'admin'] }).notNull().default('user'),
+    status: text('status', { enum: ['active', 'locked'] }).notNull().default('active'),
     emailVerifiedAt: ts('email_verified_at'),
     acceptedTermsAt: ts('accepted_terms_at').notNull(),
     /** Verknüpftes Pterodactyl-Konto (die Website speichert keine Passwörter) */
-    pteroUserId: int('ptero_user_id'),
-    pteroUsername: varchar('ptero_username', { length: 191 }),
+    pteroUserId: integer('ptero_user_id'),
+    pteroUsername: text('ptero_username'),
     /** Sprache für E-Mails, Chat-Hinweise und Panel-Beschreibung (zuletzt auf der Website verwendet) */
-    locale: mysqlEnum('locale', ['de', 'en']).notNull().default('en'),
+    locale: text('locale', { enum: ['de', 'en'] }).notNull().default('en'),
     lastLoginAt: ts('last_login_at'),
+    /** IP bei der Registrierung bzw. beim letzten Login – verschlüsselt (encryptField) */
+    registrationIp: text('registration_ip'),
+    lastLoginIp: text('last_login_ip'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
     updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
   },
@@ -48,33 +39,33 @@ export const users = mysqlTable(
 
 /* --------------------------------------------------------------- sessions */
 
-export const authSessions = mysqlTable(
+export const authSessions = sqliteTable(
   'auth_sessions',
   {
-    /** SHA-256 des Session-Tokens – das Token selbst wird nie gespeichert. */
-    id: varchar('id', { length: 64 }).primaryKey(),
-    userId: varchar('user_id', { length: 36 })
+    /** SHA-256 des Session-Tokens – das Token selbst wird nie gespeichert. `ip`/`user_agent` sind verschlüsselt. */
+    id: text('id').primaryKey(),
+    userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     expiresAt: ts('expires_at').notNull(),
     lastSeenAt: ts('last_seen_at').notNull().$defaultFn(now),
-    ip: varchar('ip', { length: 64 }),
-    userAgent: varchar('user_agent', { length: 255 }),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
   },
   (t) => [index('auth_sessions_user_idx').on(t.userId), index('auth_sessions_expires_idx').on(t.expiresAt)],
 );
 
-export const emailTokens = mysqlTable(
+export const emailTokens = sqliteTable(
   'email_tokens',
   {
-    id: varchar('id', { length: 36 }).primaryKey(),
-    userId: varchar('user_id', { length: 36 })
+    id: text('id').primaryKey(),
+    userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     /** verify_email: Bestätigung + Anmeldung · login: Anmeldelink */
-    type: mysqlEnum('type', ['verify_email', 'login']).notNull(),
-    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    type: text('type', { enum: ['verify_email', 'login'] }).notNull(),
+    tokenHash: text('token_hash').notNull(),
     expiresAt: ts('expires_at').notNull(),
     usedAt: ts('used_at'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
@@ -87,40 +78,42 @@ export const emailTokens = mysqlTable(
 export const SERVER_STATUSES = ['waitlist', 'pending', 'provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended', 'deleted'] as const;
 export const POWER_STATES = ['unknown', 'offline', 'starting', 'running', 'stopping', 'installing'] as const;
 
-export const servers = mysqlTable(
+export const servers = sqliteTable(
   'servers',
   {
-    id: varchar('id', { length: 36 }).primaryKey(),
-    userId: varchar('user_id', { length: 36 })
+    id: text('id').primaryKey(),
+    userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    name: varchar('name', { length: 64 }).notNull(),
-    planId: varchar('plan_id', { length: 32 }).notNull(),
-    serverType: varchar('server_type', { length: 32 }).notNull(),
-    version: varchar('version', { length: 32 }).notNull(),
+    name: text('name').notNull(),
+    /** Art des Servers: Minecraft-Server oder Discord-Bot */
+    kind: text('kind', { enum: ['minecraft', 'discord'] }).notNull().default('minecraft'),
+    planId: text('plan_id').notNull(),
+    serverType: text('server_type').notNull(),
+    version: text('version').notNull(),
 
     /** pending = wartet auf E-Mail-Bestätigung bzw. Panel-Zugang */
-    status: mysqlEnum('status', SERVER_STATUSES).notNull().default('pending'),
-    suspensionReason: mysqlEnum('suspension_reason', ['cycle_expired', 'admin', 'abuse']),
-    powerState: mysqlEnum('power_state', POWER_STATES).notNull().default('unknown'),
+    status: text('status', { enum: SERVER_STATUSES }).notNull().default('pending'),
+    suspensionReason: text('suspension_reason', { enum: ['cycle_expired', 'admin', 'abuse'] }),
+    powerState: text('power_state', { enum: POWER_STATES }).notNull().default('unknown'),
     powerStateAt: ts('power_state_at'),
 
     /** Ressourcen-Snapshot zum Erstellzeitpunkt */
-    memoryMb: int('memory_mb').notNull(),
-    cpuPercent: int('cpu_percent').notNull(),
-    diskMb: int('disk_mb').notNull(),
+    memoryMb: integer('memory_mb').notNull(),
+    cpuPercent: integer('cpu_percent').notNull(),
+    diskMb: integer('disk_mb').notNull(),
 
     /** Pterodactyl-Verknüpfung */
-    pteroServerId: int('ptero_server_id'),
-    pteroIdentifier: varchar('ptero_identifier', { length: 16 }),
-    pteroUuid: varchar('ptero_uuid', { length: 36 }),
-    address: varchar('address', { length: 128 }),
+    pteroServerId: integer('ptero_server_id'),
+    pteroIdentifier: text('ptero_identifier'),
+    pteroUuid: text('ptero_uuid'),
+    address: text('address'),
 
     /** 30-Tage-Zyklus */
-    cycleNumber: int('cycle_number').notNull().default(1),
+    cycleNumber: integer('cycle_number').notNull().default(1),
     cycleStartedAt: ts('cycle_started_at').notNull(),
     cycleEndsAt: ts('cycle_ends_at').notNull(),
-    reactivationCount: int('reactivation_count').notNull().default(0),
+    reactivationCount: integer('reactivation_count').notNull().default(0),
     lastReactivatedAt: ts('last_reactivated_at'),
     expiringSince: ts('expiring_since'),
     suspendedAt: ts('suspended_at'),
@@ -128,21 +121,21 @@ export const servers = mysqlTable(
     /** Fair-Use-Pause */
     pausedAt: ts('paused_at'),
     pausedUntil: ts('paused_until'),
-    pauseReason: mysqlEnum('pause_reason', ['max_session', 'weekly_offline', 'manual']),
+    pauseReason: text('pause_reason', { enum: ['max_session', 'weekly_offline', 'manual'] }),
 
     /** Provisionierung */
-    provisioningAttempts: int('provisioning_attempts').notNull().default(0),
-    provisioningError: varchar('provisioning_error', { length: 500 }),
+    provisioningAttempts: integer('provisioning_attempts').notNull().default(0),
+    provisioningError: text('provisioning_error'),
     lastProvisionAttemptAt: ts('last_provision_attempt_at'),
-    postProvisionDone: boolean('post_provision_done').notNull().default(false),
-    backupScheduleId: int('backup_schedule_id'),
+    postProvisionDone: integer('post_provision_done', { mode: 'boolean' }).notNull().default(false),
+    backupScheduleId: integer('backup_schedule_id'),
     /** Warteliste (Early Access): Platz wird bei der E-Mail-Bestätigung vergeben */
-    waitlistPosition: int('waitlist_position'),
+    waitlistPosition: integer('waitlist_position'),
     waitlistJoinedAt: ts('waitlist_joined_at'),
     /** Hardware-Stufe (aus der Warteliste): bestimmt die Pterodactyl-Location */
-    nodeTier: mysqlEnum('node_tier', ['epyc', 'xeon']),
+    nodeTier: text('node_tier', { enum: ['epyc', 'xeon'] }),
     /** Zuletzt im Panel gesetzte Server-Beschreibung (Status-Anzeige in Pterodactyl) */
-    panelDescription: varchar('panel_description', { length: 255 }),
+    panelDescription: text('panel_description'),
 
     createdAt: ts('created_at').notNull().$defaultFn(now),
     updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
@@ -151,6 +144,7 @@ export const servers = mysqlTable(
   (t) => [
     index('servers_user_idx').on(t.userId),
     index('servers_status_idx').on(t.status),
+    index('servers_kind_idx').on(t.kind),
     index('servers_cycle_idx').on(t.status, t.cycleEndsAt),
     uniqueIndex('servers_ptero_server_uq').on(t.pteroServerId),
     uniqueIndex('servers_waitlist_position_uq').on(t.waitlistPosition),
@@ -163,17 +157,17 @@ export const servers = mysqlTable(
  * garantiert, dass es pro Server höchstens EINE offene Session gibt
  * (Idempotenz auch bei parallelen Worker-Läufen).
  */
-export const serverSessions = mysqlTable(
+export const serverSessions = sqliteTable(
   'server_sessions',
   {
-    id: bigint('id', { mode: 'number', unsigned: true }).autoincrement().primaryKey(),
-    serverId: varchar('server_id', { length: 36 })
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    serverId: text('server_id')
       .notNull()
       .references(() => servers.id, { onDelete: 'cascade' }),
     startedAt: ts('started_at').notNull(),
     endedAt: ts('ended_at'),
-    endReason: mysqlEnum('end_reason', ['detected', 'user', 'fair_use_session', 'fair_use_weekly', 'cycle', 'deleted']),
-    openMarker: tinyint('open_marker').generatedAlwaysAs(sql`(case when \`ended_at\` is null then 1 else null end)`, {
+    endReason: text('end_reason', { enum: ['detected', 'user', 'fair_use_session', 'fair_use_weekly', 'cycle', 'deleted'] }),
+    openMarker: integer('open_marker').generatedAlwaysAs(sql`(case when "ended_at" is null then 1 else null end)`, {
       mode: 'stored',
     }),
   },
@@ -185,22 +179,22 @@ export const serverSessions = mysqlTable(
 
 /* ---------------------------------------------------------- notifications */
 
-export const notifications = mysqlTable(
+export const notifications = sqliteTable(
   'notifications',
   {
-    id: varchar('id', { length: 36 }).primaryKey(),
-    userId: varchar('user_id', { length: 36 })
+    id: text('id').primaryKey(),
+    userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    serverId: varchar('server_id', { length: 36 }),
-    type: varchar('type', { length: 48 }).notNull(),
-    title: varchar('title', { length: 160 }).notNull(),
+    serverId: text('server_id'),
+    type: text('type').notNull(),
+    title: text('title').notNull(),
     body: text('body').notNull(),
     /** Verhindert doppelte Benachrichtigungen bei wiederholten Job-Läufen. */
-    dedupeKey: varchar('dedupe_key', { length: 191 }).notNull(),
-    emailStatus: mysqlEnum('email_status', ['none', 'pending', 'sent', 'failed']).notNull().default('none'),
-    emailAttempts: int('email_attempts').notNull().default(0),
-    emailLastError: varchar('email_last_error', { length: 500 }),
+    dedupeKey: text('dedupe_key').notNull(),
+    emailStatus: text('email_status', { enum: ['none', 'pending', 'sent', 'failed'] }).notNull().default('none'),
+    emailAttempts: integer('email_attempts').notNull().default(0),
+    emailLastError: text('email_last_error'),
     emailSentAt: ts('email_sent_at'),
     readAt: ts('read_at'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
@@ -214,17 +208,17 @@ export const notifications = mysqlTable(
 
 /* ------------------------------------------------------------- audit logs */
 
-export const auditLogs = mysqlTable(
+export const auditLogs = sqliteTable(
   'audit_logs',
   {
-    id: bigint('id', { mode: 'number', unsigned: true }).autoincrement().primaryKey(),
-    userId: varchar('user_id', { length: 36 }),
-    serverId: varchar('server_id', { length: 36 }),
-    actor: mysqlEnum('actor', ['user', 'system', 'admin']).notNull(),
-    action: varchar('action', { length: 64 }).notNull(),
-    message: varchar('message', { length: 500 }).notNull(),
-    meta: json('meta'),
-    ip: varchar('ip', { length: 64 }),
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id'),
+    serverId: text('server_id'),
+    actor: text('actor', { enum: ['user', 'system', 'admin'] }).notNull(),
+    action: text('action').notNull(),
+    message: text('message').notNull(),
+    meta: text('meta', { mode: 'json' }),
+    ip: text('ip'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
   },
   (t) => [
@@ -234,35 +228,51 @@ export const auditLogs = mysqlTable(
   ],
 );
 
+/* ---------------------------------------------------------- consent logs */
+
+/** Nachweis der Cookie-/Einwilligungs-Entscheidung. `ip` und `user_agent` sind verschlüsselt (encryptField). */
+export const consentLogs = sqliteTable(
+  'consent_logs',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id'),
+    choice: text('choice', { enum: ['essential', 'all'] }).notNull(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('consent_logs_created_idx').on(t.createdAt)],
+);
+
 /* ---------------------------------------------------------- dedupe marks */
 
 /**
  * Markierungen für einmalige Nebenwirkungen (z. B. In-Game-Warnungen).
- * INSERT IGNORE auf den Schlüssel → jede Warnung wird genau einmal gesendet.
+ * INSERT … ON CONFLICT DO NOTHING auf den Schlüssel → jede Warnung wird genau einmal gesendet.
  */
-export const dedupeMarks = mysqlTable('dedupe_marks', {
-  key: varchar('key', { length: 191 }).primaryKey(),
+export const dedupeMarks = sqliteTable('dedupe_marks', {
+  key: text('key').primaryKey(),
   createdAt: ts('created_at').notNull().$defaultFn(now),
 });
 
 /* ------------------------------------------------------------------- jobs */
 
-export const jobLocks = mysqlTable('job_locks', {
-  name: varchar('name', { length: 64 }).primaryKey(),
-  owner: varchar('owner', { length: 64 }),
+export const jobLocks = sqliteTable('job_locks', {
+  name: text('name').primaryKey(),
+  owner: text('owner'),
   lockedUntil: ts('locked_until'),
   updatedAt: ts('updated_at').notNull().$defaultFn(now),
 });
 
-export const jobRuns = mysqlTable(
+export const jobRuns = sqliteTable(
   'job_runs',
   {
-    id: bigint('id', { mode: 'number', unsigned: true }).autoincrement().primaryKey(),
-    job: varchar('job', { length: 64 }).notNull(),
-    status: mysqlEnum('status', ['running', 'success', 'failed']).notNull(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    job: text('job').notNull(),
+    status: text('status', { enum: ['running', 'success', 'failed'] }).notNull(),
     startedAt: ts('started_at').notNull(),
     finishedAt: ts('finished_at'),
-    stats: json('stats'),
+    stats: text('stats', { mode: 'json' }),
     error: text('error'),
   },
   (t) => [index('job_runs_job_idx').on(t.job, t.startedAt)],
@@ -271,23 +281,23 @@ export const jobRuns = mysqlTable(
 /* --------------------------------------------------------------- settings */
 
 /** Im Admin-Bereich änderbare Einstellungen (Schlüssel „site“ = SiteSettings als JSON) */
-export const settings = mysqlTable('settings', {
-  key: varchar('key', { length: 64 }).primaryKey(),
-  value: json('value').notNull(),
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value', { mode: 'json' }).notNull(),
   updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
 });
 
 /* ------------------------------------------------------------ status page */
 
-export const statusIncidents = mysqlTable(
+export const statusIncidents = sqliteTable(
   'status_incidents',
   {
-    id: varchar('id', { length: 36 }).primaryKey(),
-    kind: mysqlEnum('kind', ['incident', 'maintenance', 'notice']).notNull(),
-    impact: mysqlEnum('impact', ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance']).notNull(),
-    components: json('components').$type<string[]>().notNull(),
-    titleEn: varchar('title_en', { length: 160 }).notNull(),
-    titleDe: varchar('title_de', { length: 160 }).notNull(),
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['incident', 'maintenance', 'notice'] }).notNull(),
+    impact: text('impact', { enum: ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance'] }).notNull(),
+    components: text('components', { mode: 'json' }).$type<string[]>().notNull(),
+    titleEn: text('title_en').notNull(),
+    titleDe: text('title_de').notNull(),
     messageEn: text('message_en').notNull(),
     messageDe: text('message_de').notNull(),
     startsAt: ts('starts_at').notNull(),
@@ -300,12 +310,12 @@ export const statusIncidents = mysqlTable(
 );
 
 /** Verlauf der Status-Prüfungen (alle 5 Minuten) – Grundlage für die Uptime */
-export const statusChecks = mysqlTable(
+export const statusChecks = sqliteTable(
   'status_checks',
   {
-    id: bigint('id', { mode: 'number', unsigned: true }).autoincrement().primaryKey(),
-    component: varchar('component', { length: 32 }).notNull(),
-    status: mysqlEnum('status', ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance', 'unknown']).notNull(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    component: text('component').notNull(),
+    status: text('status', { enum: ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance', 'unknown'] }).notNull(),
     checkedAt: ts('checked_at').notNull(),
   },
   (t) => [index('status_checks_component_idx').on(t.component, t.checkedAt)],

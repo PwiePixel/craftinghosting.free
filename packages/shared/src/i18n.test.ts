@@ -87,17 +87,51 @@ describe('Texte', () => {
   });
 });
 
-describe('Paket-Kapazität und EPYC-Plätze in den Einstellungen', () => {
-  it('übernimmt Standardwerte und erlaubt „unbegrenzt“', async () => {
-    const { normalizeSiteSettings, websiteEpycSlots } = await import('./settings');
+describe('Pakete, Produkte und EPYC-Plätze in den Einstellungen', () => {
+  it('übernimmt Standard-Pakete je Produkt und erlaubt „unbegrenzt“', async () => {
+    const { normalizeSiteSettings, websiteEpycSlots, findPlan, maxPlanMemoryMb } = await import('./settings');
     const d = normalizeSiteSettings({});
-    expect(Object.keys(d.plans).length).toBeGreaterThan(0);
-    const id = Object.keys(d.plans)[0]!;
-    expect(normalizeSiteSettings({ plans: { [id]: { capacity: 40, reserved: 7 } } }).plans[id]).toEqual({ capacity: 40, reserved: 7 });
-    expect(normalizeSiteSettings({ plans: { [id]: { capacity: null } } }).plans[id]!.capacity).toBeNull();
-    expect(normalizeSiteSettings({ plans: { unbekannt: { capacity: 1 } } }).plans.unbekannt).toBeUndefined();
+    expect(d.products.minecraft.plans.length).toBeGreaterThan(0);
+    expect(d.products.discord.plans.length).toBe(4);
+    expect(d.products.minecraft.capacity).toBe(500);
+    expect(d.products.discord.capacity).toBe(200);
+    expect(d.products.minecraft.fairUse).toBe(true);
+    expect(d.products.discord.fairUse).toBe(false);
+    expect(d.hardware.locations.map((l) => l.code)).toEqual(['DE']);
+    expect(findPlan(d, 'bot-512mb')?.kind).toBe('discord');
+    expect(normalizeSiteSettings({ products: { minecraft: { capacity: null } } }).products.minecraft.capacity).toBeNull();
     expect(websiteEpycSlots({ epycSlots: 50, epycReserved: 20 })).toBe(30);
     expect(websiteEpycSlots({ epycSlots: 10, epycReserved: 20 })).toBe(0);
+    expect(maxPlanMemoryMb(d.products.minecraft.plans)).toBe(6144);
+  });
+
+  it('nimmt eigene Pakete an, vergibt eindeutige IDs und begrenzt Discord auf vier Pakete', async () => {
+    const { normalizeSiteSettings, maxPlanMemoryMb } = await import('./settings');
+    const plan = (name: string, memoryMb: number, id = '') => ({ id, name, memoryMb, cpuPercent: 200, diskMb: 20480, tagline: { de: 'Test', en: '' } });
+    const s = normalizeSiteSettings({
+      products: {
+        minecraft: { plans: [plan('Free 8 GB', 8192), plan('Free 8 GB', 8192), plan('', 1024)] },
+        discord: { plans: [plan('A', 128), plan('B', 256), plan('C', 512), plan('D', 1024), plan('E', 2048)], nodeIds: [3, 3, 0, 'x'], eggs: { python: { nestId: 5, eggId: 20, name: 'generic python' }, kaputt: { nestId: 0 } } },
+      },
+      hardware: { locations: [{ code: 'de', name: { de: 'Deutschland', en: 'Germany' } }, { code: 'nl', name: { de: 'Niederlande' } }], cpus: [' Xeon ', ''] },
+      donate: { enabled: true, url: 'http://unsicher.example' },
+    });
+    // Paket ohne Namen fällt weg, doppelte Namen bekommen eindeutige IDs
+    expect(s.products.minecraft.plans.map((p) => p.id)).toEqual(['free-8-gb', 'free-8-gb-2']);
+    expect(s.products.minecraft.plans[0]!.tagline).toEqual({ de: 'Test', en: 'Test' });
+    expect(s.products.minecraft.plans[0]!.cpuLabel.de).toContain('2 Threads');
+    expect(maxPlanMemoryMb(s.products.minecraft.plans)).toBe(8192);
+    expect(s.products.discord.plans.length).toBe(4);
+    expect(s.products.discord.nodeIds).toEqual([3]);
+    expect(Object.keys(s.products.discord.eggs)).toEqual(['python']);
+    expect(s.hardware.locations).toEqual([
+      { code: 'DE', name: { de: 'Deutschland', en: 'Germany' } },
+      { code: 'NL', name: { de: 'Niederlande', en: 'Niederlande' } },
+    ]);
+    expect(s.hardware.cpus).toEqual(['Xeon']);
+    // Spenden nur mit https-Zahlungslink
+    expect(s.donate).toEqual({ enabled: false, url: '' });
+    expect(normalizeSiteSettings({ donate: { enabled: true, url: 'https://pay.sumup.com/b2c/XYZ' } }).donate.enabled).toBe(true);
   });
 });
 

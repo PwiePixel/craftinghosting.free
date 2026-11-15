@@ -1,5 +1,5 @@
 import { buildApp } from './app';
-import { pool } from './db/client';
+import { closeDb } from './db/client';
 import { env } from './env';
 import { startScheduler } from './jobs/scheduler';
 import { verifySmtpOnStartup } from './services/mail/mailer';
@@ -17,7 +17,7 @@ async function main() {
     app.log.info(`${signal} empfangen – fahre herunter …`);
     await scheduler?.stop();
     await app.close();
-    await pool.end();
+    await closeDb();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));

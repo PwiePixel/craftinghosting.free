@@ -1,15 +1,13 @@
-import { config } from 'dotenv';
 import { defineConfig } from 'drizzle-kit';
 
-config({ path: '../../.env' });
-
+/**
+ * Nur für `drizzle-kit generate` (Migrationen aus dem Schema erzeugen) – dafür ist keine Datenbank nötig.
+ * Angewendet werden Migrationen mit `npm run db:migrate` (öffnet die verschlüsselte Datei über libSQL).
+ */
 export default defineConfig({
-  dialect: 'mysql',
+  dialect: 'sqlite',
   schema: './src/db/schema.ts',
   out: './drizzle',
-  dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'mysql://chfree:chfree@localhost:3306/chfree',
-  },
   strict: true,
   verbose: true,
 });

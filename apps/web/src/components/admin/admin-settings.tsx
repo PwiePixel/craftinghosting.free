@@ -2,12 +2,15 @@
 
 /**
  * Einstellungen im Admin-Bereich: Wartungsmodus, Registrierung (offen / Vorregistrierung / geschlossen),
- * Warteliste und die Zahlen auf der Startseite. Gespeichert wird immer das komplette Einstellungs-Objekt.
+ * Produkte & Pakete, Hardware-Angaben, Spenden, Warteliste und die Zahlen auf der Startseite.
+ * Gespeichert wird immer das komplette Einstellungs-Objekt.
  */
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
-import { Save, Wrench } from 'lucide-react';
-import { freeHostingConfig, type RegistrationMode, type SiteSettings } from '@chfree/shared';
+import { Plus, Save, Wrench } from 'lucide-react';
+import { productKinds, type ProductKind, type RegistrationMode, type SiteSettings } from '@chfree/shared';
+import { ActionButton } from '@/components/admin/admin-actions';
+import { ProductEditor } from '@/components/admin/admin-plans';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -67,7 +70,7 @@ export function Labeled({ label, hint, children, className }: { label: string; h
   );
 }
 
-function NumberInput({ value, onChange, min = 0, max, step = 1, className }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; className?: string }) {
+export function NumberInput({ value, onChange, min = 0, max, step = 1, className }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; className?: string }) {
   return (
     <input
       type="number"
@@ -117,7 +120,7 @@ function SaveBar({ pending, message, onSave, dirty }: { pending: boolean; messag
 /* ------------------------------------------------------------ Formular */
 
 /** Maximale Plätze: leer = unbegrenzt */
-function CapacityInput({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+export function CapacityInput({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
   return (
     <input
       type="number"
@@ -130,7 +133,29 @@ function CapacityInput({ value, onChange }: { value: number | null; onChange: (v
   );
 }
 
-export function SettingsForm({ initial, planCounts = {} }: { initial: SiteSettings; planCounts?: Record<string, number> }) {
+/** Nur https-Links sind als Zahlungslink erlaubt (wie auf dem Server) */
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value.trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const MAX_LOCATIONS = 12;
+const MAX_CPUS = 6;
+
+export function SettingsForm({
+  initial,
+  planCounts = {},
+  productCounts = {},
+}: {
+  initial: SiteSettings;
+  /** Über die Website belegte Plätze je Paket-ID (aus der Übersicht) */
+  planCounts?: Record<string, number>;
+  /** Über die Website belegte Plätze je Produkt (aus der Übersicht) */
+  productCounts?: Partial<Record<ProductKind, number>>;
+}) {
   const router = useRouter();
   const [s, setS] = useState<SiteSettings>(initial);
   const [saved, setSaved] = useState<SiteSettings>(initial);
@@ -211,59 +236,152 @@ export function SettingsForm({ initial, planCounts = {} }: { initial: SiteSettin
       </Section>
 
       <Section
-        title="Pakete & Kapazität"
-        description="Wie viele kostenlose Server es je Paket höchstens geben darf. Auf der Website steht dann z. B. „Noch 12 von 100 Plätzen frei“, bei 0 freien Plätzen „Ausgebucht“. „Außerhalb belegt“ ist für Server, die auf denselben Nodes laufen, aber nicht über diese Website erstellt wurden (z. B. altes System)."
+        title="Produkte & Pakete"
+        description="Minecraft-Server und Discord-Bots – jeweils mit eigenen Paketen und eigener Kapazität. Auf der Website steht dann z. B. „Noch 12 von 100 Plätzen frei“, bei 0 freien Plätzen „Ausgebucht“. „Außerhalb belegt“ ist für Server, die auf denselben Nodes laufen, aber nicht über diese Website erstellt wurden (z. B. altes System). Geänderte Ressourcen gelten für neue Server; Nodes und Eggs stellst du im Tab „Pterodactyl“ ein."
       >
-        <div className="space-y-3">
-          {freeHostingConfig.plans.map((p) => {
-            const cfg = s.plans[p.id] ?? { capacity: p.capacity, reserved: 0 };
-            const site = planCounts[p.id] ?? 0;
-            const used = site + cfg.reserved;
-            const setPlan = (v: Partial<typeof cfg>) => patch('plans', { [p.id]: { ...cfg, ...v } });
-            return (
-              <div key={p.id} className="grid gap-4 rounded-lg border border-line p-4 md:grid-cols-[1fr_auto_auto] md:items-end">
-                <div>
-                  <p className="text-sm font-medium text-white">{p.name}</p>
-                  <p className="mt-0.5 text-[13px] text-subtle">
-                    Über die Website belegt: {site}
-                    {cfg.reserved > 0 ? ` · außerhalb: ${cfg.reserved}` : ''} · gesamt: {used}
-                  </p>
-                  <p className="mt-1 text-[13px] text-muted">
-                    Öffentlich:{' '}
-                    {cfg.capacity === null ? (
-                      <span className="text-gray-200">unbegrenzt (keine Anzeige)</span>
-                    ) : cfg.capacity - used > 0 ? (
-                      <span className="text-emerald-300">
-                        Noch {cfg.capacity - used} von {cfg.capacity} Plätzen frei
-                      </span>
-                    ) : (
-                      <span className="text-amber-300">Ausgebucht</span>
-                    )}
-                  </p>
-                </div>
-                <Labeled label="Maximale Plätze" hint="leer = unbegrenzt">
-                  <CapacityInput value={cfg.capacity} onChange={(v) => setPlan({ capacity: v })} />
-                </Labeled>
-                <Labeled label="Außerhalb belegt" hint="z. B. altes System">
-                  <NumberInput value={cfg.reserved} max={1000000} onChange={(v) => setPlan({ reserved: v })} />
-                </Labeled>
-              </div>
-            );
-          })}
+        <div className="space-y-4">
+          {productKinds.map((kind) => (
+            <ProductEditor
+              key={kind}
+              kind={kind}
+              product={s.products[kind]}
+              onChange={(v) => patch('products', { [kind]: { ...s.products[kind], ...v } })}
+              planCounts={planCounts}
+              productCount={productCounts[kind] ?? null}
+            />
+          ))}
         </div>
       </Section>
 
       <Section
+        title="Hardware & Standorte"
+        description="Angaben zur Hardware auf der Website: Sie erscheinen auf der Startseite, in den FAQ und in den Rechtstexten (z. B. „Standorte: DE“)."
+      >
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-gray-200">Standorte</span>
+          <div className="space-y-2">
+            {s.hardware.locations.map((l, index) => {
+              const setLocation = (v: Partial<typeof l>) => patch('hardware', { locations: s.hardware.locations.map((x, i) => (i === index ? { ...x, ...v } : x)) });
+              return (
+                <div key={index} className="grid gap-2 sm:grid-cols-[110px_1fr_1fr_auto] sm:items-center">
+                  <input
+                    className="input font-mono uppercase"
+                    value={l.code}
+                    maxLength={3}
+                    placeholder="DE"
+                    aria-label="Ländercode"
+                    onChange={(e) => setLocation({ code: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') })}
+                  />
+                  <input
+                    className="input"
+                    value={l.name.de}
+                    maxLength={60}
+                    placeholder="Name (Deutsch), z. B. Deutschland"
+                    aria-label="Name (Deutsch)"
+                    onChange={(e) => setLocation({ name: { ...l.name, de: e.target.value } })}
+                  />
+                  <input
+                    className="input"
+                    value={l.name.en}
+                    maxLength={60}
+                    placeholder="Name (Englisch), z. B. Germany"
+                    aria-label="Name (Englisch)"
+                    onChange={(e) => setLocation({ name: { ...l.name, en: e.target.value } })}
+                  />
+                  <ActionButton label="Entfernen" danger run={async () => patch('hardware', { locations: s.hardware.locations.filter((_, i) => i !== index) })} />
+                </div>
+              );
+            })}
+            {s.hardware.locations.length === 0 && <p className="text-[13px] text-amber-300">Kein Standort eingetragen – auf der Website wird dann kein Standort genannt.</p>}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              icon={<Plus />}
+              disabled={s.hardware.locations.length >= MAX_LOCATIONS}
+              onClick={() => patch('hardware', { locations: [...s.hardware.locations, { code: '', name: { de: '', en: '' } }] })}
+            >
+              Standort hinzufügen
+            </Button>
+            <span className="text-[12px] text-subtle">Ländercode mit 2–3 Buchstaben (z. B. DE), jeder Code nur einmal. Zeilen ohne gültigen Code werden beim Speichern verworfen.</span>
+          </div>
+        </div>
+        <div>
+          <span className="mb-1.5 block text-sm font-medium text-gray-200">Prozessoren</span>
+          <div className="space-y-2">
+            {s.hardware.cpus.map((cpu, index) => (
+              <div key={index} className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                <input
+                  className="input"
+                  value={cpu}
+                  maxLength={80}
+                  placeholder="z. B. Intel Xeon E5-2680 v4"
+                  aria-label={`Prozessor ${index + 1}`}
+                  onChange={(e) => patch('hardware', { cpus: s.hardware.cpus.map((x, i) => (i === index ? e.target.value : x)) })}
+                />
+                <ActionButton label="Entfernen" danger run={async () => patch('hardware', { cpus: s.hardware.cpus.filter((_, i) => i !== index) })} />
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              icon={<Plus />}
+              disabled={s.hardware.cpus.length >= MAX_CPUS}
+              onClick={() => patch('hardware', { cpus: [...s.hardware.cpus, ''] })}
+            >
+              Prozessor hinzufügen
+            </Button>
+            <span className="text-[12px] text-subtle">Leere Zeilen werden beim Speichern verworfen.</span>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Spenden"
+        description="Spenden-Seite mit einem Zahlungslink von SumUp. Die Seite liegt unter /donate bzw. /de/spenden; ist sie aktiv, erscheint im Header der Link „Spenden“."
+      >
+        <Toggle checked={s.donate.enabled} onChange={(v) => patch('donate', { enabled: v })} label="Spenden-Seite aktiv" />
+        <Labeled label="SumUp-Zahlungslink" hint="Muss mit https:// beginnen, z. B. https://pay.sumup.com/b2c/…">
+          <input
+            type="url"
+            inputMode="url"
+            className="input max-w-xl"
+            value={s.donate.url}
+            maxLength={500}
+            placeholder="https://pay.sumup.com/b2c/…"
+            onChange={(e) => patch('donate', { url: e.target.value })}
+          />
+        </Labeled>
+        {s.donate.url.trim() !== '' && !isHttpsUrl(s.donate.url) && (
+          <p className="text-[13px] text-amber-300">Das ist kein gültiger https-Link – er wird beim Speichern verworfen.</p>
+        )}
+        {s.donate.enabled && !isHttpsUrl(s.donate.url) && (
+          <p className="text-[13px] text-amber-300">
+            Ohne gültigen https-Zahlungslink schaltet der Server die Spenden-Seite beim Speichern wieder aus.
+          </p>
+        )}
+      </Section>
+
+      <Section
         title="Warteliste (Early Access)"
-        description="Die ersten Plätze bekommen einen Server auf AMD EPYC, alle weiteren auf Intel Xeon. Die Hardware-Stufe steuert die Pterodactyl-Locations (PTERODACTYL_LOCATION_IDS_EPYC / _XEON)."
+        description="Optional gibt es zwei Hardware-Stufen: Die ersten Plätze bekommen einen Server auf AMD EPYC, alle weiteren auf Intel Xeon (gesteuert über die Pterodactyl-Locations PTERODACTYL_LOCATION_IDS_EPYC / _XEON). Bei 0 EPYC-Plätzen gibt es nur eine Hardware-Stufe (aktuell Intel Xeon) – öffentlich wird dann nichts zu EPYC angezeigt."
       >
         <div className="grid gap-5 md:grid-cols-2">
-          <Labeled label="Plätze auf AMD EPYC (gesamt)" hint="0 = alle Plätze auf Intel Xeon">
+          <Labeled label="Plätze auf AMD EPYC (gesamt)" hint="0 = nur eine Hardware-Stufe (aktuell Intel Xeon), EPYC wird nirgends erwähnt">
             <NumberInput value={s.waitlist.epycSlots} max={100000} onChange={(v) => patch('waitlist', { epycSlots: v })} />
           </Labeled>
           <Labeled
             label="Davon außerhalb belegt"
-            hint={`z. B. Server aus dem alten System auf dem EPYC. Für die Warteliste bleiben ${Math.max(0, s.waitlist.epycSlots - s.waitlist.epycReserved)} EPYC-Plätze.`}
+            hint={
+              s.waitlist.epycSlots > 0
+                ? `z. B. Server aus dem alten System auf dem EPYC. Für die Warteliste bleiben ${Math.max(0, s.waitlist.epycSlots - s.waitlist.epycReserved)} EPYC-Plätze.`
+                : 'Nur von Bedeutung, wenn es EPYC-Plätze gibt.'
+            }
           >
             <NumberInput value={s.waitlist.epycReserved} max={100000} onChange={(v) => patch('waitlist', { epycReserved: v })} />
           </Labeled>

@@ -7,7 +7,7 @@
  *   Docker:  docker compose run --rm api node dist/cli.js mail-test du@example.com
  */
 import pino from 'pino';
-import { pool } from './db/client';
+import { closeDb } from './db/client';
 import { allJobs } from './jobs/registry';
 import { runJobOnce } from './jobs/scheduler';
 import { env, mailFrom, smtpSecure } from './env';
@@ -115,4 +115,4 @@ main()
     console.error(err.message ?? err);
     process.exitCode = 1;
   })
-  .finally(() => pool.end());
+  .finally(() => closeDb());

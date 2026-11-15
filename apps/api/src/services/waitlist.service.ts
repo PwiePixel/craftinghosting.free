@@ -5,8 +5,8 @@
  *  – Freischalten im Admin → Status „pending“ → Server wird erstellt, sobald der Panel-Zugang steht
  */
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { freeHostingConfig, getPlan, tierForPosition, websiteEpycSlots, type Locale } from '@chfree/shared';
-import { db } from '../db/client';
+import { findPlan, freeHostingConfig, tierForPosition, websiteEpycSlots, type Locale } from '@chfree/shared';
+import { db, isUniqueViolation } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
 import { L } from '../lib/errors';
@@ -14,7 +14,7 @@ import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { manageUrl, manageUrlShort } from './panel';
 import { activatePendingServers, assertConfigAvailable, countOwnedServers, savePendingServer } from './server.service';
-import { getSettings, invalidatePublicSite, planAvailability, waitlistRank } from './settings.service';
+import { capacityState, getSettings, invalidatePublicSite, waitlistRank } from './settings.service';
 
 export async function hasWaitlistEntry(userId: string): Promise<boolean> {
   const [row] = await db
@@ -34,13 +34,14 @@ export async function confirmWaitlist(userId: string): Promise<void> {
   for (const { id } of open) {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await db.execute(
-          sql`UPDATE ${servers} SET ${servers.waitlistPosition} = (SELECT next FROM (SELECT COALESCE(MAX(${servers.waitlistPosition}), 0) + 1 AS next FROM ${servers}) AS t), ${servers.waitlistJoinedAt} = NOW(3) WHERE ${servers.id} = ${id} AND ${servers.waitlistPosition} IS NULL`,
+        // Zeitstempel sind Millisekunden – als Zahl binden
+        await db.run(
+          sql`UPDATE "servers" SET "waitlist_position" = (SELECT COALESCE(MAX(s2."waitlist_position"), 0) + 1 FROM "servers" s2), "waitlist_joined_at" = ${Date.now()} WHERE "id" = ${id} AND "waitlist_position" IS NULL`,
         );
         break;
       } catch (err) {
         // Gleichzeitige Bestätigung → gleiche Nummer → Unique-Index greift → erneut versuchen
-        if ((err as { code?: string }).code !== 'ER_DUP_ENTRY' || attempt === 4) throw err;
+        if (!isUniqueViolation(err) || attempt === 4) throw err;
       }
     }
   }
@@ -78,7 +79,10 @@ export async function releaseWaitlist(
     .where(eq(servers.status, 'pending'));
   const pendingByPlan: Record<string, number> = {};
   for (const r of pendingRows) pendingByPlan[r.planId] = (pendingByPlan[r.planId] ?? 0) + 1;
-  const remaining = Object.fromEntries((await planAvailability(settings, pendingByPlan)).map((p) => [p.id, p.remaining]));
+  const capacity = await capacityState(settings, pendingByPlan);
+  const remaining = Object.fromEntries(capacity.plans.map((p) => [p.id, p.remaining]));
+  // Zusätzlich gilt die Kapazität des Produkts (Minecraft / Discord-Bots) über alle Pakete
+  const productLeft = { minecraft: capacity.products.minecraft.remaining, discord: capacity.products.discord.remaining };
   const rows = await db
     .select({ s: servers, u: users })
     .from(servers)
@@ -87,11 +91,13 @@ export async function releaseWaitlist(
     .orderBy(asc(servers.waitlistPosition));
   for (const { s, u } of rows) {
     const left = remaining[s.planId];
-    if (left !== null && left !== undefined && left <= 0) {
+    const leftInProduct = productLeft[s.kind];
+    if ((left !== null && left !== undefined && left <= 0) || (leftInProduct !== null && leftInProduct <= 0)) {
       skippedFull++;
       continue;
     }
     if (typeof left === 'number') remaining[s.planId] = left - 1;
+    if (leftInProduct !== null) productLeft[s.kind] = leftInProduct - 1;
     const rank = await waitlistRank(s.waitlistPosition!);
     const tier = tierForPosition(rank, websiteEpycSlots(settings.waitlist));
     const now = new Date();
@@ -176,12 +182,12 @@ export interface ManualWaitlistResult {
 async function assignFrontPosition(serverId: string): Promise<void> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      await db.execute(
-        sql`UPDATE ${servers} SET ${servers.waitlistPosition} = (SELECT next FROM (SELECT COALESCE(MIN(${servers.waitlistPosition}), 1) - 1 AS next FROM ${servers}) AS t), ${servers.waitlistJoinedAt} = NOW(3) WHERE ${servers.id} = ${serverId} AND ${servers.waitlistPosition} IS NULL`,
+      await db.run(
+        sql`UPDATE "servers" SET "waitlist_position" = (SELECT COALESCE(MIN(s2."waitlist_position"), 1) - 1 FROM "servers" s2), "waitlist_joined_at" = ${Date.now()} WHERE "id" = ${serverId} AND "waitlist_position" IS NULL`,
       );
       return;
     } catch (err) {
-      if ((err as { code?: string }).code !== 'ER_DUP_ENTRY' || attempt === 4) throw err;
+      if (!isUniqueViolation(err) || attempt === 4) throw err;
     }
   }
 }
@@ -193,7 +199,7 @@ async function assignFrontPosition(serverId: string): Promise<void> {
 export async function addWaitlistEntries(input: ManualWaitlistInput, admin: Pick<User, 'email'>, ip?: string): Promise<ManualWaitlistResult> {
   const result: ManualWaitlistResult = { added: [], skipped: [] };
   const addedIds: { email: string; id: string }[] = [];
-  const plan = getPlan(input.planId);
+  const plan = findPlan(await getSettings(), input.planId);
   if (!plan) throw new Error('Unbekanntes Paket');
   // Vom Admin übernommene Vormerkungen dürfen auch in ein volles Paket – belegt wird erst beim Freischalten
   await assertConfigAvailable({ planId: input.planId, serverType: input.serverType, version: input.version, name: 'x' }, { ignoreCapacity: true });
@@ -209,7 +215,7 @@ export async function addWaitlistEntries(input: ManualWaitlistInput, admin: Pick
 
     let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) {
-      await db.insert(users).ignore().values({ id: uuid(), email, acceptedTermsAt: new Date(), locale: input.locale });
+      await db.insert(users).values({ id: uuid(), email, acceptedTermsAt: new Date(), locale: input.locale }).onConflictDoNothing();
       [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
       if (!user) {
         result.skipped.push({ email, reason: 'Konto konnte nicht angelegt werden' });
@@ -230,7 +236,7 @@ export async function addWaitlistEntries(input: ManualWaitlistInput, admin: Pick
       continue;
     }
 
-    const name = entry.name?.trim() || 'Minecraft Server';
+    const name = entry.name?.trim() || (plan.kind === 'discord' ? 'Discord Bot' : 'Minecraft Server');
     const id = await savePendingServer(user.id, { planId: input.planId, serverType: input.serverType, version: input.version, name }, 'waitlist');
     if (input.priority) await assignFrontPosition(id);
     else await confirmWaitlist(user.id);

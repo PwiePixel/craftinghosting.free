@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Globe, Menu, X } from 'lucide-react';
+import { Globe, Heart, Menu, X } from 'lucide-react';
 import { localePath, sectionPath, switchLocalePath, type RegistrationMode } from '@chfree/shared';
 import { Logo } from '@/components/brand/logo';
 import { buttonClasses } from '@/components/ui/button';
@@ -20,11 +20,14 @@ export function SiteHeader({
   mode = 'open',
   maintenance = false,
   signedIn = false,
+  donate = false,
 }: {
   minimal?: boolean;
   mode?: RegistrationMode;
   maintenance?: boolean;
   signedIn?: boolean;
+  /** Spenden-Seite ist aktiv → Link in der Navigation */
+  donate?: boolean;
 }) {
   const lang = useLang();
   const t = useDict();
@@ -40,6 +43,7 @@ export function SiteHeader({
   // Wartung: angemeldet → „Meine Server“, sonst „Anmelden“
   const maintenanceLink = signedIn ? { href: localePath(lang, 'myServers'), label: t.common.myServers } : { href: localePath(lang, 'login'), label: t.common.signIn };
   const switchHref = switchLocalePath(pathname, other);
+  const donateHref = localePath(lang, 'donate');
 
   const nav = [
     { href: sectionPath(lang, 'plans'), label: t.nav.plans },
@@ -76,6 +80,12 @@ export function SiteHeader({
                 {item.label}
               </Link>
             ))}
+            {donate && (
+              <Link href={donateHref} className={cn('inline-flex items-center gap-1.5 text-sm transition-colors', pathname === donateHref ? 'text-white' : 'text-muted hover:text-white')}>
+                <Heart className="size-3.5 text-blue-400" aria-hidden />
+                {t.nav.donate}
+              </Link>
+            )}
           </nav>
         )}
 
@@ -117,6 +127,12 @@ export function SiteHeader({
                 {item.label}
               </Link>
             ))}
+            {donate && (
+              <Link href={donateHref} className="inline-flex items-center gap-1.5 py-2.5 text-[15px] text-gray-200">
+                <Heart className="size-4 text-blue-400" aria-hidden />
+                {t.nav.donate}
+              </Link>
+            )}
             {langSwitch('py-2.5 text-[15px] text-gray-200')}
             {cta && (
               <Link href={ctaHref} className={buttonClasses('primary', 'md', 'mt-3')}>

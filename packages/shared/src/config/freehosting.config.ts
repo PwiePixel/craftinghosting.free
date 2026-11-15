@@ -17,6 +17,18 @@
 
 import type { Localized } from '../i18n';
 
+/** Produkt: Minecraft-Server oder Discord-Bot */
+export const productKinds = ['minecraft', 'discord'] as const;
+export type ProductKind = (typeof productKinds)[number];
+
+export function isProductKind(value: unknown): value is ProductKind {
+  return typeof value === 'string' && (productKinds as readonly string[]).includes(value);
+}
+
+/**
+ * Ein Paket. Die Liste unten sind nur die STANDARD-Pakete – im Admin-Bereich
+ * (Einstellungen → Pakete) lassen sich eigene Pakete anlegen, ändern und entfernen.
+ */
 export interface PlanConfig {
   /** Stabile ID – wird in der Datenbank gespeichert, nicht nachträglich ändern. */
   id: string;
@@ -47,6 +59,8 @@ export interface PlanConfig {
 
 export interface ServerTypeConfig {
   id: string;
+  /** Zu welchem Produkt der Typ gehört (Minecraft-Software bzw. Laufzeit eines Discord-Bots) */
+  kind: ProductKind;
   name: string;
   description: Localized;
   /** Auswählbare Versionen. "latest" = neueste vom Egg unterstützte Version. */
@@ -103,7 +117,12 @@ export interface FreeHostingConfig {
     storage: string;
     note: Localized;
   };
+  /** Standard-Pakete für Minecraft (im Admin-Bereich änderbar) */
   plans: PlanConfig[];
+  /** Standard-Pakete für Discord-Bots (im Admin-Bereich änderbar, höchstens `maxDiscordPlans`) */
+  discordPlans: PlanConfig[];
+  /** Standard-Kapazität je Produkt (im Admin-Bereich änderbar, null = unbegrenzt) */
+  capacity: Record<ProductKind, number | null>;
   fairUse: FairUseRules;
   cycle: CycleRules;
   limits: {
@@ -111,6 +130,8 @@ export interface FreeHostingConfig {
     requireVerifiedEmail: boolean;
     serverNameMinLength: number;
     serverNameMaxLength: number;
+    maxMinecraftPlans: number;
+    maxDiscordPlans: number;
   };
   serverTypes: ServerTypeConfig[];
 }
@@ -123,7 +144,7 @@ export const freeHostingConfig: FreeHostingConfig = {
     /** Name / Domain des kostenlosen Angebots */
     productName: 'CraftingHosting.free',
     domain: 'craftinghosting.free',
-    tagline: 'Free Minecraft Hosting',
+    tagline: 'Free Minecraft & Discord Bot Hosting',
     poweredBy: 'A CraftingHosting Service',
     /** Standard-Links – können per NEXT_PUBLIC_* Umgebungsvariablen überschrieben werden. */
     parentUrl: 'https://crafting.host',
@@ -136,11 +157,9 @@ export const freeHostingConfig: FreeHostingConfig = {
 
   /** Hardware, auf der das FreeHosting läuft. Ehrlich halten – keine Garantien. */
   hardware: {
-    locations: [
-      { code: 'DE', name: { de: 'Deutschland', en: 'Germany' } },
-      { code: 'NL', name: { de: 'Niederlande', en: 'Netherlands' } },
-    ],
-    cpus: ['Dual Intel Xeon Gold 6230', 'AMD EPYC 7402P'],
+    /** Standardwerte – Standorte und CPUs sind im Admin-Bereich änderbar */
+    locations: [{ code: 'DE', name: { de: 'Deutschland', en: 'Germany' } }],
+    cpus: ['Dual Intel Xeon Gold 6230'],
     network: '2 × 10 Gbit/s Uplink (LACP)',
     storage: 'NVMe SSD',
     note: {
@@ -193,6 +212,78 @@ export const freeHostingConfig: FreeHostingConfig = {
     },
   ],
 
+  /** Standard-Pakete für Discord-Bots (Python oder Node.js) – höchstens vier */
+  discordPlans: [
+    {
+      id: 'bot-256mb',
+      name: 'Bot 256 MB',
+      tagline: { de: 'Für kleine Bots und erste Projekte', en: 'For small bots and first projects' },
+      memoryMb: 256,
+      cpuPercent: 25,
+      cpuLabel: { de: 'Geteilte CPU (bis zu 0,25 Threads)', en: 'Shared CPU (up to 0.25 threads)' },
+      diskMb: 1024,
+      swapMb: 0,
+      ioWeight: 500,
+      databases: 0,
+      backups: 0,
+      allocations: 1,
+      capacity: null,
+      features: [],
+    },
+    {
+      id: 'bot-512mb',
+      name: 'Bot 512 MB',
+      tagline: { de: 'Der Standard für die meisten Bots', en: 'The default for most bots' },
+      memoryMb: 512,
+      cpuPercent: 50,
+      cpuLabel: { de: 'Geteilte CPU (bis zu 0,5 Threads)', en: 'Shared CPU (up to 0.5 threads)' },
+      diskMb: 2048,
+      swapMb: 0,
+      ioWeight: 500,
+      databases: 0,
+      backups: 1,
+      allocations: 1,
+      highlighted: true,
+      capacity: null,
+      features: [],
+    },
+    {
+      id: 'bot-1gb',
+      name: 'Bot 1 GB',
+      tagline: { de: 'Für Bots mit Datenbank oder Musik', en: 'For bots with a database or music' },
+      memoryMb: 1024,
+      cpuPercent: 75,
+      cpuLabel: { de: 'Geteilte CPU (bis zu 0,75 Threads)', en: 'Shared CPU (up to 0.75 threads)' },
+      diskMb: 3072,
+      swapMb: 0,
+      ioWeight: 500,
+      databases: 0,
+      backups: 1,
+      allocations: 1,
+      capacity: null,
+      features: [],
+    },
+    {
+      id: 'bot-2gb',
+      name: 'Bot 2 GB',
+      tagline: { de: 'Für große Bots auf vielen Servern', en: 'For large bots on many servers' },
+      memoryMb: 2048,
+      cpuPercent: 100,
+      cpuLabel: { de: 'Geteilte CPU (bis zu 1 Thread)', en: 'Shared CPU (up to 1 thread)' },
+      diskMb: 5120,
+      swapMb: 0,
+      ioWeight: 500,
+      databases: 0,
+      backups: 1,
+      allocations: 1,
+      capacity: null,
+      features: [],
+    },
+  ],
+
+  /** Plätze je Produkt: 500 Minecraft-Server + 200 Discord-Bots */
+  capacity: { minecraft: 500, discord: 200 },
+
   /**
    * Fair-Use-System ("24-Stunden-Aktivsystem")
    * – Ein Server darf am Stück höchstens `maxSessionHours` laufen.
@@ -235,11 +326,14 @@ export const freeHostingConfig: FreeHostingConfig = {
     requireVerifiedEmail: true,
     serverNameMinLength: 3,
     serverNameMaxLength: 32,
+    maxMinecraftPlans: 12,
+    maxDiscordPlans: 4,
   },
 
   serverTypes: [
     {
       id: 'paper',
+      kind: 'minecraft',
       name: 'Paper',
       description: { de: 'Performanter Standard mit Bukkit/Spigot-Plugin-Support.', en: 'Fast default with Bukkit/Spigot plugin support.' },
       versions: ['latest', '26.3', '26.2', '26.1.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.8'],
@@ -248,6 +342,7 @@ export const freeHostingConfig: FreeHostingConfig = {
     },
     {
       id: 'purpur',
+      kind: 'minecraft',
       name: 'Purpur',
       description: { de: 'Paper-Fork mit vielen zusätzlichen Gameplay-Optionen.', en: 'Paper fork with many extra gameplay options.' },
       versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.19.4', '1.18.2', '1.16.5'],
@@ -255,6 +350,7 @@ export const freeHostingConfig: FreeHostingConfig = {
     },
     {
       id: 'vanilla',
+      kind: 'minecraft',
       name: 'Vanilla',
       description: { de: 'Der offizielle Minecraft-Server – ohne Plugins und Mods.', en: 'The official Minecraft server – no plugins or mods.' },
       versions: ['latest', '26.3', '26.2', '26.1.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.9'],
@@ -262,6 +358,7 @@ export const freeHostingConfig: FreeHostingConfig = {
     },
     {
       id: 'fabric',
+      kind: 'minecraft',
       name: 'Fabric',
       description: { de: 'Leichtgewichtiger Mod-Loader für moderne Versionen.', en: 'Lightweight mod loader for modern versions.' },
       versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5'],
@@ -269,19 +366,37 @@ export const freeHostingConfig: FreeHostingConfig = {
     },
     {
       id: 'forge',
+      kind: 'minecraft',
       name: 'Forge',
       description: { de: 'Klassischer Mod-Loader für große Modpacks.', en: 'Classic mod loader for large modpacks.' },
       versions: ['latest', '1.21.1', '1.20.1', '1.19.2', '1.18.2', '1.16.5', '1.12.2'],
       defaultVersion: '1.20.1',
     },
+    {
+      id: 'python',
+      kind: 'discord',
+      name: 'Python',
+      description: { de: 'Für Bots mit discord.py, Pycord, nextcord & Co.', en: 'For bots built with discord.py, Pycord, nextcord & co.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+      recommended: true,
+    },
+    {
+      id: 'nodejs',
+      kind: 'discord',
+      name: 'Node.js',
+      description: { de: 'Für Bots mit discord.js, Eris, Sapphire & Co. (JavaScript/TypeScript).', en: 'For bots built with discord.js, Eris, Sapphire & co. (JavaScript/TypeScript).' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
   ],
 };
 
-export const plans: readonly PlanConfig[] = freeHostingConfig.plans;
 export const serverTypes: readonly ServerTypeConfig[] = freeHostingConfig.serverTypes;
 
-export function getPlan(id: string): PlanConfig | undefined {
-  return plans.find((p) => p.id === id);
+/** Servertypen eines Produkts (Minecraft: Paper, Vanilla … · Discord: Python, Node.js) */
+export function serverTypesOf(kind: ProductKind): ServerTypeConfig[] {
+  return serverTypes.filter((t) => t.kind === kind);
 }
 
 export function getServerType(id: string): ServerTypeConfig | undefined {

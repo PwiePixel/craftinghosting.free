@@ -27,7 +27,6 @@ export async function notify(input: NotifyInput): Promise<boolean> {
   const locale = await getUserLocale(input.userId);
   const result = await db
     .insert(notifications)
-    .ignore()
     .values({
       id: uuid(),
       userId: input.userId,
@@ -37,7 +36,8 @@ export async function notify(input: NotifyInput): Promise<boolean> {
       body: resolveText(input.body, locale),
       dedupeKey: input.dedupeKey.slice(0, 191),
       emailStatus: input.email ? 'pending' : 'none',
-    });
+    })
+    .onConflictDoNothing();
   return affectedRows(result) === 1;
 }
 

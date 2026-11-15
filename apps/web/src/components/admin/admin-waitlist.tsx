@@ -7,8 +7,9 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Minus, Plus, Unlock, UserPlus } from 'lucide-react';
-import { formatDateTime, freeHostingConfig, type AdminWaitlistBlockDTO, type AdminWaitlistDTO, type SiteSettings } from '@chfree/shared';
+import { formatDateTime, freeHostingConfig, serverTypesOf, type AdminWaitlistBlockDTO, type AdminWaitlistDTO, type ProductKind, type SiteSettings } from '@chfree/shared';
 import { ActionButton } from '@/components/admin/admin-actions';
+import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { Labeled, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -31,7 +32,16 @@ function queueRows(entries: AdminWaitlistDTO[], blocks: AdminWaitlistBlockDTO[])
   return rows;
 }
 
-export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitlistDTO[]; blocks?: AdminWaitlistBlockDTO[] }) {
+export function WaitlistManager({
+  entries,
+  blocks = [],
+  showTier = true,
+}: {
+  entries: AdminWaitlistDTO[];
+  blocks?: AdminWaitlistBlockDTO[];
+  /** Spalte „Hardware“ (EPYC/Xeon) – nur wenn es EPYC-Plätze gibt */
+  showTier?: boolean;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [count, setCount] = useState(10);
@@ -53,7 +63,7 @@ export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitli
           (res.released === 0
             ? 'Keine Plätze freigeschaltet.'
             : `${res.released} ${res.released === 1 ? 'Platz' : 'Plätze'} freigeschaltet – ${res.created} Server sofort erstellt, die übrigen Nutzer bekommen eine E-Mail zum Einrichten des Panel-Zugangs.`) +
-          (res.skippedFull > 0 ? ` ${res.skippedFull} nicht freigeschaltet, weil das Paket ausgebucht ist (Einstellungen → Pakete & Kapazität).` : ''),
+          (res.skippedFull > 0 ? ` ${res.skippedFull} nicht freigeschaltet, weil das Paket bzw. Produkt ausgebucht ist (Einstellungen → Produkte & Pakete).` : ''),
       });
       router.refresh();
     } catch (err) {
@@ -109,7 +119,7 @@ export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitli
                   onChange={(e) => setSelected(e.target.checked ? new Set(confirmed.map((c) => c.id)) : new Set())}
                 />
               </th>
-              {['Platz', 'Hardware', 'Server', 'E-Mail', 'Panel-Konto', 'Eingetragen', ''].map((h) => (
+              {['Platz', ...(showTier ? ['Hardware'] : []), 'Server', 'E-Mail', 'Panel-Konto', 'Eingetragen', ''].map((h) => (
                 <th key={h} className="px-3 py-2.5 font-medium whitespace-nowrap">
                   {h}
                 </th>
@@ -125,7 +135,7 @@ export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitli
                     #{row.b.fromRank}
                     {row.b.count > 1 ? ` – #${row.b.toRank}` : ''}
                   </td>
-                  <td colSpan={6} className="px-3 py-2.5 text-gray-200">
+                  <td colSpan={showTier ? 6 : 5} className="px-3 py-2.5 text-gray-200">
                     {row.b.count.toLocaleString('de-DE')} {row.b.count === 1 ? 'Vormerkung' : 'Vormerkungen'} außerhalb der Website
                     <span className="text-subtle">{row.b.at ? ` · hinzugefügt ${fmt(row.b.at)}` : ''} · Freischalten außerhalb (z. B. altes System)</span>
                   </td>
@@ -146,13 +156,15 @@ export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitli
                 <td className="px-3 py-2.5 whitespace-nowrap">
                   {e.rank !== null ? <span className="font-semibold text-white">#{e.rank}</span> : <span className="text-amber-300">E-Mail unbestätigt</span>}
                 </td>
-                <td className="px-3 py-2.5 whitespace-nowrap">
-                  {e.tier ? <span className={e.tier === 'epyc' ? 'text-blue-300' : 'text-gray-200'}>{e.tier === 'epyc' ? 'AMD EPYC' : 'Intel Xeon'}</span> : '–'}
-                </td>
+                {showTier && (
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {e.tier ? <span className={e.tier === 'epyc' ? 'text-blue-300' : 'text-gray-200'}>{e.tier === 'epyc' ? 'AMD EPYC' : 'Intel Xeon'}</span> : '–'}
+                  </td>
+                )}
                 <td className="px-3 py-2.5">
                   <p className="font-medium text-white">{e.name}</p>
                   <p className="text-[11px] text-subtle">
-                    {e.planId} · {e.serverType} {e.version}
+                    {PRODUCT_SHORT[e.kind] ?? e.kind} · {e.planId} · {e.serverType} {e.version}
                   </p>
                 </td>
                 <td className="px-3 py-2.5">
@@ -178,7 +190,7 @@ export function WaitlistManager({ entries, blocks = [] }: { entries: AdminWaitli
             )}
             {entries.length === 0 && blocks.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted">
+                <td colSpan={showTier ? 8 : 7} className="px-3 py-8 text-center text-muted">
                   Niemand auf der Warteliste.
                 </td>
               </tr>
@@ -207,12 +219,20 @@ function parseLines(text: string) {
     });
 }
 
-export function WaitlistAddForm() {
+/** Paket aus den Einstellungen (beide Produkte) */
+export type WaitlistPlanOption = { id: string; name: string; kind: ProductKind; enabled: boolean; highlighted?: boolean };
+
+const defaultTypeId = (kind: ProductKind) => {
+  const types = serverTypesOf(kind);
+  return (types.find((t) => t.recommended) ?? types[0])?.id ?? '';
+};
+
+export function WaitlistAddForm({ plans }: { plans: WaitlistPlanOption[] }) {
   const router = useRouter();
-  const { plans, serverTypes } = freeHostingConfig;
   const [text, setText] = useState('');
-  const [planId, setPlanId] = useState((plans.find((p) => p.highlighted) ?? plans[0]!).id);
-  const [typeId, setTypeId] = useState((serverTypes.find((t) => t.recommended) ?? serverTypes[0]!).id);
+  const initialPlan = plans.find((p) => p.enabled && p.highlighted) ?? plans.find((p) => p.enabled) ?? plans[0];
+  const [planId, setPlanId] = useState(initialPlan?.id ?? '');
+  const [typeId, setTypeId] = useState(defaultTypeId(initialPlan?.kind ?? 'minecraft'));
   const [locale, setLocale] = useState<'de' | 'en'>('de');
   const [priority, setPriority] = useState(true);
   const [notify, setNotify] = useState(true);
@@ -220,19 +240,23 @@ export function WaitlistAddForm() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AddResult | null>(null);
   const entries = parseLines(text);
-  const type = serverTypes.find((t) => t.id === typeId)!;
+  const plan = plans.find((p) => p.id === planId) ?? plans[0];
+  // Nur Servertypen des Produkts, zu dem das Paket gehört
+  const serverTypes = serverTypesOf(plan?.kind ?? 'minecraft');
+  const type = serverTypes.find((t) => t.id === typeId) ?? serverTypes[0];
 
   return (
     <form
       className="space-y-4"
       onSubmit={async (e) => {
         e.preventDefault();
+        if (!plan || !type) return;
         setPending(true);
         setError(null);
         setResult(null);
         try {
           const res = await api<AddResult>('/admin/waitlist/add', {
-            body: { entries, planId, serverType: typeId, version: type.defaultVersion, locale, priority, notify },
+            body: { entries, planId: plan.id, serverType: type.id, version: type.defaultVersion, locale, priority, notify },
           });
           setResult(res);
           if (res.added.length) setText('');
@@ -244,7 +268,7 @@ export function WaitlistAddForm() {
         }
       }}
     >
-      <Labeled label="E-Mail-Adressen" hint="Eine Person pro Zeile, optional mit Servername: „mail@example.com, Survival“. Doppelte Adressen und Personen mit Server/Platz werden übersprungen.">
+      <Labeled label="E-Mail-Adressen" hint="Eine Person pro Zeile, optional mit Server- bzw. Bot-Name: „mail@example.com, Survival“. Doppelte Adressen und Personen mit Server/Platz werden übersprungen.">
         <textarea
           className="input h-32 py-2.5 font-mono text-[13px]"
           value={text}
@@ -253,17 +277,34 @@ export function WaitlistAddForm() {
         />
       </Labeled>
       <div className="grid gap-4 sm:grid-cols-3">
-        <Labeled label="Paket">
-          <select className="input" value={planId} onChange={(e) => setPlanId(e.target.value)}>
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+        <Labeled label="Paket" hint={plan ? `Produkt: ${PRODUCT_LABEL[plan.kind]}` : undefined}>
+          <select
+            className="input"
+            value={plan?.id ?? ''}
+            onChange={(e) => {
+              const next = plans.find((p) => p.id === e.target.value);
+              setPlanId(e.target.value);
+              // Produkt gewechselt → Servertyp des neuen Produkts vorbelegen
+              if (next && next.kind !== plan?.kind) setTypeId(defaultTypeId(next.kind));
+            }}
+          >
+            {(Object.keys(PRODUCT_LABEL) as ProductKind[]).map((kind) => {
+              const group = plans.filter((p) => p.kind === kind);
+              return group.length > 0 ? (
+                <optgroup key={kind} label={PRODUCT_LABEL[kind]}>
+                  {group.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.enabled ? '' : ' (inaktiv)'}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null;
+            })}
           </select>
         </Labeled>
-        <Labeled label="Servertyp" hint="Version: neueste – im Panel änderbar">
-          <select className="input" value={typeId} onChange={(e) => setTypeId(e.target.value)}>
+        <Labeled label={plan?.kind === 'discord' ? 'Laufzeit' : 'Servertyp'} hint="Version: neueste – im Panel änderbar">
+          <select className="input" value={type?.id ?? ''} onChange={(e) => setTypeId(e.target.value)}>
             {serverTypes.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -279,11 +320,11 @@ export function WaitlistAddForm() {
         </Labeled>
       </div>
       <div className="space-y-3">
-        <Toggle checked={priority} onChange={setPriority} label="Vor allen bisherigen Einträgen einreihen" hint="Für Vormerkungen, die älter sind als die Anmeldungen über die Website – sie bekommen die vorderen Plätze (EPYC zuerst)." />
+        <Toggle checked={priority} onChange={setPriority} label="Vor allen bisherigen Einträgen einreihen" hint="Für Vormerkungen, die älter sind als die Anmeldungen über die Website – sie bekommen die vorderen Plätze." />
         <Toggle checked={notify} onChange={setNotify} label="Per E-Mail über den reservierten Platz informieren" />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" icon={<UserPlus />} loading={pending} disabled={entries.length === 0}>
+        <Button type="submit" icon={<UserPlus />} loading={pending} disabled={entries.length === 0 || !plan || !type}>
           {entries.length > 0 ? `${entries.length} ${entries.length === 1 ? 'Person' : 'Personen'} hinzufügen` : 'Hinzufügen'}
         </Button>
         {error && <span className="text-sm text-red-300">{error}</span>}

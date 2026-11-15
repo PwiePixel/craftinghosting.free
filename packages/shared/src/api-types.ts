@@ -1,6 +1,8 @@
 /**
  * Datenobjekte, die die API an das Frontend ausliefert.
  */
+import type { PlanConfig, ProductKind } from './config/freehosting.config';
+import type { Localized } from './i18n';
 import type {
   CycleState,
   FairUseState,
@@ -42,6 +44,10 @@ export interface VerifyResult {
 export interface ServerDTO {
   id: string;
   name: string;
+  /** Minecraft-Server oder Discord-Bot */
+  kind: ProductKind;
+  /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
+  fairUseEnabled: boolean;
   planId: string;
   planName: string;
   serverType: string;
@@ -142,9 +148,11 @@ export interface AdminJobDTO {
 
 export interface AdminOverviewDTO {
   site: { maintenance: boolean; registrationMode: RegistrationMode; maxServersPerUser: number; waitlistConfirmed: number; waitlistUnconfirmed: number };
+  /** Belegung je Produkt (Minecraft / Discord-Bots) */
+  products: { kind: ProductKind; enabled: boolean; count: number; reserved: number; capacity: number | null }[];
   users: { total: number; verified: number; locked: number; admins: number; newLast7Days: number };
   servers: { byStatus: Record<string, number>; online: number; paused: number; total: number };
-  plans: { id: string; name: string; count: number; reserved: number; capacity: number | null }[];
+  plans: { id: string; kind: ProductKind; name: string; count: number; reserved: number; capacity: number | null }[];
   mails: { pending: number; failed: number; lastError: string | null };
   jobs: AdminJobDTO[];
   system: {
@@ -160,6 +168,7 @@ export interface AdminOverviewDTO {
 export interface AdminServerDTO {
   id: string;
   name: string;
+  kind: ProductKind;
   ownerId: string;
   ownerEmail: string;
   ownerLocale: 'de' | 'en';
@@ -196,6 +205,9 @@ export interface AdminUserDTO {
   panelAdminUrl: string | null;
   servers: number;
   lastLoginAt: string | null;
+  /** IP-Adressen (verschlüsselt gespeichert, nur im Admin-Bereich sichtbar) */
+  registrationIp: string | null;
+  lastLoginIp: string | null;
   createdAt: string;
 }
 
@@ -257,8 +269,20 @@ export interface SiteSettings {
     /** EPYC-Plätze, die außerhalb dieser Website schon belegt sind (z. B. Server im alten System) */
     epycReserved: number;
   };
-  /** Kapazität je Paket (Schlüssel = Paket-ID) */
-  plans: Record<string, PlanCapacitySetting>;
+  /** Produkte: Minecraft-Server und Discord-Bots – jeweils mit eigenen Paketen, Kapazität, Nodes und Eggs */
+  products: Record<ProductKind, ProductSettings>;
+  /** Angaben zur Hardware auf der Website */
+  hardware: {
+    /** Rechenzentrums-Standorte (Ländercode + Name) */
+    locations: HardwareLocation[];
+    cpus: string[];
+  };
+  /** Spenden-Seite (Zahlungslink von SumUp) */
+  donate: {
+    enabled: boolean;
+    /** Zahlungslink, z. B. https://pay.sumup.com/b2c/… */
+    url: string;
+  };
   stats: {
     /** Zahlen auf der Startseite anzeigen */
     show: boolean;
@@ -282,11 +306,45 @@ export interface WaitlistBlock {
   at: string | null;
 }
 
-export interface PlanCapacitySetting {
-  /** Höchstzahl gleichzeitiger Server dieses Pakets (null = unbegrenzt) */
-  capacity: number | null;
+export interface HardwareLocation {
+  /** Ländercode, z. B. DE */
+  code: string;
+  name: Localized;
+}
+
+/** Ein Paket, wie es im Admin-Bereich gepflegt wird */
+export interface PlanSetting extends PlanConfig {
+  /** false = nicht mehr wählbar (bestehende Server laufen weiter) */
+  enabled: boolean;
   /** Außerhalb dieser Website belegte Plätze (z. B. Server im alten System auf denselben Nodes) */
   reserved: number;
+}
+
+/** Egg in Pterodactyl (Nest + Egg) */
+export interface EggRef {
+  nestId: number;
+  eggId: number;
+  /** Anzeigename (nur zur Orientierung im Admin-Bereich) */
+  name: string;
+}
+
+export interface ProductSettings {
+  /** Produkt wird auf der Website angeboten */
+  enabled: boolean;
+  /** Höchstzahl gleichzeitiger Server dieses Produkts über alle Pakete (null = unbegrenzt) */
+  capacity: number | null;
+  /** Außerhalb dieser Website belegte Plätze */
+  reserved: number;
+  /** Fair-Use-System (max. Laufzeit am Stück + Wochen-Offline-Zeit). Aus = Dauerbetrieb, nur der 30-Tage-Zyklus gilt */
+  fairUse: boolean;
+  plans: PlanSetting[];
+  /**
+   * Pterodactyl-Nodes, auf denen Server dieses Produkts erstellt werden (leer = automatisch über
+   * die Locations aus der .env). Für Discord-Bots: die eigene Bot-Node.
+   */
+  nodeIds: number[];
+  /** Egg je Servertyp (Schlüssel = Servertyp-ID, z. B. paper, python, nodejs). Fehlt ein Eintrag, gilt die .env bzw. die automatische Erkennung */
+  eggs: Record<string, EggRef>;
 }
 
 /** Belegung eines Pakets */
@@ -297,6 +355,26 @@ export interface PlanAvailabilityDTO {
   used: number;
   remaining: number | null;
   available: boolean;
+}
+
+/** Paket mit Belegung für die Website */
+export interface PublicPlanDTO extends PlanConfig, PlanAvailabilityDTO {
+  kind: ProductKind;
+}
+
+/** Produkt mit Paketen und Belegung für die Website */
+export interface PublicProductDTO {
+  kind: ProductKind;
+  enabled: boolean;
+  fairUse: boolean;
+  capacity: number | null;
+  used: number;
+  remaining: number | null;
+  available: boolean;
+  /** Nur aktive Pakete */
+  plans: PublicPlanDTO[];
+  /** Servertypen und ob ein Egg dafür eingerichtet ist */
+  serverTypes: { id: string; available: boolean }[];
 }
 
 export interface WaitlistInfo {
@@ -310,7 +388,11 @@ export interface PublicSiteDTO {
   maintenance: { enabled: boolean; message: { en: string; de: string }; until: string | null };
   registration: { mode: RegistrationMode; maxServersPerUser: number };
   waitlist: { total: number | null; epycSlots: number; epycUsed: number; epycRemaining: number };
+  /** Belegung aller Pakete (beide Produkte) */
   plans: PlanAvailabilityDTO[];
+  products: Record<ProductKind, PublicProductDTO>;
+  hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
+  donate: { enabled: boolean; url: string | null };
   stats: { users: number; activeServers: number; uptime: number | null } | null;
 }
 
@@ -338,6 +420,7 @@ export interface AdminWaitlistDTO {
   name: string;
   email: string;
   locale: 'de' | 'en';
+  kind: ProductKind;
   planId: string;
   serverType: string;
   version: string;
@@ -358,4 +441,71 @@ export interface AdminIncidentInput {
   message: { en: string; de: string };
   startsAt: string | null;
   endsAt: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Pterodactyl im Admin-Bereich (Nodes und Eggs werden automatisch erkannt)   */
+/* -------------------------------------------------------------------------- */
+
+export interface AdminPanelNodeDTO {
+  id: number;
+  name: string;
+  fqdn: string;
+  locationId: number;
+  locationName: string | null;
+  memoryMb: number;
+  diskMb: number;
+  maintenance: boolean;
+  /** Freie Ports (Allokationen) – ohne freie Allokation kann kein Server erstellt werden */
+  freeAllocations: number | null;
+}
+
+export interface AdminPanelEggDTO {
+  nestId: number;
+  nestName: string;
+  eggId: number;
+  name: string;
+  description: string;
+  dockerImages: string[];
+}
+
+export interface AdminPanelDTO {
+  mode: 'live' | 'mock';
+  url: string;
+  /** Verbindung zum Panel steht (API-Keys gültig) */
+  connected: boolean;
+  error: string | null;
+  nodes: AdminPanelNodeDTO[];
+  eggs: AdminPanelEggDTO[];
+  /** Vorschlag der automatischen Erkennung je Servertyp */
+  suggestedEggs: Record<string, EggRef>;
+}
+
+/** Aktionen für alle Server auf einmal (Admin-Bereich) */
+export type BulkServerAction = 'suspend' | 'unsuspend' | 'delete';
+
+export interface BulkServerInput {
+  action: BulkServerAction;
+  /** all = alle Server · minecraft / discord = nur dieses Produkt */
+  kind: ProductKind | 'all';
+  /** E-Mail-Adressen der Konten, deren Server NICHT betroffen sind (zusätzlich zu allen Admin-Konten) */
+  exemptEmails: string[];
+  /** true = nur zählen, nichts ändern (Vorschau vor der Bestätigung) */
+  dryRun?: boolean;
+  /** Höchstzahl Server pro Aufruf – die Website ruft so lange auf, bis `remaining` 0 ist */
+  limit?: number;
+  /** So viele Treffer überspringen (bisher fehlgeschlagene Server, damit die Runde nicht hängen bleibt) */
+  skip?: number;
+}
+
+export interface BulkServerResult {
+  processed: number;
+  failed: number;
+  /** Noch betroffene Server nach diesem Aufruf */
+  remaining: number;
+  /** Ausgenommene Server (Admin-Konten + ausgewählte Konten) */
+  exempt: number;
+  /** Ausnahme-Adressen, zu denen es kein Konto gibt */
+  unknownEmails: string[];
+  errors: string[];
 }

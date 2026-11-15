@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, Check, Cpu, Users } from 'lucide-react';
-import { freeHostingConfig, homeSections, intlLocale, localePath, tr, type Locale, type PublicSiteDTO } from '@chfree/shared';
+import { ArrowRight, ArrowUpRight, Bot, Check, Cpu, Users } from 'lucide-react';
+import { homeSections, intlLocale, localePath, serverTypesOf, tr, type Locale, type PublicPlanDTO, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
 import { FaqList } from '@/components/home/faq-list';
 import { PanelPreview } from '@/components/home/panel-preview';
 import { ButtonLink } from '@/components/ui/button';
@@ -10,9 +10,8 @@ import { formatters, getDict, resolveLang } from '@/i18n';
 import { alternates } from '@/lib/seo';
 import { panelHost, site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
+import { siteTexts } from '@/lib/site-texts';
 import { cn } from '@/lib/utils';
-
-const { plans, hardware } = freeHostingConfig;
 
 type Props = { params: Promise<{ lang: string }> };
 
@@ -22,7 +21,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { alternates: alternates(lang, 'home') };
 }
 
-function JsonLd({ lang }: { lang: Locale }) {
+function JsonLd({ lang, plans }: { lang: Locale; plans: PublicPlanDTO[] }) {
   const t = getDict(lang).home;
   const data = {
     '@context': 'https://schema.org',
@@ -32,7 +31,7 @@ function JsonLd({ lang }: { lang: Locale }) {
       {
         '@type': 'Service',
         name: t.jsonLdService,
-        serviceType: 'Minecraft Server Hosting',
+        serviceType: 'Minecraft Server Hosting, Discord Bot Hosting',
         provider: { '@id': `${site.parentUrl}#organization` },
         areaServed: 'EU',
         url: `${site.url}${localePath(lang, 'home')}`,
@@ -66,6 +65,89 @@ function StatsBand({ stats, lang }: { stats: NonNullable<PublicSiteDTO['stats']>
   );
 }
 
+/** „Noch 412 von 500 Plätzen frei“ – Kapazität des Produkts aus dem Admin-Bereich */
+function Slots({ product, lang }: { product: PublicProductDTO; lang: Locale }) {
+  const h = getDict(lang).home;
+  if (product.capacity === null || product.remaining === null) return null;
+  const n = (v: number) => v.toLocaleString(intlLocale(lang));
+  const full = product.remaining <= 0;
+  return (
+    <p className={cn('mt-6 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[13px] font-medium', full ? 'border-amber-400/30 text-amber-300' : 'border-emerald-400/30 text-emerald-300')}>
+      <span className={cn('size-1.5 rounded-full', full ? 'bg-amber-400' : 'bg-emerald-400')} aria-hidden />
+      {full ? h.slotsFull : h.slotsLeft(n(product.remaining), n(product.capacity))}
+    </p>
+  );
+}
+
+/** Paketkarte – für Minecraft-Server und Discord-Bots. Alle Werte kommen aus den Paketen im Admin-Bereich. */
+function PlanCard({
+  plan,
+  lang,
+  closed,
+  early,
+  unavailable,
+}: {
+  plan: PublicPlanDTO;
+  lang: Locale;
+  closed: boolean;
+  early: boolean;
+  /** Produkt gerade nicht bestellbar (z. B. Discord-Bots noch ohne Node) */
+  unavailable?: boolean;
+}) {
+  const t = getDict(lang);
+  const h = t.home;
+  const f = formatters(lang);
+  const bot = plan.kind === 'discord';
+  const full = !plan.available;
+  const rows: [string, string][] = [
+    [h.planRows.ram, f.mb(plan.memoryMb)],
+    [h.planRows.cpu, h.planRows.cpuValue((plan.cpuPercent / 100).toLocaleString(intlLocale(lang)), plan.cpuPercent === 100)],
+    [h.planRows.disk, f.mb(plan.diskMb)],
+    ...(bot
+      ? ([[h.discord.rows.runtime, h.discord.rows.runtimeValue]] as [string, string][])
+      : ([[h.planRows.backups, h.planRows.backupsValue(plan.backups)]] as [string, string][])),
+    [h.planRows.manage, h.planRows.manageValue],
+  ];
+  return (
+    <div className={cn('flex flex-col rounded-xl border bg-surface p-7', plan.highlighted ? 'border-blue-500/60' : 'border-line')}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
+        {plan.highlighted && <span className="shrink-0 rounded-md bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-300">{h.morePower}</span>}
+      </div>
+      {tr(plan.tagline, lang) && <p className="mt-1 text-sm text-muted">{tr(plan.tagline, lang)}</p>}
+      <p className="mt-6 flex items-baseline gap-1.5">
+        <span className="text-4xl font-semibold tracking-tight text-white">{lang === 'en' ? '€0' : '0 €'}</span>
+        <span className="text-sm text-subtle">{t.common.perMonth}</span>
+      </p>
+      {plan.capacity !== null && plan.remaining !== null && (
+        <p className={cn('mt-2 text-[13px] font-medium', full ? 'text-amber-300' : 'text-emerald-300')}>
+          {full ? h.planFull : h.planLeft(plan.remaining.toLocaleString(intlLocale(lang)), plan.capacity.toLocaleString(intlLocale(lang)))}
+        </p>
+      )}
+      <dl className="mt-6 divide-y divide-line border-y border-line text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-4 py-2.5">
+            <dt className="text-muted">{k}</dt>
+            <dd className="text-right text-gray-100">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="mt-auto pt-7">
+        {!closed && !full && !unavailable && (
+          <ButtonLink href={localePath(lang, 'start', { plan: plan.id })} variant={plan.highlighted ? 'primary' : 'secondary'} className="w-full">
+            {early ? t.early.securePlan(plan.name) : bot ? h.discord.create(plan.name) : h.createPlan(plan.name)}
+          </ButtonLink>
+        )}
+        {!closed && (full || unavailable) && (
+          <span className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line text-[15px] text-subtle">
+            {unavailable && !full ? t.start.soonTitle : h.planFull}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Early Access: Warteliste und freie EPYC-Plätze unter dem Hero */
 function WaitlistInfo({ settings, lang }: { settings: PublicSiteDTO; lang: Locale }) {
   const t = getDict(lang).early;
@@ -93,17 +175,23 @@ export default async function HomePage({ params }: Props) {
   const lang = await resolveLang(params);
   const t = getDict(lang);
   const h = t.home;
-  const f = formatters(lang);
   const startHref = localePath(lang, 'start');
   const settings = await getSite();
+  const x = siteTexts(settings, lang);
+  const minecraft = settings.products.minecraft;
+  const discord = settings.products.discord;
+  const minecraftPlans = minecraft.enabled ? minecraft.plans : [];
+  const discordPlans = discord.enabled ? discord.plans : [];
+  // Discord-Bots sind erst bestellbar, wenn im Admin-Bereich Node und Egg zugewiesen sind
+  const discordReady = discord.serverTypes.some((st) => st.available);
   const mode = settings.registration.mode;
   const early = mode === 'preregistration';
   const closed = mode === 'closed';
   const ctaLabel = early ? t.early.cta : t.common.startFree;
-  const faqItems = [...(early ? [t.faq.earlyItem] : []), ...t.faq.items(settings.registration.maxServersPerUser)];
+  const faqItems = [...(early ? [t.faq.earlyItem(x.twoTiers)] : []), ...t.faq.items(settings.registration.maxServersPerUser, x.faq)];
   return (
     <>
-      <JsonLd lang={lang} />
+      <JsonLd lang={lang} plans={[...minecraftPlans, ...discordPlans]} />
 
       {/* ------------------------------------------------------------ Hero */}
       <section className="relative overflow-hidden">
@@ -121,11 +209,13 @@ export default async function HomePage({ params }: Props) {
                 h.kicker
               )}
             </p>
-            <h1 className="mt-5 text-[2.75rem] leading-[1.04] font-semibold tracking-[-0.04em] text-white sm:text-[4.25rem]">
+            <h1 className="mt-5 text-[2.5rem] leading-[1.04] font-semibold tracking-[-0.04em] text-white sm:text-[3.75rem]">
               {h.heroLine1}
+              {x.discord && <span className="block">{h.heroLine1b}</span>}
+              {!x.discord && '.'}
               <span className="block text-blue-400">{h.heroLine2}</span>
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted">{early ? t.early.heroText : h.heroText}</p>
+            <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted">{early ? t.early.heroText(x.twoTiers) : h.heroText(x.locationNames)}</p>
             {closed && (
               <Alert tone="warning" className="mt-6 max-w-xl">
                 {t.closed.text}
@@ -147,7 +237,7 @@ export default async function HomePage({ params }: Props) {
             </div>
             {early && <WaitlistInfo settings={settings} lang={lang} />}
             <dl className="mt-12 grid max-w-lg grid-cols-2 gap-x-8 gap-y-5 border-t border-line pt-8 sm:grid-cols-4">
-              {h.facts.map(([v, l]) => (
+              {h.facts(x.maxRam, x.locationCodes, x.locationCount).map(([v, l]) => (
                 <div key={l}>
                   <dt className="sr-only">{l}</dt>
                   <dd className="text-xl font-semibold text-white">{v}</dd>
@@ -167,7 +257,7 @@ export default async function HomePage({ params }: Props) {
       {/* ------------------------------------------------------- Hardware */}
       <section className="border-y border-line bg-surface/60">
         <div className="container-page flex flex-wrap items-center justify-center gap-x-8 gap-y-2 py-5 text-[13px] text-muted sm:justify-between">
-          {[...hardware.cpus, hardware.storage, hardware.network, h.datacenters].map((item) => (
+          {[...settings.hardware.cpus, settings.hardware.storage, settings.hardware.network, h.datacenters(x.locationNames, x.locationCount)].map((item) => (
             <span key={item} className="whitespace-nowrap">
               {item}
             </span>
@@ -182,7 +272,7 @@ export default async function HomePage({ params }: Props) {
             {h.howText}
           </SectionHead>
           <ol className="mt-12 grid overflow-hidden rounded-xl border border-line md:grid-cols-3">
-            {(early ? t.early.steps(panelHost) : h.steps(panelHost)).map(([title, text], i) => (
+            {(early ? t.early.steps(panelHost, x.twoTiers) : h.steps(panelHost)).map(([title, text], i) => (
               <li key={title} className={cn('bg-surface p-7 sm:p-8', i > 0 && 'border-t border-line md:border-t-0 md:border-l')}>
                 <span className="font-mono text-sm text-blue-400">0{i + 1}</span>
                 <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
@@ -194,78 +284,85 @@ export default async function HomePage({ params }: Props) {
       </section>
 
       {/* ---------------------------------------------------------- Pakete */}
-      <section id={homeSections.plans[lang]} className="scroll-mt-16 border-t border-line py-20 sm:py-28">
-        <div className="container-page">
-          <SectionHead label={h.plansLabel} title={h.plansTitle}>
-            {h.plansText}
-          </SectionHead>
-          <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {plans.map((p) => {
-              const cap = settings.plans.find((x) => x.id === p.id);
-              const full = cap ? !cap.available : false;
-              return (
-              <div key={p.id} className={cn('flex flex-col rounded-xl border bg-surface p-7', p.highlighted ? 'border-blue-500/60' : 'border-line')}>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">{p.name}</h3>
-                  {p.highlighted && <span className="rounded-md bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-300">{h.morePower}</span>}
-                </div>
-                <p className="mt-1 text-sm text-muted">{tr(p.tagline, lang)}</p>
-                <p className="mt-6 flex items-baseline gap-1.5">
-                  <span className="text-4xl font-semibold tracking-tight text-white">{lang === 'en' ? '€0' : '0 €'}</span>
-                  <span className="text-sm text-subtle">{t.common.perMonth}</span>
-                </p>
-                {cap && cap.capacity !== null && (
-                  <p className={cn('mt-2 text-[13px] font-medium', full ? 'text-amber-300' : 'text-emerald-300')}>
-                    {full ? h.planFull : h.planLeft(cap.remaining!.toLocaleString(intlLocale(lang)), cap.capacity.toLocaleString(intlLocale(lang)))}
-                  </p>
-                )}
-                <dl className="mt-6 divide-y divide-line border-y border-line text-sm">
-                  {[
-                    [h.planRows.ram, f.mb(p.memoryMb)],
-                    [h.planRows.cpu, h.planRows.cpuValue((p.cpuPercent / 100).toLocaleString(intlLocale(lang)), p.cpuPercent === 100)],
-                    [h.planRows.disk, f.mb(p.diskMb)],
-                    [h.planRows.backups, h.planRows.backupsValue(p.backups)],
-                    [h.planRows.manage, h.planRows.manageValue],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-4 py-2.5">
-                      <dt className="text-muted">{k}</dt>
-                      <dd className="text-right text-gray-100">{v}</dd>
-                    </div>
+      {minecraftPlans.length > 0 && (
+        <section id={homeSections.plans[lang]} className="scroll-mt-16 border-t border-line py-20 sm:py-28">
+          <div className="container-page">
+            <SectionHead label={h.plansLabel} title={h.plansTitle(minecraftPlans.length)}>
+              {h.plansText}
+            </SectionHead>
+            <Slots product={minecraft} lang={lang} />
+            <div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+              {minecraftPlans.map((p) => (
+                <PlanCard key={p.id} plan={p} lang={lang} closed={closed} early={early} />
+              ))}
+              <div className="flex flex-col rounded-xl border border-dashed border-line-strong p-7 md:col-span-2 lg:col-span-1">
+                <h3 className="text-lg font-semibold text-white">{h.premiumTitle}</h3>
+                <p className="mt-1 text-sm text-muted">{h.premiumSub}</p>
+                <p className="mt-6 text-[15px] leading-relaxed text-muted">{h.premiumText}</p>
+                <ul className="mt-6 space-y-2.5 text-sm text-gray-200">
+                  {h.premiumPoints.map((point) => (
+                    <li key={point} className="flex gap-2.5">
+                      <Check className="mt-0.5 size-4 shrink-0 text-blue-400" aria-hidden />
+                      {point}
+                    </li>
                   ))}
-                </dl>
-                {!closed && !full && (
-                  <ButtonLink href={localePath(lang, 'start', { plan: p.id })} variant={p.highlighted ? 'primary' : 'secondary'} className="mt-7 w-full">
-                    {early ? t.early.securePlan(p.name) : h.createPlan(p.name)}
+                </ul>
+                <div className="mt-auto pt-7">
+                  <ButtonLink href={site.parentPricingUrl} external variant="secondary" className="w-full">
+                    {h.premiumCta} <ArrowUpRight aria-hidden />
                   </ButtonLink>
-                )}
-                {!closed && full && (
-                  <span className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-lg border border-line text-[15px] text-subtle">{h.planFull}</span>
-                )}
-              </div>
-              );
-            })}
-            <div className="flex flex-col rounded-xl border border-dashed border-line-strong p-7 md:col-span-2 lg:col-span-1">
-              <h3 className="text-lg font-semibold text-white">{h.premiumTitle}</h3>
-              <p className="mt-1 text-sm text-muted">{h.premiumSub}</p>
-              <p className="mt-6 text-[15px] leading-relaxed text-muted">{h.premiumText}</p>
-              <ul className="mt-6 space-y-2.5 text-sm text-gray-200">
-                {h.premiumPoints.map((point) => (
-                  <li key={point} className="flex gap-2.5">
-                    <Check className="mt-0.5 size-4 shrink-0 text-blue-400" aria-hidden />
-                    {point}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-auto pt-7">
-                <ButtonLink href={site.parentPricingUrl} external variant="secondary" className="w-full">
-                  {h.premiumCta} <ArrowUpRight aria-hidden />
-                </ButtonLink>
+                </div>
               </div>
             </div>
           </div>
+        </section>
+      )}
 
-        </div>
-      </section>
+      {/* ------------------------------------------------------ Discord-Bots */}
+      {discordPlans.length > 0 && (
+        <section id={homeSections.discord[lang]} className="scroll-mt-16 border-t border-line py-20 sm:py-28">
+          <div className="container-page">
+            <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:items-end lg:gap-16">
+              <div>
+                <SectionHead label={h.discord.label} title={h.discord.title}>
+                  {h.discord.text}
+                </SectionHead>
+                <Slots product={discord} lang={lang} />
+                {!discordReady && <p className="mt-4 text-sm text-amber-300">{h.discord.soon}</p>}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Bot className="size-4 text-blue-400" aria-hidden />
+                  <span className="text-sm text-muted">{h.discord.runtimes}:</span>
+                  {serverTypesOf('discord').map((rt) => (
+                    <span key={rt.id} className="rounded-md border border-line-strong bg-surface px-2.5 py-1 font-mono text-xs text-gray-100">
+                      {rt.name}
+                    </span>
+                  ))}
+                </div>
+                <ul className="mt-5 grid gap-2.5 text-[15px] text-gray-200">
+                  {h.discord.points(discord.fairUse).map((point) => (
+                    <li key={point} className="flex gap-2.5">
+                      <Check className="mt-0.5 size-4 shrink-0 text-blue-400" aria-hidden />
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className={cn('mt-12 grid gap-5 md:grid-cols-2', discordPlans.length >= 4 ? 'xl:grid-cols-4' : 'lg:grid-cols-3')}>
+              {discordPlans.map((p) => (
+                <PlanCard key={p.id} plan={p} lang={lang} closed={closed} early={early} unavailable={!discordReady} />
+              ))}
+            </div>
+            <p className="mt-8 text-sm text-muted">
+              <Link href={localePath(lang, 'discordTerms')} className="text-blue-400 hover:text-blue-300">
+                {h.discord.termsLink}
+              </Link>
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* ---------------------------------------------------------- Regeln */}
       <section id={homeSections.rules[lang]} className="scroll-mt-16 border-t border-line py-20 sm:py-28">

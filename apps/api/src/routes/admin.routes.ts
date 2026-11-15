@@ -14,6 +14,8 @@ import {
   listIncidents,
   listMailProblems,
   listServersAdmin,
+  bulkServerAction,
+  getPanelInfo,
   deleteMatchingUsers,
   deleteUsersAdmin,
   listUsersAdmin,
@@ -35,6 +37,7 @@ const idParams = z.object({ id: z.string().uuid() });
 const listQuery = z.object({
   q: z.string().max(100).optional(),
   status: z.string().max(32).optional(),
+  kind: z.string().max(16).optional(),
   page: z.coerce.number().int().min(1).max(1_000_000).optional(),
 });
 
@@ -48,6 +51,29 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/users', async (request) => listUsersAdmin(listQuery.parse(request.query)));
   app.get('/admin/audit', async (request) => listAudit(listQuery.parse(request.query)));
   app.get('/admin/mails', async () => ({ mails: await listMailProblems() }));
+
+  /**
+   * Alle Server auf einmal sperren, entsperren oder löschen – Admin-Konten und die angegebenen Konten sind ausgenommen.
+   * Läuft in Runden; die Antwort enthält „remaining“.
+   */
+  app.post('/admin/servers/bulk', { config: { rateLimit: { max: 600, timeWindow: '10 minutes' } } }, async (request) => {
+    const body = z
+      .object({
+        action: z.enum(['suspend', 'unsuspend', 'delete']),
+        kind: z.enum(['all', 'minecraft', 'discord']).default('all'),
+        exemptEmails: z.array(z.string().trim().max(254)).max(1000).default([]),
+        dryRun: z.boolean().default(false),
+        limit: z.number().int().min(1).max(50).default(20),
+        skip: z.number().int().min(0).max(1_000_000).default(0),
+      })
+      .parse(request.body);
+    const result = await bulkServerAction(currentUser(request), body, request.ip);
+    if (!body.dryRun) invalidatePublicSite();
+    return result;
+  });
+
+  /** Pterodactyl: Verbindung, Nodes und Eggs (automatisch erkannt) */
+  app.get('/admin/panel', async () => ({ panel: await getPanelInfo() }));
 
   app.post('/admin/servers/:id/:action', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });

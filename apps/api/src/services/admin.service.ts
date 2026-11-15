@@ -2,11 +2,16 @@
  * Admin-Bereich: Übersicht, Listen und Eingriffe (Sperren, Verlängern, Pause aufheben …).
  * Jede Aktion wird im Audit-Log mit actor = admin protokolliert.
  */
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import {
   ADMIN_PAGE_SIZE,
+  allPlans,
   cycleEndFrom,
   freeHostingConfig,
+  productKinds,
+  type AdminPanelDTO,
+  type BulkServerInput,
+  type BulkServerResult,
   type AdminAuditDTO,
   type AdminJobDTO,
   type AdminMailDTO,
@@ -24,7 +29,7 @@ import {
 import { adminEmails, env, mailFrom, panelPublicUrl, smtpSecure } from '../env';
 import { affectedRows, db } from '../db/client';
 import { auditLogs, jobRuns, notifications, servers, statusIncidents, users, type Server, type User } from '../db/schema';
-import { uuid } from '../lib/crypto';
+import { decryptField, uuid } from '../lib/crypto';
 import { getSettings, waitlistRank } from './settings.service';
 import { toIncidentDTO } from './status.service';
 import { ApiError, Errors, L } from '../lib/errors';
@@ -32,6 +37,8 @@ import { isAdmin } from '../plugins/auth';
 import { deleteAccount } from './account.service';
 import { allJobs } from '../jobs/registry';
 import { pterodactyl } from '../pterodactyl';
+import { suggestEggs } from '../config/pterodactyl.config';
+import { mapLimit } from '../jobs/types';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { notificationMail } from './mail/templates';
@@ -43,6 +50,8 @@ const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const panelServerAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/servers/view/${id}` : null);
 const panelUserAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/users/view/${id}` : null);
 const escapeLike = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+/** LIKE mit „\\“ als Escape-Zeichen (SQLite kennt – anders als MySQL – kein Standard-Escape-Zeichen) */
+const like = (column: SQLWrapper, pattern: string): SQL => sql`${column} like ${pattern} escape '\\'`;
 
 /* ------------------------------------------------------------------ Übersicht */
 
@@ -74,7 +83,7 @@ export async function getOverview(): Promise<AdminOverviewDTO> {
       verified: sql<number>`sum(${users.emailVerifiedAt} is not null)`,
       locked: sql<number>`sum(${users.status} = 'locked')`,
       admins: sql<number>`sum(${users.role} = 'admin')`,
-      newLast7Days: sql<number>`sum(${users.createdAt} >= ${weekAgo})`,
+      newLast7Days: sql<number>`sum(${users.createdAt} >= ${weekAgo.getTime()})`,
     })
     .from(users);
   const statusRows = await db.select({ status: servers.status, n: count() }).from(servers).groupBy(servers.status);
@@ -82,14 +91,14 @@ export async function getOverview(): Promise<AdminOverviewDTO> {
   const [live] = await db
     .select({
       online: sql<number>`sum(${servers.powerState} in ('running','starting') and ${servers.status} = 'active')`,
-      paused: sql<number>`sum(${servers.pausedUntil} > ${now} and ${servers.status} = 'active')`,
+      paused: sql<number>`sum(${servers.pausedUntil} > ${now.getTime()} and ${servers.status} = 'active')`,
     })
     .from(servers);
   const planRows = await db
-    .select({ planId: servers.planId, n: count() })
+    .select({ kind: servers.kind, planId: servers.planId, n: count() })
     .from(servers)
     .where(inArray(servers.status, ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended']))
-    .groupBy(servers.planId);
+    .groupBy(servers.kind, servers.planId);
   const [mailPending] = await db.select({ n: count() }).from(notifications).where(eq(notifications.emailStatus, 'pending'));
   const [mailFailed] = await db.select({ n: count() }).from(notifications).where(eq(notifications.emailStatus, 'failed'));
   const [lastMailError] = await db
@@ -123,12 +132,20 @@ export async function getOverview(): Promise<AdminOverviewDTO> {
       paused: Number(live?.paused ?? 0),
       total: Object.entries(byStatus).reduce((a, [k, v]) => (k === 'deleted' ? a : a + v), 0),
     },
-    plans: freeHostingConfig.plans.map((p) => ({
+    products: productKinds.map((kind) => ({
+      kind,
+      enabled: settings.products[kind].enabled,
+      count: planRows.filter((r) => r.kind === kind).reduce((sum, r) => sum + Number(r.n), 0),
+      reserved: settings.products[kind].reserved,
+      capacity: settings.products[kind].capacity,
+    })),
+    plans: allPlans(settings).map((p) => ({
       id: p.id,
+      kind: p.kind,
       name: p.name,
       count: Number(planRows.find((r) => r.planId === p.id)?.n ?? 0),
-      reserved: settings.plans[p.id]?.reserved ?? 0,
-      capacity: settings.plans[p.id] ? settings.plans[p.id]!.capacity : p.capacity,
+      reserved: p.reserved,
+      capacity: p.capacity,
     })),
     mails: { pending: Number(mailPending?.n ?? 0), failed: Number(mailFailed?.n ?? 0), lastError: lastMailError?.e ?? null },
     jobs: await jobStatus(now),
@@ -152,8 +169,11 @@ function paging(page: number | undefined, total: number): PageInfo & { offset: n
   return { page: p, pageSize: ADMIN_PAGE_SIZE, total, pages, offset: (p - 1) * ADMIN_PAGE_SIZE };
 }
 
-export async function listServersAdmin(filter: { q?: string; status?: string; page?: number }): Promise<{ servers: AdminServerDTO[] } & PageInfo> {
+export async function listServersAdmin(
+  filter: { q?: string; status?: string; kind?: string; page?: number },
+): Promise<{ servers: AdminServerDTO[] } & PageInfo> {
   const conds: SQL[] = [];
+  if (filter.kind === 'minecraft' || filter.kind === 'discord') conds.push(eq(servers.kind, filter.kind));
   if (filter.status && filter.status !== 'all') conds.push(eq(servers.status, filter.status as Server['status']));
   else conds.push(ne(servers.status, 'deleted'));
   if (filter.q?.trim()) {
@@ -177,6 +197,7 @@ export async function listServersAdmin(filter: { q?: string; status?: string; pa
   const list = rows.map(({ s, email, locale }) => ({
     id: s.id,
     name: s.name,
+    kind: s.kind,
     ownerId: s.userId,
     ownerEmail: email,
     ownerLocale: locale,
@@ -216,7 +237,7 @@ export const USER_FILTERS = {
  * Server je Nutzer als Unterabfrage. Bewusst mit festen Tabellen-Aliasen: Drizzle lässt bei Abfragen auf nur
  * eine Tabelle den Tabellennamen weg – aus `servers.user_id = users.id` würde sonst `user_id = id` (falsch).
  */
-const userServerCount = sql<number>`(select count(*) from \`servers\` s_cnt where s_cnt.\`user_id\` = \`users\`.\`id\` and s_cnt.\`status\` <> 'deleted')`;
+const userServerCount = sql<number>`(select count(*) from "servers" s_cnt where s_cnt."user_id" = "users"."id" and s_cnt."status" <> 'deleted')`;
 
 /** Admin = Rolle in der Datenbank oder Adresse in ADMIN_EMAILS */
 function adminCond(): SQL {
@@ -232,7 +253,7 @@ function userConds(filter: { q?: string; status?: string }): SQL[] {
   if (filter.status === 'locked') conds.push(eq(users.status, 'locked'));
   if (filter.status === 'admins') conds.push(adminCond());
   if (filter.status === 'no-servers') conds.push(sql`${userServerCount} = 0`);
-  if (filter.status === 'waitlist') conds.push(sql`exists (select 1 from \`servers\` s_wl where s_wl.\`user_id\` = \`users\`.\`id\` and s_wl.\`status\` = 'waitlist')`);
+  if (filter.status === 'waitlist') conds.push(sql`exists (select 1 from "servers" s_wl where s_wl."user_id" = "users"."id" and s_wl."status" = 'waitlist')`);
   return conds;
 }
 
@@ -268,6 +289,8 @@ export async function listUsersAdmin(
     panelAdminUrl: panelUserAdminUrl(u.pteroUserId),
     servers: Number(n),
     lastLoginAt: iso(u.lastLoginAt),
+    registrationIp: decryptField(u.registrationIp),
+    lastLoginIp: decryptField(u.lastLoginIp),
     createdAt: u.createdAt.toISOString(),
   }));
   return { users: list, deletable: Number(deletableRow?.n ?? 0), ...info };
@@ -294,7 +317,7 @@ export async function listAudit(filter: { q?: string; page?: number }): Promise<
     message: a.message,
     userEmail: email ?? null,
     serverId: a.serverId,
-    ip: a.ip,
+    ip: decryptField(a.ip),
   }));
   return { entries: list, ...info };
 }
@@ -420,6 +443,111 @@ export async function serverAction(admin: User, id: string, action: ServerAction
       return;
     }
   }
+}
+
+/* ------------------------------------------------------- Alle Server auf einmal */
+
+/**
+ * Sperrt, entsperrt oder löscht ALLE Server – außer denen von Admin-Konten und ausgewählten Konten.
+ *  – suspend:   alle aktiven Server werden vom Team gesperrt (im Panel suspendiert, Daten bleiben erhalten)
+ *  – unsuspend: hebt genau diese Team-Sperren wieder auf (abgelaufene Server bleiben abgelaufen)
+ *  – delete:    löscht die Server samt Daten im Panel – auch Anfragen und Wartelisten-Plätze
+ * Arbeitet in Runden (`limit` Server pro Aufruf); die Website ruft so lange auf, bis `remaining` 0 ist.
+ */
+export async function bulkServerAction(admin: User, input: BulkServerInput, ip?: string): Promise<BulkServerResult> {
+  // Ausgenommene Konten: alle Admins (Rolle oder ADMIN_EMAILS) + die angegebenen Adressen
+  const wanted = [...new Set(input.exemptEmails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  const exemptRows = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(or(adminCond(), wanted.length ? inArray(users.email, wanted) : undefined));
+  const exemptIds = exemptRows.map((r) => r.id);
+  const known = new Set(exemptRows.map((r) => r.email.toLowerCase()));
+  const unknownEmails = wanted.filter((e) => !known.has(e));
+
+  const base: SQL[] = [];
+  if (input.kind !== 'all') base.push(eq(servers.kind, input.kind));
+  if (input.action === 'suspend') base.push(inArray(servers.status, ['active', 'expiring']));
+  else if (input.action === 'unsuspend') base.push(eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'admin'));
+  else base.push(ne(servers.status, 'deleted'));
+  const notExempt = exemptIds.length ? notInArray(servers.userId, exemptIds) : undefined;
+  const target = and(...base, notExempt);
+  const countTargets = async () => Number((await db.select({ n: count() }).from(servers).where(target))[0]?.n ?? 0);
+  const [exemptRow] = exemptIds.length
+    ? await db
+        .select({ n: count() })
+        .from(servers)
+        .where(and(...base, inArray(servers.userId, exemptIds)))
+    : [{ n: 0 }];
+  const exempt = Number(exemptRow?.n ?? 0);
+
+  if (input.dryRun) return { processed: 0, failed: 0, remaining: await countTargets(), exempt, unknownEmails, errors: [] };
+
+  const rows = await db
+    .select({ id: servers.id, name: servers.name })
+    .from(servers)
+    .where(target)
+    .orderBy(asc(servers.createdAt), asc(servers.id))
+    .limit(Math.min(Math.max(input.limit ?? 20, 1), 50))
+    .offset(Math.max(0, input.skip ?? 0));
+  if (rows.length > 0 && !input.skip) {
+    await audit({
+      actor: 'admin',
+      action: `admin.bulk_${input.action}`,
+      message: `Massenaktion „${input.action}“ für ${input.kind === 'all' ? 'alle Server' : input.kind} gestartet – ${exempt} Server ausgenommen (durch ${admin.email})`,
+      ip,
+    });
+  }
+  let processed = 0;
+  const errors: string[] = [];
+  await mapLimit(rows, 4, async (row) => {
+    try {
+      await serverAction(admin, row.id, input.action, ip);
+      processed++;
+    } catch (err) {
+      errors.push(`${row.name}: ${(err as Error).message}`.slice(0, 200));
+    }
+  });
+  return { processed, failed: errors.length, remaining: await countTargets(), exempt, unknownEmails, errors: errors.slice(0, 10) };
+}
+
+/* ------------------------------------------------------------- Pterodactyl */
+
+/**
+ * Verbindung zum Panel prüfen und alles einlesen, was dort eingerichtet ist: Nodes (mit freien Ports) und alle Eggs.
+ * Im Admin-Bereich werden daraus die Nodes für Minecraft bzw. Discord-Bots und die Eggs je Servertyp ausgewählt.
+ */
+export async function getPanelInfo(): Promise<AdminPanelDTO> {
+  const ptero = pterodactyl();
+  const result: AdminPanelDTO = { mode: ptero.mode, url: panelPublicUrl, connected: false, error: null, nodes: [], eggs: [], suggestedEggs: {} };
+  try {
+    const [nodes, locations, eggs] = await Promise.all([ptero.listNodes(), ptero.listLocations().catch(() => []), ptero.listEggs()]);
+    const free = await Promise.all(nodes.map((n) => ptero.freeAllocations(n.id).then((f) => f.count, () => null)));
+    result.nodes = nodes.map((n, i) => {
+      const loc = locations.find((l) => l.id === n.locationId);
+      return {
+        id: n.id,
+        name: n.name,
+        fqdn: n.fqdn,
+        locationId: n.locationId,
+        locationName: loc ? loc.long || loc.short : null,
+        memoryMb: n.memoryMb,
+        diskMb: n.diskMb,
+        maintenance: n.maintenanceMode,
+        freeAllocations: free[i] ?? null,
+      };
+    });
+    result.eggs = eggs.map((e) => ({ ...e, description: e.description.slice(0, 200) }));
+    result.suggestedEggs = suggestEggs(eggs);
+    result.connected = true;
+    // Der Client-Key wird für Stopps, Ressourcen und Hinweise gebraucht
+    await ptero.pingClient().catch((err) => {
+      result.error = `Application-API-Key funktioniert, der Client-API-Key (PTERODACTYL_CLIENT_KEY) aber nicht: ${(err as Error).message}`;
+    });
+  } catch (err) {
+    result.error = (err as Error).message;
+  }
+  return result;
 }
 
 export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin';
@@ -584,6 +712,7 @@ export async function listWaitlist(opts: { offset?: number; limit?: number } = {
         name: s.name,
         email,
         locale,
+        kind: s.kind,
         planId: s.planId,
         serverType: s.serverType,
         version: s.version,

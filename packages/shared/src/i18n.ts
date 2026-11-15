@@ -58,6 +58,9 @@ export const routes = {
   terms: { en: '/terms', de: '/de/agb', internal: 'agb' },
   rules: { en: '/terms-of-use', de: '/de/nutzungsbedingungen', internal: 'nutzungsbedingungen' },
   cookies: { en: '/cookies', de: '/de/cookies', internal: 'cookies' },
+  /** Nutzungsbedingungen für das Discord-Bot-Hosting */
+  discordTerms: { en: '/discord-bot/terms-of-use', de: '/de/discord-bot/nutzungsbedingungen', internal: 'discord-bot/nutzungsbedingungen' },
+  donate: { en: '/donate', de: '/de/spenden', internal: 'spenden' },
 } as const satisfies Record<string, Record<Locale | 'internal', string>>;
 
 export type RouteKey = keyof typeof routes;
@@ -67,6 +70,7 @@ export const homeSections = {
   plans: { de: 'pakete', en: 'plans' },
   how: { de: 'ablauf', en: 'how-it-works' },
   rules: { de: 'regeln', en: 'rules' },
+  discord: { de: 'discord-bots', en: 'discord-bots' },
 } as const satisfies Record<string, Record<Locale, string>>;
 
 export type HomeSection = keyof typeof homeSections;
@@ -141,6 +145,7 @@ export const validationMessages: Record<Locale, Record<string, string>> = {
     'v.server_name_max': `Der Servername darf höchstens ${limits.serverNameMaxLength} Zeichen lang sein.`,
     'v.server_name_chars': 'Der Servername enthält ungültige Zeichen.',
     'v.plan_unknown': 'Unbekanntes Paket.',
+    'v.plan_type_mismatch': 'Dieses Paket passt nicht zum gewählten Servertyp.',
     'v.type_unknown': 'Unbekannter Servertyp.',
     'v.version_unavailable': 'Diese Version ist für den Servertyp nicht verfügbar.',
     'v.accept_terms': 'Bitte akzeptiere die Nutzungsbedingungen und AGB.',
@@ -159,6 +164,7 @@ export const validationMessages: Record<Locale, Record<string, string>> = {
     'v.server_name_max': `The server name must be at most ${limits.serverNameMaxLength} characters long.`,
     'v.server_name_chars': 'The server name contains invalid characters.',
     'v.plan_unknown': 'Unknown plan.',
+    'v.plan_type_mismatch': 'This plan does not match the selected server type.',
     'v.type_unknown': 'Unknown server type.',
     'v.version_unavailable': 'This version is not available for the selected server type.',
     'v.accept_terms': 'Please accept the terms of use and terms and conditions.',

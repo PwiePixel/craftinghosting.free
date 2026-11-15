@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowUpRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  freeHostingConfig,
+  allPlans,
   localePath,
+  productKinds,
   type AdminAuditDTO,
   type AdminMailDTO,
   type AdminOverviewDTO,
@@ -13,6 +14,7 @@ import {
   type AdminWaitlistBlockDTO,
   type AdminWaitlistDTO,
   type PageInfo,
+  type ProductKind,
   type PublicSiteDTO,
   type SiteSettings,
   type StatusDTO,
@@ -20,6 +22,9 @@ import {
   type UserDTO,
 } from '@chfree/shared';
 import { MailTestForm, RunJobButton, ServerActions } from '@/components/admin/admin-actions';
+import { ServerBulkActions } from '@/components/admin/admin-bulk';
+import { PanelManager } from '@/components/admin/admin-panel';
+import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm, StatusOverrides } from '@/components/admin/admin-settings';
 import { IncidentForm, IncidentList } from '@/components/admin/admin-status';
 import { UsersTable } from '@/components/admin/admin-users';
@@ -48,6 +53,7 @@ export const dynamic = 'force-dynamic';
 const TABS = [
   { id: 'overview', label: 'Übersicht' },
   { id: 'settings', label: 'Einstellungen' },
+  { id: 'panel', label: 'Pterodactyl' },
   { id: 'waitlist', label: 'Warteliste' },
   { id: 'status', label: 'Statusseite' },
   { id: 'servers', label: 'Server' },
@@ -189,7 +195,7 @@ const USER_FILTERS = {
   admins: 'Admins',
 } as const;
 
-function SearchBar({ tab, q, status }: { tab: Tab; q?: string; status?: string }) {
+function SearchBar({ tab, q, status, kind }: { tab: Tab; q?: string; status?: string; kind?: string }) {
   return (
     <form method="get" action={adminPath()} className="mb-4 flex flex-col gap-2 sm:flex-row">
       <input type="hidden" name="tab" value={tab} />
@@ -205,11 +211,21 @@ function SearchBar({ tab, q, status }: { tab: Tab; q?: string; status?: string }
         </select>
       )}
       {tab === 'servers' && (
-        <select name="status" defaultValue={status ?? ''} className="input sm:max-w-[220px]">
+        <select name="status" defaultValue={status ?? ''} className="input sm:max-w-[220px]" aria-label="Status">
           <option value="">Alle (ohne gelöschte)</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => (
             <option key={k} value={k}>
               {v.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {tab === 'servers' && (
+        <select name="kind" defaultValue={kind ?? ''} className="input sm:max-w-[200px]" aria-label="Produkt">
+          <option value="">Alle Produkte</option>
+          {productKinds.map((k) => (
+            <option key={k} value={k}>
+              {PRODUCT_LABEL[k]}
             </option>
           ))}
         </select>
@@ -222,6 +238,11 @@ function SearchBar({ tab, q, status }: { tab: Tab; q?: string; status?: string }
 }
 
 /* ---------------------------------------------------------------- Tabs */
+
+/** „12 / 100 belegt · 88 frei“ bzw. „12 belegt (unbegrenzt)“ */
+function usage(used: number, capacity: number | null): string {
+  return capacity !== null ? `${used} / ${capacity} belegt · ${Math.max(0, capacity - used)} frei` : `${used} belegt (unbegrenzt)`;
+}
 
 function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: SiteSettings | null; fmt: ReturnType<typeof formatters> }) {
   const s = o.servers.byStatus;
@@ -287,22 +308,40 @@ function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: Site
             <Stat label="Einrichtung fehlgeschlagen" value={s.provisioning_failed ?? 0} tone={s.provisioning_failed ? 'red' : undefined} />
           </div>
         </Card>
-        <Card title="Pakete">
-          <ul className="space-y-2 text-sm">
-            {o.plans.map((p) => {
-              const used = p.count + p.reserved;
+        <Card title="Produkte & Pakete">
+          <div className="space-y-4 text-sm">
+            {o.products.map((product) => {
+              const total = product.count + product.reserved;
               return (
-                <li key={p.id} className="flex justify-between gap-4">
-                  <span className="text-gray-200">{p.name}</span>
-                  <span className="text-right text-muted">
-                    {used}
-                    {p.capacity !== null ? ` / ${p.capacity} belegt · ${Math.max(0, p.capacity - used)} frei` : ' belegt (unbegrenzt)'}
-                    {p.reserved > 0 && <span className="block text-[11px] text-subtle">davon {p.reserved} außerhalb der Website</span>}
-                  </span>
-                </li>
+                <div key={product.kind}>
+                  <div className="flex justify-between gap-4 border-b border-line pb-1.5">
+                    <span className="font-medium text-white">
+                      {PRODUCT_LABEL[product.kind]}
+                      {!product.enabled && <span className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-normal text-gray-300">nicht angeboten</span>}
+                    </span>
+                    <span className="text-right text-gray-200">
+                      {usage(total, product.capacity)}
+                      {product.reserved > 0 && <span className="block text-[11px] text-subtle">davon {product.reserved} außerhalb der Website</span>}
+                    </span>
+                  </div>
+                  <ul className="mt-2 space-y-2">
+                    {o.plans
+                      .filter((p) => p.kind === product.kind)
+                      .map((p) => (
+                        <li key={p.id} className="flex justify-between gap-4">
+                          <span className="text-gray-200">{p.name}</span>
+                          <span className="text-right text-muted">
+                            {usage(p.count + p.reserved, p.capacity)}
+                            {p.reserved > 0 && <span className="block text-[11px] text-subtle">davon {p.reserved} außerhalb der Website</span>}
+                          </span>
+                        </li>
+                      ))}
+                    {!o.plans.some((p) => p.kind === product.kind) && <li className="text-subtle">Keine Pakete</li>}
+                  </ul>
+                </div>
               );
             })}
-          </ul>
+          </div>
         </Card>
         <Card title="E-Mails">
           <div className="grid grid-cols-2 gap-4">
@@ -375,7 +414,12 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
             <tr key={s.id}>
               <td className="px-3 py-2.5">
                 <p className="font-medium text-white">{s.name}</p>
-                <p className="font-mono text-[11px] text-subtle">{s.id.slice(0, 8)}</p>
+                <p className="mt-0.5 flex items-center gap-1.5">
+                  <span className={cn('rounded px-1.5 py-0.5 text-[11px]', s.kind === 'discord' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-emerald-500/10 text-emerald-300')}>
+                    {PRODUCT_SHORT[s.kind] ?? s.kind}
+                  </span>
+                  <span className="font-mono text-[11px] text-subtle">{s.id.slice(0, 8)}</span>
+                </p>
                 {s.panelAdminUrl && (
                   <a href={s.panelAdminUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-0.5 text-[12px] text-blue-400 hover:text-blue-300">
                     Panel #{s.pteroServerId} <ArrowUpRight className="size-3" aria-hidden />
@@ -492,9 +536,13 @@ function MailsTab({ list, me, o, fmt }: { list: AdminMailDTO[]; me: string; o: A
   );
 }
 
-function SettingsTab({ settings, pub }: { settings: SiteSettings; pub: PublicSiteDTO | null }) {
-  // Über die Website belegte Plätze je Paket (öffentliche Belegung minus außerhalb belegt)
-  const planCounts = Object.fromEntries((pub?.plans ?? []).map((p) => [p.id, Math.max(0, p.used - (settings.plans[p.id]?.reserved ?? 0))]));
+function SettingsTab({ settings, pub, overview }: { settings: SiteSettings; pub: PublicSiteDTO | null; overview: AdminOverviewDTO | null }) {
+  // Über die Website belegte Plätze je Paket und je Produkt: aus der Übersicht, sonst aus der öffentlichen Belegung minus „außerhalb belegt“
+  const plans = allPlans(settings);
+  const planCounts: Record<string, number> = overview
+    ? Object.fromEntries(overview.plans.map((p) => [p.id, p.count]))
+    : Object.fromEntries((pub?.plans ?? []).map((p) => [p.id, Math.max(0, p.used - (plans.find((x) => x.id === p.id)?.reserved ?? 0))]));
+  const productCounts: Partial<Record<ProductKind, number>> = overview ? Object.fromEntries(overview.products.map((p) => [p.kind, p.count])) : {};
   return (
     <div className="space-y-5">
       {pub && (
@@ -506,12 +554,31 @@ function SettingsTab({ settings, pub }: { settings: SiteSettings; pub: PublicSit
             <Stat label="Warteliste" value={pub.waitlist.total !== null ? pub.waitlist.total.toLocaleString('de-DE') : 'ausgeblendet'} />
           </dl>
           <ul className="mt-4 space-y-1 text-[13px] text-muted">
-            {pub.plans.map((p) => (
-              <li key={p.id}>
-                {freeHostingConfig.plans.find((x) => x.id === p.id)?.name ?? p.id}:{' '}
-                {p.capacity === null ? 'unbegrenzt' : p.available ? `noch ${p.remaining} von ${p.capacity} Plätzen frei` : 'ausgebucht'}
-              </li>
-            ))}
+            {productKinds.map((kind) => {
+              const product = pub.products?.[kind];
+              if (!product) return null;
+              return (
+                <li key={kind} className="text-gray-200">
+                  {PRODUCT_LABEL[kind]}:{' '}
+                  {!product.enabled
+                    ? 'nicht angeboten'
+                    : product.capacity === null
+                      ? 'unbegrenzt'
+                      : product.available
+                        ? `noch ${product.remaining} von ${product.capacity} Plätzen frei`
+                        : 'ausgebucht'}
+                </li>
+              );
+            })}
+            {pub.plans.map((p) => {
+              const plan = plans.find((x) => x.id === p.id);
+              return (
+                <li key={p.id}>
+                  {plan ? `${PRODUCT_SHORT[plan.kind]} · ${plan.name}` : p.id}:{' '}
+                  {p.capacity === null ? 'unbegrenzt' : p.available ? `noch ${p.remaining} von ${p.capacity} Plätzen frei` : 'ausgebucht'}
+                </li>
+              );
+            })}
             {pub.waitlist.epycSlots > 0 && (
               <li>
                 AMD EPYC: {pub.waitlist.epycUsed} von {pub.waitlist.epycSlots} Plätzen belegt, {pub.waitlist.epycRemaining} frei
@@ -521,7 +588,7 @@ function SettingsTab({ settings, pub }: { settings: SiteSettings; pub: PublicSit
           <p className="mt-3 text-[12px] text-subtle">Werte werden bis zu 10 Sekunden zwischengespeichert.</p>
         </Card>
       )}
-      <SettingsForm initial={settings} planCounts={planCounts} />
+      <SettingsForm initial={settings} planCounts={planCounts} productCounts={productCounts} />
     </div>
   );
 }
@@ -542,27 +609,30 @@ function WaitlistTab({
   pager: (list: React.ReactNode) => React.ReactNode;
 }) {
   const external = settings?.waitlist.externalCount ?? 0;
+  // EPYC-Plätze = 0 → es gibt nur eine Hardware-Stufe, EPYC wird nicht erwähnt
+  const epyc = (pub?.waitlist.epycSlots ?? settings?.waitlist.epycSlots ?? 0) > 0;
+  const plans = settings ? allPlans(settings).map((p) => ({ id: p.id, name: p.name, kind: p.kind, enabled: p.enabled, highlighted: p.highlighted ?? false })) : [];
   return (
     <div className="space-y-5">
       <Card title="Early Access">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+        <div className={cn('grid grid-cols-2 gap-4', epyc ? 'sm:grid-cols-5' : 'sm:grid-cols-3')}>
           <Stat label="Einträge über die Website" value={totalEntries.toLocaleString('de-DE')} />
           <Stat label="Vormerkungen außerhalb" value={external.toLocaleString('de-DE')} />
           <Stat label="öffentlich angezeigt" value={pub?.waitlist.total?.toLocaleString('de-DE') ?? 'ausgeblendet'} />
-          <Stat label="Plätze auf AMD EPYC" value={pub ? `${pub.waitlist.epycUsed} / ${pub.waitlist.epycSlots} belegt` : '–'} />
-          <Stat label="EPYC noch frei" value={pub?.waitlist.epycRemaining ?? '–'} />
+          {epyc && <Stat label="Plätze auf AMD EPYC" value={pub ? `${pub.waitlist.epycUsed} / ${pub.waitlist.epycSlots} belegt` : '–'} />}
+          {epyc && <Stat label="EPYC noch frei" value={pub?.waitlist.epycRemaining ?? '–'} />}
         </div>
         <p className="mt-4 text-[13px] leading-relaxed text-muted">
           Freischalten erstellt den Server sofort, wenn der Nutzer schon einen Panel-Zugang hat – sonst bekommt er eine E-Mail und legt den Zugang unter „Meine
-          Server“ fest. Die Hardware (EPYC/Xeon) richtet sich nach dem aktuellen Platz. Die Laufzeit von 30 Tagen beginnt mit der Freischaltung.
+          Server“ fest.{epyc ? ' Die Hardware (EPYC/Xeon) richtet sich nach dem aktuellen Platz.' : ''} Die Laufzeit von 30 Tagen beginnt mit der Freischaltung.
         </p>
       </Card>
-      {pager(<WaitlistManager entries={entries} blocks={blocks} />)}
+      {pager(<WaitlistManager entries={entries} blocks={blocks} showTier={epyc} />)}
       {settings && (
         <Card title="Vormerkungen außerhalb der Website (Anzahl)">
           <p className="mb-4 text-sm leading-relaxed text-muted">
             Für Vormerkungen, die du nur als Zahl hast (z. B. aus dem alten System). „Hinzufügen“ hängt sie als Block hinten an die Warteschlange: Sie belegen echte Plätze
-            (auch EPYC-Plätze), wer sich danach über die Website einträgt, kommt dahinter. Beispiel: 23 Anmeldungen + 890 Vormerkungen → der nächste bekommt Platz #914.
+            {epyc ? ' (auch EPYC-Plätze)' : ''}, wer sich danach über die Website einträgt, kommt dahinter. Beispiel: 23 Anmeldungen + 890 Vormerkungen → der nächste bekommt Platz #914.
             Öffentlich angezeigt: {pub?.waitlist.total?.toLocaleString('de-DE') ?? 'ausgeblendet'}.
           </p>
           <ExternalSpotsForm settings={settings} />
@@ -573,7 +643,13 @@ function WaitlistTab({
           Für Personen, die sich schon vorher eingetragen haben – z. B. im alten System oder per Discord. Sie bekommen einen echten Platz, erscheinen in der Liste oben, zählen in
           der öffentlichen Zahl mit und werden wie alle anderen freigeschaltet. Fehlende Konten werden angelegt; die Personen melden sich später per E-Mail-Link an.
         </p>
-        <WaitlistAddForm />
+        {plans.length > 0 ? (
+          <WaitlistAddForm plans={plans} />
+        ) : (
+          <p className="text-sm text-amber-300">
+            {settings ? 'Es gibt keine Pakete – bitte zuerst unter Einstellungen → Produkte & Pakete ein Paket anlegen.' : 'Die Pakete konnten nicht geladen werden.'}
+          </p>
+        )}
       </Card>
     </div>
   );
@@ -620,7 +696,8 @@ export default async function AdminPage({ params, searchParams }: Props) {
   const tab: Tab = TABS.some((t) => t.id === query.tab) ? (query.tab as Tab) : 'overview';
   const fmt = formatters('de');
   const page = Math.max(1, Math.floor(Number(query.page) || 1));
-  const filters = { ...(query.q ? { q: query.q } : {}), ...(query.status ? { status: query.status } : {}) };
+  const kind = tab === 'servers' && productKinds.some((k) => k === query.kind) ? query.kind : undefined;
+  const filters = { ...(query.q ? { q: query.q } : {}), ...(query.status ? { status: query.status } : {}), ...(kind ? { kind } : {}) };
   const suffix = `?${new URLSearchParams({ ...filters, page: String(page) }).toString()}`;
   /** Link zu einer Seite des aktuellen Tabs (Suche und Filter bleiben erhalten) */
   const pageHref = (p: number) => `${base}?${new URLSearchParams({ tab, ...filters, ...(p > 1 ? { page: String(p) } : {}) }).toString()}`;
@@ -632,7 +709,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
     </>
   );
 
-  const overview = tab === 'overview' || tab === 'mails' ? await apiServer<{ overview: AdminOverviewDTO }>('/admin/overview', lang) : null;
+  const overview = tab === 'overview' || tab === 'mails' || tab === 'settings' ? await apiServer<{ overview: AdminOverviewDTO }>('/admin/overview', lang) : null;
   if (overview && !overview.ok && overview.status === 404) notFound();
 
   let content: React.ReactNode = null;
@@ -645,8 +722,10 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'settings') {
     const pub = await apiServer<{ site: PublicSiteDTO }>('/site', lang);
     failed = !settings;
-    if (settings) content = <SettingsTab settings={settings} pub={pub.ok ? pub.data.site : null} />;
+    if (settings) content = <SettingsTab settings={settings} pub={pub.ok ? pub.data.site : null} overview={overview?.ok ? overview.data.overview : null} />;
   }
+  // Nodes und Eggs lädt die Komponente selbst – das Einlesen des Panels kann ein paar Sekunden dauern
+  if (tab === 'panel') content = <PanelManager />;
   if (tab === 'waitlist') {
     const [res, pub] = await Promise.all([
       apiServer<{ entries: AdminWaitlistDTO[]; blocks?: AdminWaitlistBlockDTO[] } & PageInfo>(`/admin/waitlist?page=${page}`, lang),
@@ -673,7 +752,13 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'servers') {
     const res = await apiServer<{ servers: AdminServerDTO[] } & PageInfo>(`/admin/servers${suffix}`, lang);
     failed = !res.ok;
-    if (res.ok) content = paged(res.data, 'Servern', <ServersTab list={res.data.servers} fmt={fmt} />);
+    if (res.ok)
+      content = (
+        <>
+          <ServerBulkActions />
+          {paged(res.data, 'Servern', <ServersTab list={res.data.servers} fmt={fmt} />)}
+        </>
+      );
   }
   if (tab === 'users') {
     const res = await apiServer<{ users: AdminUserDTO[]; deletable: number } & PageInfo>(`/admin/users${suffix}`, lang);
@@ -729,7 +814,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
       </nav>
 
       <div className="mt-6">
-        {(tab === 'servers' || tab === 'users' || tab === 'logs') && <SearchBar tab={tab} q={query.q} status={query.status} />}
+        {(tab === 'servers' || tab === 'users' || tab === 'logs') && <SearchBar tab={tab} q={query.q} status={query.status} kind={kind} />}
         {failed ? <Alert tone="error">Die Daten konnten nicht geladen werden. Läuft die API?</Alert> : content}
       </div>
     </div>

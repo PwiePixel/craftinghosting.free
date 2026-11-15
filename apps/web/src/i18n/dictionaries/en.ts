@@ -2,13 +2,14 @@
  * English texts of the website – same structure as de.ts (checked by TypeScript).
  */
 import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText } from '@chfree/shared';
-import type { Dictionary } from './de';
+import type { Dictionary, FaqContext } from './de';
 
-const { fairUse, cycle, plans, hardware, serverTypes } = freeHostingConfig;
+const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
+const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
+const botTypes = serverTypes.filter((t) => t.kind === 'discord');
 const hasRest = cycle.reactivationCooldownMinutes > 0;
 const rest = restPeriodText(cycle.reactivationCooldownMinutes, 'en');
 const afterRest = restPeriodAfterText(cycle.reactivationCooldownMinutes, 'en');
-const maxRam = formatMb(Math.max(...plans.map((p) => p.memoryMb)), 'en');
 const reminders = cycle.reminderDaysBefore.map((d) => (d === 1 ? '1 day' : `${d} days`)).join(' and ');
 const delH = cycle.deleteAfterRestHours;
 const epyc = hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
@@ -17,15 +18,19 @@ const perPerson = (max: number) => (max === 1 ? 'One free server is' : `${max} f
 
 export const en: Dictionary = {
   meta: {
-    title: 'CraftingHosting.free – Free Minecraft server by CraftingHosting',
-    shortTitle: 'CraftingHosting.free – Free Minecraft server',
+    title: 'CraftingHosting.free – Free Minecraft servers & Discord bots by CraftingHosting',
+    shortTitle: 'CraftingHosting.free – Free Minecraft servers & Discord bots',
     description:
-      'Free Minecraft server by Crafting Hosting: create it here, manage it in the Pterodactyl panel. Modern hardware in Germany and the Netherlands, NVMe storage – no monthly costs.',
+      'Free Minecraft server or Discord bot (Python, Node.js) by Crafting Hosting: create it here, manage it in the Pterodactyl panel. Modern hardware, NVMe storage – no monthly costs.',
     keywords: [
       'free Minecraft server',
       'Minecraft server free',
       'Free Minecraft Hosting',
       'Minecraft hosting Europe',
+      'free Discord bot hosting',
+      'host a Discord bot',
+      'Python Discord bot hosting',
+      'Node.js Discord bot hosting',
       'CraftingHosting',
       'Pterodactyl',
       'Paper server',
@@ -33,10 +38,10 @@ export const en: Dictionary = {
       'Forge server',
     ],
     ogLocale: 'en_GB',
-    ogImageAlt: 'CraftingHosting.free – Free Minecraft server by CraftingHosting',
-    ogTagline: 'Free Minecraft server. No hidden costs.',
-    ogChips: ['€0 / month', `up to ${maxRam} RAM`, 'NVMe', 'Pterodactyl', 'DE & NL'],
-    manifestDescription: 'Free Minecraft hosting by CraftingHosting',
+    ogImageAlt: 'CraftingHosting.free – Free Minecraft servers & Discord bots by CraftingHosting',
+    ogTagline: 'Free Minecraft servers & Discord bots. No hidden costs.',
+    ogChips: ['€0 / month', 'Minecraft', 'Discord bots', 'NVMe', 'Pterodactyl'],
+    manifestDescription: 'Free Minecraft and Discord bot hosting by CraftingHosting',
   },
 
   common: {
@@ -63,6 +68,7 @@ export const en: Dictionary = {
     rules: 'Rules',
     faq: 'FAQ',
     status: 'Status',
+    donate: 'Donate',
     main: 'Main navigation',
     mobile: 'Mobile navigation',
     openMenu: 'Open menu',
@@ -73,31 +79,36 @@ export const en: Dictionary = {
   },
 
   footer: {
-    aboutBefore: 'CraftingHosting.free is the free Minecraft hosting by ',
+    aboutBefore: 'CraftingHosting.free is the free Minecraft and Discord bot hosting by ',
     aboutAfter: '.',
     contact: 'Contact',
     imprint: 'Imprint',
     privacy: 'Privacy',
     terms: 'Terms',
     rules: 'Terms of use',
+    discordTerms: 'Discord bot terms of use',
     cookies: 'Cookies',
+    donate: 'Donate',
     label: 'Footer',
   },
 
   home: {
     kicker: 'The free offer by Crafting Hosting',
-    heroLine1: 'Minecraft server.',
+    heroLine1: 'Minecraft servers',
+    heroLine1b: '& Discord bots.',
     heroLine2: 'Free.',
-    heroText:
-      'No hidden costs and no payment details: create your server here, play and manage it in the Crafting Hosting Pterodactyl panel. Modern hardware in Germany and the Netherlands.',
+    heroText: (locations: string) =>
+      `No hidden costs and no payment details: create your Minecraft server or Discord bot here, manage it in the Crafting Hosting Pterodactyl panel. Modern hardware in ${locations}.`,
     howLink: 'How it works',
-    facts: [
+    facts: (maxRam: string, locationCodes: string, locationCount: number) => [
       ['€0', 'per month'],
       [`up to ${maxRam}`, 'RAM'],
       ['NVMe', 'SSD storage'],
-      [hardware.locations.map((l) => l.code).join(' · '), 'Locations'],
+      [locationCodes, locationCount === 1 ? 'Location' : 'Locations'],
     ],
-    datacenters: 'Data centers in Germany & the Netherlands',
+    datacenters: (locations: string, count: number) => `${count === 1 ? 'Data center' : 'Data centers'} in ${locations}`,
+    slotsLeft: (left: string, total: string) => `${left} of ${total} slots left`,
+    slotsFull: 'All slots are currently taken',
 
     howLabel: 'How it works',
     howTitle: 'Your own server in three steps.',
@@ -108,8 +119,8 @@ export const en: Dictionary = {
       ['Get started in the panel', `Sign in at ${panelHost}, start your server and play. Everything else runs automatically.`],
     ],
 
-    plansLabel: 'Plans',
-    plansTitle: 'Two plans. Both free.',
+    plansLabel: 'Minecraft plans',
+    plansTitle: (n: number) => (n === 1 ? 'One plan. Free.' : n === 2 ? 'Two plans. Both free.' : `${n} plans. All free.`),
     plansText: 'Free servers share the hardware of a node fairly. The values are upper limits, not guaranteed sustained performance.',
     morePower: 'More power',
     planRows: {
@@ -123,6 +134,23 @@ export const en: Dictionary = {
       manageValue: 'Pterodactyl panel',
     },
     createPlan: (name: string) => `Create ${name}`,
+
+    discord: {
+      label: 'Discord bots',
+      title: 'Your Discord bot. Online around the clock.',
+      text: 'Host your own Discord bot for free – in Python or Node.js. Upload your code, pick the start file, start it. Bots run on their own node, separate from the Minecraft servers.',
+      runtimes: 'Choose your runtime',
+      points: (fairUseOn: boolean) => [
+        `${botTypes.map((t) => t.name).join(' or ')} – discord.py, discord.js & co.`,
+        'Pterodactyl panel: console, file manager, SFTP, startup parameters',
+        fairUseOn ? `Fair use as for Minecraft: max. ${fairUse.maxSessionHours} h in a row` : 'Always on: no daily runtime limit',
+        `${cycle.days} days of runtime, renewable for free`,
+      ],
+      rows: { ram: 'Memory', cpu: 'CPU', disk: 'NVMe storage', runtime: 'Runtime', runtimeValue: botTypes.map((t) => t.name).join(' / ') },
+      create: (name: string) => `Create ${name}`,
+      termsLink: 'Terms of use for Discord bots',
+      soon: 'Discord bot hosting is launching shortly.',
+    },
     planLeft: (left: string, total: string) => `${left} of ${total} spots left`,
     planFull: 'Currently fully booked',
     premiumTitle: 'Need more power?',
@@ -168,7 +196,7 @@ export const en: Dictionary = {
     faqMoreMiddle: ' or ask us on ',
     faqMoreAfter: '.',
     ctaText: 'This is Crafting Hosting – just free. Your server is ready in a few minutes.',
-    jsonLdService: 'CraftingHosting.free – Free Minecraft hosting',
+    jsonLdService: 'CraftingHosting.free – Free Minecraft and Discord bot hosting',
   },
 
   panelPreview: {
@@ -179,8 +207,8 @@ export const en: Dictionary = {
   },
 
   start: {
-    metaTitle: 'Create a free Minecraft server',
-    metaDescription: 'Choose plan, server type and version, confirm your email, get started in the Pterodactyl panel – free at CraftingHosting.free.',
+    metaTitle: 'Create a free Minecraft server or Discord bot',
+    metaDescription: 'Pick a Minecraft server or a Discord bot, choose a plan, confirm your email, get started in the Pterodactyl panel – free at CraftingHosting.free.',
     title: 'Create server',
     intro: 'Choose your plan and software. After you confirm your email, your server is created automatically in the Pterodactyl panel.',
     hasServerTitle: 'You already have a free server',
@@ -191,12 +219,29 @@ export const en: Dictionary = {
     closedText: 'New servers cannot be requested right now. Existing servers keep running as usual. Check back soon – news is posted on Discord.',
     premiumOffers: 'Premium plans',
     asideTitle: 'What you get',
-    asidePoints: [
-      'Your own Minecraft server, €0 per month',
+    asidePoints: (cpus: string, locations: string, locationCount: number) => [
+      'Your own Minecraft server or Discord bot, €0 per month',
       'Pterodactyl panel: console, files, plugins, backups',
-      `${hardware.cpus.join(' / ')}, NVMe`,
-      'Locations in Germany & the Netherlands',
+      `${cpus}, NVMe`,
+      `${locationCount === 1 ? 'Location' : 'Locations'}: ${locations}`,
     ],
+    stepProduct: 'What would you like to host?',
+    products: {
+      minecraft: { name: 'Minecraft server', text: 'Paper, Vanilla, Fabric, Forge …' },
+      discord: { name: 'Discord bot', text: 'Python or Node.js' },
+    },
+    productUnavailable: 'currently not available',
+    stepRuntime: 'Runtime',
+    runtimeGroup: 'Programming language',
+    runtimeHint: 'You set the exact version (e.g. Python 3.12 or Node.js 22) later in the panel under “Startup”.',
+    nameHintBot: 'This is the name of your bot server in the panel, e.g. “My music bot”.',
+    noPlans: 'There are currently no plans for this offer.',
+    acceptRulesBot: 'terms of use for Discord bots',
+    acceptSummaryBot: (fairUseOn: boolean) =>
+      `: ${fairUseOn ? `max. ${fairUse.maxSessionHours} h in a row, ${fairUse.weeklyOfflineHours} h offline per week, ` : ''}renewal after ${cycle.days} days${hasRest ? ` and ${rest}` : ''}, no self-bots, no spam. Information on `,
+    fairTitleBot: 'Runtime in short',
+    fairTextBot: (fairUseOn: boolean) =>
+      `${fairUseOn ? `Max. ${fairUse.maxSessionHours} h in a row, at least ${fairUse.weeklyOfflineHours} h offline per week. ` : 'Your bot may run permanently. '}After ${cycle.days} days ${hasRest ? `and ${rest} ` : ''}you renew with one click – we remind you by email beforehand.`,
     fairTitle: 'Fair use in short',
     fairText: `Max. ${fairUse.maxSessionHours} h in a row, at least ${fairUse.weeklyOfflineHours} h offline per week, renew with one click after ${cycle.days} days${hasRest ? ` and ${rest.replace(/^1 /, 'a ')}` : ''}. All automatic – with a notice in the chat before anything happens.`,
 
@@ -323,6 +368,8 @@ export const en: Dictionary = {
     runtime: 'Runtime',
     activeUntil: (date: string, left: string) => `Active until ${date} · ${left} left`,
     fairUse: 'Fair use',
+    alwaysOn: 'Always on – no daily runtime limit',
+    alwaysOnHint: `Only the runtime of ${cycle.days} days applies.`,
     pausedUntil: (dt: string) => `Break until ${dt}`,
     autoStop: (dt: string) => `Automatic stop ${dt}`,
     weeklyDone: 'Offline time for this week done',
@@ -356,13 +403,13 @@ export const en: Dictionary = {
 
   faq: {
     metaTitle: 'FAQ – Frequently asked questions',
-    metaDescription: 'Answers about CraftingHosting.free: costs, panel access, Minecraft versions, RAM, fair-use system, 30-day runtime and reactivation.',
+    metaDescription: 'Answers about CraftingHosting.free: costs, panel access, Minecraft versions, Discord bots, RAM, fair-use system, 30-day runtime and reactivation.',
     title: 'Frequently asked questions',
-    intro: 'Everything you need to know about free Minecraft hosting by Crafting Hosting.',
+    intro: 'Everything you need to know about free Minecraft and Discord bot hosting by Crafting Hosting.',
     moreTitle: 'Your question is not listed?',
     moreText: 'The community and the team will help you on Discord.',
     openDiscord: 'Open Discord',
-    items: (max: number) => [
+    items: (max: number, ctx: FaqContext) => [
       {
         q: 'Is CraftingHosting.free really free?',
         a: `Yes. No monthly price, no trial period, no payment details. To keep it that way, a fair-use system and a runtime of ${cycle.days} days apply, which you can renew for free.`,
@@ -377,11 +424,11 @@ export const en: Dictionary = {
       },
       {
         q: 'Which Minecraft versions are supported?',
-        a: `You can choose between ${serverTypes.map((t) => t.name).join(', ')} – from current versions to classics like 1.8.8, 1.12.2 and 1.16.5. You can change the version and server type later in the panel via the startup parameters.`,
+        a: `You can choose between ${minecraftTypes.map((t) => t.name).join(', ')} – from current versions to classics like 1.8.8, 1.12.2 and 1.16.5. You can change the version and server type later in the panel via the startup parameters.`,
       },
       {
         q: 'How much RAM do I get?',
-        a: `Depending on the plan ${plans.map((p) => formatMb(p.memoryMb, 'en')).join(' or ')} RAM. All free servers share the hardware of a node fairly – the values are upper limits, not permanently guaranteed performance.`,
+        a: `Depending on the plan ${ctx.minecraftRam} RAM${ctx.discordRam ? ` for Minecraft servers and ${ctx.discordRam} for Discord bots` : ''}. All free servers share the hardware of a node fairly – the values are upper limits, not permanently guaranteed performance.`,
       },
       {
         q: 'How does the fair-use system work?',
@@ -405,17 +452,35 @@ export const en: Dictionary = {
       },
       {
         q: 'Where are the servers located and what hardware do they run on?',
-        a: `The nodes are located in data centers in Germany and the Netherlands and run on ${hardware.cpus.join(' and ')} with ${hardware.storage} and ${hardware.network}.`,
+        a: `The nodes are located in ${ctx.locations} and run on ${ctx.cpus} with ${hardware.storage} and ${hardware.network}.`,
       },
+      ...(ctx.discordRam
+        ? [
+            {
+              q: 'Can I host a Discord bot as well?',
+              a: `Yes. In addition to Minecraft servers we host Discord bots for free in ${botTypes.map((t) => t.name).join(' or ')} – with ${ctx.discordRam} RAM depending on the plan. You upload your code in the Pterodactyl panel (file manager or SFTP), enter the start file and start the bot. Bots run on their own node, separate from the Minecraft servers.`,
+            },
+            {
+              q: 'Does my Discord bot run around the clock?',
+              a: ctx.discordFairUse
+                ? `The same fair-use system as for Minecraft servers applies to Discord bots: at most ${fairUse.maxSessionHours} hours in a row and ${fairUse.weeklyOfflineHours} hours of offline time per week. After ${cycle.days} days you renew for free.`
+                : `Yes – there is no daily runtime limit for Discord bots. Only the runtime of ${cycle.days} days applies, which you can renew for free. As with any free offer, there is no entitlement to a particular availability.`,
+            },
+            {
+              q: 'What is not allowed for Discord bots?',
+              a: 'Self-bots, spam, raid and nuke bots, token loggers, mass DMs and anything that violates Discord’s Terms of Service and Developer Policy. Also off limits: mining, proxies and software other than your bot. The details are in the terms of use for Discord bots.',
+            },
+          ]
+        : []),
       {
         q: 'How many free servers can I have?',
-        a: `${perPerson(max)} possible per person. That way there is enough room for everyone.`,
+        a: `${perPerson(max)} possible per person${ctx.discordRam ? ' – each as a Minecraft server and as a Discord bot' : ''}. That way there is enough room for everyone.`,
       },
     ],
-    earlyItem: {
+    earlyItem: (twoTiers: boolean) => ({
       q: 'What is the first launch phase (early access)?',
-      a: `At launch we only have limited space. That is why you first secure a spot on the waitlist, and we unlock the servers one after another. The first spots get a server on ${epyc}, after that we continue on ${xeon}. You will get an email as soon as your spot is unlocked. If everything runs smoothly, several free servers per person will be possible after this phase.`,
-    },
+      a: `At launch we only have limited space. That is why you first secure a spot on the waitlist, and we unlock the servers one after another.${twoTiers ? ` The first spots get a server on ${epyc}, after that we continue on ${xeon}.` : ''} You will get an email as soon as your spot is unlocked. If everything runs smoothly, several free servers per person will be possible after this phase.`,
+    }),
   },
 
   status: {
@@ -470,27 +535,72 @@ export const en: Dictionary = {
       description: `Terms of use, fair-use system and ${cycle.days}-day cycle of CraftingHosting.free.`,
     },
     cookies: { title: 'Cookie & privacy notice', short: 'Cookie notice', description: 'Which cookies CraftingHosting.free uses.' },
+    discordTerms: {
+      title: 'Terms of use for Discord bot hosting',
+      short: 'Discord bot terms of use',
+      description: `Terms of use for the free Discord bot hosting of CraftingHosting.free: plans, ${cycle.days}-day cycle, allowed and prohibited use.`,
+    },
+  },
+
+  donate: {
+    metaTitle: 'Donate',
+    metaDescription: 'Support CraftingHosting.free with a voluntary donation – for server hardware, electricity and more free slots.',
+    label: 'Donate',
+    title: 'Keep free hosting free.',
+    intro:
+      'CraftingHosting.free costs you nothing – but it does cost us: hardware, electricity and connectivity run around the clock. If you like the service, you can support it with a voluntary donation. Every amount helps.',
+    button: 'Donate via SumUp',
+    redirectNote: 'You will be redirected to SumUp, our payment provider. We never see your card details.',
+    closedTitle: 'Donations are not open yet',
+    closedText: 'We are still setting up donations. Follow us on Discord – we will announce it there as soon as it is ready.',
+    whyLabel: 'What for',
+    whyTitle: 'Why donate?',
+    whyIntro: 'Donations go into running and expanding the free offer.',
+    reasons: [
+      { title: 'Server hardware & electricity', text: 'The servers run around the clock in the data center. Donations help pay for hardware, electricity and network.' },
+      { title: 'More slots', text: 'More capacity means more free slots for Minecraft servers and Discord bots – and shorter waiting times.' },
+      { title: 'Better hardware', text: 'With more budget we can upgrade in the future: for example more RAM, faster CPUs or additional locations.' },
+      { title: 'Ad-free & no data selling', text: 'We show no ads and do not sell data. Donations help keep it that way.' },
+    ],
+    knowTitle: 'What you should know',
+    know: [
+      'Donations are voluntary. You can use the free offer just the same if you do not donate.',
+      'A donation is not a purchase: it does not buy you any service, upgrade, priority on the waitlist or entitlement to a server.',
+      'We cannot issue donation receipts for tax purposes – Crafting Hosting is a company, not a charity.',
+    ],
+    refundBefore: 'Donated by mistake or too much? Write to ',
+    refundAfter: ' – we refund the donation on request.',
+    closing: 'Thank you for making free hosting possible. Questions or ideas? Talk to us on Discord.',
+    discord: 'Open Discord',
+  },
+
+  cookieBanner: {
+    label: 'Cookie notice',
+    text: 'We only use technically necessary cookies (sign-in, language, this choice). To protect the service we store your IP address in encrypted form.',
+    more: 'Cookie notice',
+    ok: 'OK',
   },
 
   early: {
     badge: 'Early access',
     kicker: 'Early access · First launch phase',
-    heroText: `We are launching with a first phase and limited spots. Secure your spot now: the first spots get a server on ${epyc}, after that we continue on ${xeon}. Free and without payment details.`,
+    heroText: (twoTiers: boolean) =>
+      `We are launching with a first phase and limited spots. Secure your spot now${twoTiers ? `: the first spots get a server on ${epyc}, after that we continue on ${xeon}` : ' – we unlock the servers one after another'}. Free and without payment details.`,
     cta: 'Secure your spot',
     securePlan: (name: string) => `${name} – secure your spot`,
     waitlistCount: (n: string) => `${n} on the waitlist`,
     epycLeft: (left: string, total: string) => `${left} of ${total} spots on ${epyc} left`,
     epycFull: `${epyc} spots taken – new spots on ${xeon}`,
-    steps: (panelHost: string) => [
+    steps: (panelHost: string, twoTiers: boolean) => [
       ['Secure your spot', 'Choose plan, server type and name, confirm your email. That locks in your spot on the waitlist.'],
-      ['Unlock', `We unlock the spots one after another – first on ${epyc}, then on ${xeon}. You will get an email.`],
+      ['Unlock', `We unlock the spots one after another${twoTiers ? ` – first on ${epyc}, then on ${xeon}` : ''}. You will get an email.`],
       ['Get started in the panel', `Set up your panel access, sign in at ${panelHost} and play. Everything else runs automatically.`],
     ],
     ctaText: 'The first launch phase has limited spots. Secure yours now – for free.',
     tiers: { epyc, xeon },
     tierNote: {
       epyc: `You are among the first spots – your server runs on ${epyc}.`,
-      xeon: `The ${epyc} spots are taken – your server runs on ${xeon}. If someone ahead of you leaves the waitlist, you move up.`,
+      xeon: `Your server runs on ${xeon}. If someone ahead of you leaves the waitlist, you move up.`,
     },
 
     startTitle: 'Secure your spot',

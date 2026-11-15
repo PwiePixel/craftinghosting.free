@@ -1,17 +1,19 @@
 import type { Locale } from '@chfree/shared';
 import { getDict } from '@/i18n';
 import { panelHost } from '@/lib/site';
+import { Tilt } from './tilt';
 
 /**
  * Illustration: So sieht der Server später im Pterodactyl-Panel aus –
  * inklusive Status-Beschreibung und automatischem Hinweis im Chat.
- * Rein dekorativ (keine echten Daten).
+ * Rein dekorativ (keine echten Daten). Die Karte neigt sich beim Überfahren leicht zur Maus.
  */
 export function PanelPreview({ lang }: { lang: Locale }) {
   const t = getDict(lang).panelPreview;
   return (
     <div className="relative" aria-hidden>
       <div className="absolute -inset-8 rounded-[2rem] bg-blue-600/10 blur-3xl" />
+      <Tilt>
       <div className="relative overflow-hidden rounded-xl border border-line-strong bg-surface shadow-2xl shadow-black/50">
         {/* Fensterleiste */}
         <div className="flex items-center gap-3 border-b border-line px-4 py-3">
@@ -60,6 +62,7 @@ export function PanelPreview({ lang }: { lang: Locale }) {
           </div>
         </div>
       </div>
+      </Tilt>
     </div>
   );
 }

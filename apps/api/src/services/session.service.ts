@@ -2,7 +2,7 @@ import { and, eq, gt, lt } from 'drizzle-orm';
 import { env } from '../env';
 import { affectedRows, db } from '../db/client';
 import { authSessions, users, type User } from '../db/schema';
-import { generateToken, sha256 } from '../lib/crypto';
+import { encryptField, generateToken, sha256 } from '../lib/crypto';
 
 /**
  * Sessions sind bewusst kurzlebig – man muss sich regelmäßig neu per E-Mail-Link anmelden:
@@ -29,8 +29,9 @@ export async function createSession(userId: string, meta: { ip?: string; userAge
     expiresAt,
     lastSeenAt: now,
     createdAt: now,
-    ip: meta.ip?.slice(0, 64) ?? null,
-    userAgent: meta.userAgent?.slice(0, 255) ?? null,
+    // IP und User-Agent werden nur verschlüsselt gespeichert
+    ip: encryptField(meta.ip?.slice(0, 64)),
+    userAgent: encryptField(meta.userAgent?.slice(0, 255)),
   });
   return { token, expiresAt };
 }

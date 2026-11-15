@@ -9,7 +9,7 @@ import { jobLocks } from '../db/schema';
 
 export async function acquireLease(name: string, owner: string, ttlMs: number): Promise<boolean> {
   const now = new Date();
-  await db.insert(jobLocks).ignore().values({ name, owner: null, lockedUntil: null, updatedAt: now });
+  await db.insert(jobLocks).values({ name, owner: null, lockedUntil: null, updatedAt: now }).onConflictDoNothing();
   const res = await db
     .update(jobLocks)
     .set({ owner, lockedUntil: new Date(now.getTime() + ttlMs), updatedAt: now })

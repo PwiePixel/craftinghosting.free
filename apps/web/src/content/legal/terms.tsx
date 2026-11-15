@@ -1,32 +1,40 @@
 import Link from 'next/link';
-import { freeHostingConfig, localePath } from '@chfree/shared';
+import { freeHostingConfig, localePath, locationNames, type PublicSiteDTO } from '@chfree/shared';
 import { operator as o } from './operator';
 
 const { cycle } = freeHostingConfig;
 
-export function TermsDe() {
+export function TermsDe({ site }: { site: PublicSiteDTO }) {
+  const location = locationNames(site.hardware.locations, 'de') || 'Deutschland';
   return (
     <>
       <section>
         <h2>§ 1 Geltungsbereich</h2>
         <p>
           Diese Allgemeinen Geschäftsbedingungen gelten für die Nutzung des kostenlosen Hosting-Angebots CraftingHosting.free (craftinghosting.free) von {o.company}, Inhaber{' '}
-          {o.owner}, {o.street}, {o.zipCity} („Anbieter“). Ergänzend gelten die <Link href={localePath('de', 'rules')}>Nutzungsbedingungen & Fair-Use</Link>. Kostenpflichtige
-          Angebote von CraftingHosting unterliegen gesonderten Bedingungen.
+          {o.owner}, {o.street}, {o.zipCity} („Anbieter“). Das Angebot umfasst kostenlose Minecraft-Server und kostenloses Discord-Bot-Hosting. Ergänzend gelten für
+          Minecraft-Server die <Link href={localePath('de', 'rules')}>Nutzungsbedingungen & Fair-Use</Link> und für Discord-Bots die{' '}
+          <Link href={localePath('de', 'discordTerms')}>Nutzungsbedingungen für Discord-Bot-Hosting</Link> (zusammen „Nutzungsbedingungen“). Kostenpflichtige Angebote von
+          CraftingHosting unterliegen gesonderten Bedingungen.
         </p>
       </section>
 
       <section>
         <h2>§ 2 Leistungen</h2>
         <p>
-          Der Anbieter stellt unentgeltlich Ressourcen zum Betrieb eines Minecraft-Servers bereit, die über das Pterodactyl-Panel des Anbieters verwaltet werden. Die Ressourcen
-          werden zwischen allen kostenlosen Servern eines Nodes geteilt; die angegebenen Werte sind Obergrenzen. Ein Anspruch auf eine bestimmte Verfügbarkeit, Leistung,
-          Hardware oder einen bestimmten Standort besteht nicht. Der Anbieter darf Server aus technischen Gründen auf andere Nodes verschieben und Wartungsarbeiten durchführen.
+          Der Anbieter stellt unentgeltlich Ressourcen zum Betrieb eines Minecraft-Servers oder eines Discord-Bots bereit, die über das Pterodactyl-Panel des Anbieters
+          verwaltet werden. Die Ressourcen werden zwischen allen kostenlosen Servern eines Nodes geteilt; die angegebenen Werte sind Obergrenzen. Die Server stehen derzeit in{' '}
+          {location}. Ein Anspruch auf eine bestimmte Verfügbarkeit, Leistung, Hardware oder einen bestimmten Standort besteht nicht. Der Anbieter darf Server aus technischen
+          Gründen auf andere Nodes verschieben und Wartungsarbeiten durchführen.
         </p>
         <p>
           In der ersten Startphase (Early Access) werden Server über eine Warteliste der Reihe nach freigeschaltet. Ein Platz auf der Warteliste begründet keinen Anspruch auf
           einen Server zu einem bestimmten Zeitpunkt. Der Anbieter kann den Umfang des Angebots, insbesondere die Anzahl kostenloser Server pro Person, jederzeit für neue
           Server anpassen.
+        </p>
+        <p>
+          Spenden an den Anbieter sind freiwillig. Sie sind keine Gegenleistung und begründen keinen Anspruch auf eine Leistung, ein Upgrade, eine bevorzugte Freischaltung
+          oder den Fortbestand des kostenlosen Angebots.
         </p>
       </section>
 
@@ -42,8 +50,9 @@ export function TermsDe() {
       <section>
         <h2>§ 4 Fair-Use, Laufzeit und Löschung</h2>
         <p>
-          Es gelten das Fair-Use-System und der {cycle.days}-Tage-Zyklus gemäß den <Link href={localePath('de', 'rules')}>Nutzungsbedingungen</Link>. Nach Ablauf eines Zyklus
-          wird der Server suspendiert und kann nach der Ruhezeit reaktiviert werden. Wird er nicht innerhalb von {cycle.deleteAfterRestHours} Stunden nach dem Ende der Ruhezeit
+          Es gelten das Fair-Use-System und der {cycle.days}-Tage-Zyklus gemäß den jeweiligen Nutzungsbedingungen (
+          <Link href={localePath('de', 'rules')}>Minecraft-Server</Link>, <Link href={localePath('de', 'discordTerms')}>Discord-Bots</Link>). Nach Ablauf eines Zyklus wird
+          der Server suspendiert und kann nach der Ruhezeit reaktiviert werden. Wird er nicht innerhalb von {cycle.deleteAfterRestHours} Stunden nach dem Ende der Ruhezeit
           reaktiviert, wird er einschließlich Welt, Dateien und Backups gelöscht.
         </p>
       </section>
@@ -53,8 +62,14 @@ export function TermsDe() {
         <ul>
           <li>Nutzer halten ihre Zugangsdaten (Panel-Passwort, Zugriff auf das E-Mail-Postfach) geheim und informieren den Anbieter bei Missbrauch unverzüglich.</li>
           <li>Nutzer sind für alle Inhalte, Plugins, Mods und Einstellungen auf ihrem Server selbst verantwortlich und stellen sicher, dass sie die nötigen Rechte daran besitzen.</li>
-          <li>Der Server darf nur für den Betrieb eines Minecraft-Servers genutzt werden. Unzulässige Nutzungen sind in den Nutzungsbedingungen aufgeführt.</li>
-          <li>Nutzer beachten die Minecraft-Nutzungsbedingungen (EULA) von Mojang/Microsoft sowie geltendes Recht.</li>
+          <li>
+            Der Server darf nur für den jeweils vorgesehenen Zweck genutzt werden – den Betrieb eines Minecraft-Servers bzw. eines Discord-Bots. Unzulässige Nutzungen sind in
+            den jeweiligen Nutzungsbedingungen aufgeführt.
+          </li>
+          <li>
+            Nutzer beachten die Minecraft-Nutzungsbedingungen (EULA) von Mojang/Microsoft bzw. bei Discord-Bots die Nutzungsbedingungen und die Developer Policy von Discord
+            sowie geltendes Recht.
+          </li>
         </ul>
       </section>
 
@@ -108,28 +123,35 @@ export function TermsDe() {
   );
 }
 
-export function TermsEn() {
+export function TermsEn({ site }: { site: PublicSiteDTO }) {
+  const location = locationNames(site.hardware.locations, 'en') || 'Germany';
   return (
     <>
       <section>
         <h2>§ 1 Scope</h2>
         <p>
           These terms and conditions apply to the use of the free hosting offer CraftingHosting.free (craftinghosting.free) by {o.company}, owner {o.owner}, {o.street},{' '}
-          {o.zipCity}, Germany (“provider”). The <Link href={localePath('en', 'rules')}>terms of use & fair use</Link> apply in addition. Paid CraftingHosting plans are subject
-          to separate terms.
+          {o.zipCity}, Germany (“provider”). The offer comprises free Minecraft servers and free Discord bot hosting. In addition, the{' '}
+          <Link href={localePath('en', 'rules')}>terms of use & fair use</Link> apply to Minecraft servers and the{' '}
+          <Link href={localePath('en', 'discordTerms')}>terms of use for Discord bot hosting</Link> apply to Discord bots (together “terms of use”). Paid CraftingHosting plans
+          are subject to separate terms.
         </p>
       </section>
 
       <section>
         <h2>§ 2 Services</h2>
         <p>
-          The provider makes resources available free of charge for running a Minecraft server, managed via the provider’s Pterodactyl panel. The resources are shared between
-          all free servers on a node; the values stated are upper limits. There is no entitlement to a particular availability, performance, hardware or location. The provider
-          may move servers to other nodes for technical reasons and carry out maintenance.
+          The provider makes resources available free of charge for running a Minecraft server or a Discord bot, managed via the provider’s Pterodactyl panel. The resources
+          are shared between all free servers on a node; the values stated are upper limits. The servers are currently located in {location}. There is no entitlement to a
+          particular availability, performance, hardware or location. The provider may move servers to other nodes for technical reasons and carry out maintenance.
         </p>
         <p>
           During the first launch phase (early access), servers are unlocked one after another via a waitlist. A spot on the waitlist does not entitle you to a server at a
           particular time. The provider may adjust the scope of the offer for new servers at any time, in particular the number of free servers per person.
+        </p>
+        <p>
+          Donations to the provider are voluntary. They are not consideration for a service and do not create any entitlement to a service, an upgrade, priority unlocking or
+          the continuation of the free offer.
         </p>
       </section>
 
@@ -144,8 +166,9 @@ export function TermsEn() {
       <section>
         <h2>§ 4 Fair use, runtime and deletion</h2>
         <p>
-          The fair-use system and the {cycle.days}-day cycle apply as described in the <Link href={localePath('en', 'rules')}>terms of use</Link>. When a cycle ends, the server
-          is suspended and can be reactivated after the rest period. If it is not reactivated within {cycle.deleteAfterRestHours} hours after the rest period ends, it is deleted
+          The fair-use system and the {cycle.days}-day cycle apply as described in the respective terms of use (
+          <Link href={localePath('en', 'rules')}>Minecraft servers</Link>, <Link href={localePath('en', 'discordTerms')}>Discord bots</Link>). When a cycle ends, the server is
+          suspended and can be reactivated after the rest period. If it is not reactivated within {cycle.deleteAfterRestHours} hours after the rest period ends, it is deleted
           including world, files and backups.
         </p>
       </section>
@@ -155,8 +178,14 @@ export function TermsEn() {
         <ul>
           <li>Users keep their access data (panel password, access to their email inbox) secret and inform the provider immediately in case of misuse.</li>
           <li>Users are responsible for all content, plugins, mods and settings on their server and ensure that they hold the necessary rights.</li>
-          <li>The server may only be used to run a Minecraft server. Prohibited uses are listed in the terms of use.</li>
-          <li>Users comply with the Minecraft end user license agreement (EULA) of Mojang/Microsoft and applicable law.</li>
+          <li>
+            The server may only be used for its intended purpose – running a Minecraft server or a Discord bot respectively. Prohibited uses are listed in the respective
+            terms of use.
+          </li>
+          <li>
+            Users comply with the Minecraft end user license agreement (EULA) of Mojang/Microsoft or, for Discord bots, Discord’s Terms of Service and Developer Policy, as
+            well as applicable law.
+          </li>
         </ul>
       </section>
 

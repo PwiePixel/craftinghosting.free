@@ -74,7 +74,7 @@ export async function authRoutes(app: FastifyInstance) {
     if (user.pteroUserId) throw new ApiError(409, 'panel_already_linked', L('Dein Panel-Zugang ist bereits eingerichtet.', 'Your panel access is already set up.'));
     let existing: boolean;
     try {
-      ({ existing } = await createPanelAccount(user, input.username, input.password));
+      ({ existing } = await createPanelAccount(user, input.username, input.password, request.ip));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       // z. B. Panel nicht erreichbar, falscher API-Key, Mock-Datei nicht beschreibbar – Details nur ins Log

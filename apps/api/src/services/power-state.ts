@@ -35,7 +35,7 @@ export async function applyPowerState(
       .where(and(eq(serverSessions.serverId, server.id), isNull(serverSessions.endedAt)))
       .limit(1);
     if (!open) {
-      const res = await db.insert(serverSessions).ignore().values({ serverId: server.id, startedAt: now });
+      const res = await db.insert(serverSessions).values({ serverId: server.id, startedAt: now }).onConflictDoNothing();
       opened = affectedRows(res) === 1;
     }
   } else {

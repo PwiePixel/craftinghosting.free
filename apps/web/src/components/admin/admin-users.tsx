@@ -18,6 +18,17 @@ import { api, ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 const tz = freeHostingConfig.fairUse.timezone;
+const IP_HINT = 'IP-Adressen werden verschlüsselt gespeichert und sind nur im Admin-Bereich sichtbar.';
+
+/** IP-Adresse klein unter dem Datum – nur wenn vorhanden */
+function IpLine({ label, ip }: { label: string; ip: string | null }) {
+  if (!ip) return null;
+  return (
+    <p className="mt-0.5 text-[11px] text-subtle" title={IP_HINT}>
+      {label}: <span className="font-mono">{ip}</span>
+    </p>
+  );
+}
 type DeleteResult = { deleted: number; servers: number; skipped: { email: string; reason: string }[] };
 
 function describeFilter(filter: { q?: string; status?: string }, labels: Record<string, string>): string {
@@ -314,8 +325,14 @@ export function UsersTable({
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-muted">{u.servers}</td>
-                <td className="px-3 py-2.5 whitespace-nowrap text-muted">{u.lastLoginAt ? formatDateTime(u.lastLoginAt, tz, 'de') : '–'}</td>
-                <td className="px-3 py-2.5 whitespace-nowrap text-muted">{formatDate(u.createdAt, tz, 'de')}</td>
+                <td className="px-3 py-2.5 whitespace-nowrap text-muted">
+                  {u.lastLoginAt ? formatDateTime(u.lastLoginAt, tz, 'de') : '–'}
+                  <IpLine label="Letzte Anmelde-IP" ip={u.lastLoginIp} />
+                </td>
+                <td className="px-3 py-2.5 whitespace-nowrap text-muted">
+                  {formatDate(u.createdAt, tz, 'de')}
+                  <IpLine label="IP bei Registrierung" ip={u.registrationIp} />
+                </td>
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap gap-1.5">
                     <UserActions user={u} self={u.id === meId} />
@@ -346,7 +363,7 @@ export function UsersTable({
       </div>
       <p className="text-[12px] text-subtle">
         Löschen entfernt das Konto auf dieser Website und alle kostenlosen Server (im Panel inkl. Welt und Backups). Das Pterodactyl-Konto bleibt bestehen – dort können
-        auch bezahlte Server liegen. Wartelisten-Plätze werden frei, alle dahinter rücken auf.
+        auch bezahlte Server liegen. Wartelisten-Plätze werden frei, alle dahinter rücken auf. {IP_HINT}
       </p>
     </div>
   );

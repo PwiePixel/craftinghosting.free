@@ -1,20 +1,26 @@
 /**
  * Umgebungsvariablen – werden beim Start validiert.
- * Sensible Werte (DB-Passwort, Pterodactyl-Keys, SMTP) kommen ausschließlich
+ * Sensible Werte (DB-Schlüssel, Pterodactyl-Keys, SMTP) kommen ausschließlich
  * aus der Umgebung und werden niemals an das Frontend ausgeliefert.
  */
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 import { freeHostingConfig } from '@chfree/shared';
 
+/** Ordner der gefundenen .env (Projektwurzel) – Basis für relative Pfade wie DATABASE_PATH */
+let envDir = process.cwd();
 for (const candidate of [resolve(process.cwd(), '.env'), resolve(process.cwd(), '../../.env')]) {
   if (existsSync(candidate)) {
     loadDotenv({ path: candidate, quiet: true });
+    envDir = dirname(candidate);
     break;
   }
 }
+
+/** Nur für die Entwicklung – in Produktion ist DATABASE_ENCRYPTION_KEY Pflicht */
+const DEV_DATABASE_ENCRYPTION_KEY = 'chfree-dev-only-database-encryption-key-0000';
 
 const bool = (def: boolean) =>
   z
@@ -48,8 +54,19 @@ const schema = z
     /** Interne URL der Website für den Status-Check */
     WEB_INTERNAL_URL: z.string().url().optional(),
 
-    DATABASE_URL: z.string().min(1, 'DATABASE_URL fehlt (mysql://user:pass@host:3306/db)'),
-    DATABASE_POOL_SIZE: z.coerce.number().int().min(1).default(10),
+    /** Pfad der verschlüsselten SQLite-Datei (relativ = ab dem Ordner der .env bzw. dem Arbeitsverzeichnis) */
+    DATABASE_PATH: z
+      .string()
+      .optional()
+      .transform((v) => {
+        const p = v?.trim() || './data/chfree.db';
+        return isAbsolute(p) ? p : resolve(envDir, p);
+      }),
+    /** Schlüssel der Datenbank-Verschlüsselung (openssl rand -hex 32) – ohne ihn lässt sich die Datei nicht öffnen */
+    DATABASE_ENCRYPTION_KEY: z
+      .string()
+      .optional()
+      .transform((v) => v?.trim() ?? ''),
 
     SESSION_COOKIE_NAME: z.string().default('chf_session'),
     /** Abmeldung nach so vielen Minuten ohne Aktivität */
@@ -95,6 +112,13 @@ const schema = z
     STATUS_PROVIDER: z.enum(['internal', 'static']).default('internal'),
   })
   .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && env.DATABASE_ENCRYPTION_KEY.length < 32) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_ENCRYPTION_KEY'],
+        message: 'DATABASE_ENCRYPTION_KEY fehlt oder ist zu kurz (mindestens 32 Zeichen, z. B. openssl rand -hex 32)',
+      });
+    }
     if (env.PTERODACTYL_MODE === 'live') {
       for (const key of ['PTERODACTYL_URL', 'PTERODACTYL_APP_KEY', 'PTERODACTYL_CLIENT_KEY'] as const) {
         if (!env[key]) ctx.addIssue({ code: 'custom', path: [key], message: `${key} ist im Live-Modus erforderlich` });
@@ -112,7 +136,10 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export const env = parsed.data;
+export const env = {
+  ...parsed.data,
+  DATABASE_ENCRYPTION_KEY: parsed.data.DATABASE_ENCRYPTION_KEY || DEV_DATABASE_ENCRYPTION_KEY,
+};
 export const isProd = env.NODE_ENV === 'production';
 export const cookieSecure = env.COOKIE_SECURE === 'auto' ? env.APP_URL.startsWith('https://') : env.COOKIE_SECURE === 'true';
 export const allowedOrigins = new Set([new URL(env.APP_URL).origin, ...env.ALLOWED_ORIGINS.map((o) => new URL(o).origin)]);

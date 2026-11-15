@@ -12,7 +12,7 @@ const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\
  * Status und Rechtstexte. Gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (/start) –
  * Startseite und FAQ zeigen die Wartungsseite.
  */
-const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies']);
+const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate']);
 
 /* ------------------------------------------------------------ Wartungsmodus */
 
@@ -55,6 +55,18 @@ async function isAdminSession(request: NextRequest): Promise<boolean> {
   return admin;
 }
 
+/* ------------------------------------------------------------ Kurzlinks */
+
+/** Andere Schreibweisen der Discord-Bot-Nutzungsbedingungen → richtige Seite (Pfad ohne Sprach-Präfix) */
+const DISCORD_TERMS_ALIASES = new Set([
+  '/discord-bot',
+  '/discord-bot/terms',
+  '/discordbot/terms-of-use',
+  '/discord/terms-of-use',
+  '/discordbot/nutzungsbedingungen',
+  '/discord/nutzungsbedingungen',
+]);
+
 /* ------------------------------------------------------------ Helfer */
 
 function rewrite(request: NextRequest, pathname: string, headers?: Record<string, string>) {
@@ -95,6 +107,11 @@ export async function proxy(request: NextRequest) {
 
   // Interne Ordner nie direkt erreichbar machen
   if (/^\/(admin|maintenance)(\/|$)/.test(rest)) return rewrite(request, `/${locale}/__not-found`, NOINDEX);
+
+  // Kurzlinks und andere Schreibweisen der Discord-Bot-Nutzungsbedingungen
+  if (!key && DISCORD_TERMS_ALIASES.has(rest)) {
+    return redirect(request, localePath(prefix === 'de' || rest.endsWith('/nutzungsbedingungen') ? 'de' : 'en', 'discordTerms'));
+  }
 
   // Alte Links: /en/… → englischer Pfad ohne Präfix
   if (prefix === 'en') return redirect(request, key ? localePath('en', key) : rest);

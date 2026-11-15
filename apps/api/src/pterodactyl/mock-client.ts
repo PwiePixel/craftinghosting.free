@@ -12,6 +12,8 @@ import {
   type BackupScheduleSpec,
   type CreateServerSpec,
   type PteroEgg,
+  type PteroEggSummary,
+  type PteroLocation,
   type PteroNode,
   type PteroResources,
   type PteroServer,
@@ -197,6 +199,25 @@ export class PterodactylMockClient implements PterodactylGateway {
   }
 
   async getEgg(_nestId: number, eggId: number): Promise<PteroEgg> {
+    if (eggId === 20) {
+      return {
+        id: eggId,
+        dockerImage: 'ghcr.io/parkervcp/yolks:python_3.13',
+        startup: 'python /home/container/{{PY_FILE}}',
+        variables: [
+          { envVariable: 'PY_FILE', defaultValue: 'app.py' },
+          { envVariable: 'REQUIREMENTS_FILE', defaultValue: 'requirements.txt' },
+        ],
+      };
+    }
+    if (eggId === 21) {
+      return {
+        id: eggId,
+        dockerImage: 'ghcr.io/parkervcp/yolks:nodejs_22',
+        startup: 'node /home/container/{{MAIN_FILE}}',
+        variables: [{ envVariable: 'MAIN_FILE', defaultValue: 'index.js' }],
+      };
+    }
     return {
       id: eggId,
       dockerImage: 'ghcr.io/pterodactyl/yolks:java_21',
@@ -211,10 +232,42 @@ export class PterodactylMockClient implements PterodactylGateway {
 
   async listNodes(): Promise<PteroNode[]> {
     return [
-      { id: 1, name: 'free-de-1 (Xeon Gold 6230)', maintenanceMode: false, locationId: 1 },
-      { id: 2, name: 'free-de-2 (EPYC 7402P)', maintenanceMode: false, locationId: 1 },
+      { id: 1, name: 'free-de-1 (Xeon Gold 6230)', fqdn: 'free-de-1.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
+      { id: 2, name: 'free-de-2 (Xeon Gold 6230)', fqdn: 'free-de-2.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
+      { id: 3, name: 'bots-de-1 (Discord-Bots)', fqdn: 'bots-de-1.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 65_536, diskMb: 524_288 },
     ];
   }
+
+  async listLocations(): Promise<PteroLocation[]> {
+    return [{ id: 1, short: 'de', long: 'Deutschland' }];
+  }
+
+  async listEggs(): Promise<PteroEggSummary[]> {
+    const mc = (eggId: number, name: string): PteroEggSummary => ({
+      nestId: 1,
+      nestName: 'Minecraft',
+      eggId,
+      name,
+      description: `${name} (Mock)`,
+      dockerImages: ['Java 21', 'Java 17'],
+    });
+    return [
+      mc(2, 'Forge Minecraft'),
+      mc(3, 'Paper'),
+      mc(5, 'Vanilla Minecraft'),
+      mc(16, 'Purpur'),
+      mc(17, 'Fabric'),
+      { nestId: 5, nestName: 'Discord Bots', eggId: 20, name: 'generic python', description: 'Python-Bots (Mock)', dockerImages: ['Python 3.13', 'Python 3.12'] },
+      { nestId: 5, nestName: 'Discord Bots', eggId: 21, name: 'generic node.js', description: 'Node.js-Bots (Mock)', dockerImages: ['Nodejs 22', 'Nodejs 20'] },
+    ];
+  }
+
+  async freeAllocations(nodeId: number): Promise<{ count: number; firstId: number | null }> {
+    // Der Mock hat immer freie Ports – die „Allokations-ID“ kodiert die Node
+    return { count: 250, firstId: nodeId * 100_000 + this.load().nextServerId };
+  }
+
+  async pingClient(): Promise<void> {}
 
   async getResources(identifier: string): Promise<PteroResources> {
     const state = this.load();

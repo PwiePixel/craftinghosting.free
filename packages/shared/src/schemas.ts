@@ -50,9 +50,7 @@ const serverConfigShape = {
 };
 
 function refineServerConfig(val: { planId: string; serverType: string; version: string }, ctx: z.RefinementCtx) {
-  if (!freeHostingConfig.plans.some((p) => p.id === val.planId)) {
-    ctx.addIssue({ code: 'custom', path: ['planId'], message: 'v.plan_unknown' });
-  }
+  // Pakete sind im Admin-Bereich frei definierbar – ob es das Paket gibt (und ob es zum Servertyp passt), prüft die API
   const type = getServerType(val.serverType);
   if (!type) {
     ctx.addIssue({ code: 'custom', path: ['serverType'], message: 'v.type_unknown' });

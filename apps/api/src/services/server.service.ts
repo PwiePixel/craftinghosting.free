@@ -6,15 +6,15 @@ import {
   tierForPosition,
   websiteEpycSlots,
   type WaitlistInfo,
+  findPlan,
   freeHostingConfig,
-  getPlan,
   getServerType,
+  type ProductKind,
   reactivationBlockMessages,
   type Locale,
   type ServerDTO,
 } from '@chfree/shared';
-import { getEggMapping } from '../config/pterodactyl.config';
-import { affectedRows, db } from '../db/client';
+import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
@@ -25,7 +25,7 @@ import { panelServerUrl, trySyncPanelDescription } from './panel';
 import { closeOpenSession } from './power-state';
 import { provisionServer } from './provisioning.service';
 import { computeRuntimeState, loadWeekSessions } from './runtime';
-import { getSettings, planAvailability, waitlistRank } from './settings.service';
+import { capacityState, getSettings, serverTypeAvailable, waitlistRank } from './settings.service';
 import { confirmWaitlist, hasWaitlistEntry } from './waitlist.service';
 
 const { cycle: cycleRules } = freeHostingConfig;
@@ -41,13 +41,17 @@ export interface ServerConfigInput {
 }
 
 export async function toServerDTO(server: Server, user: User, now = new Date()): Promise<ServerDTO> {
+  const settings = await getSettings();
+  const fairUseEnabled = settings.products[server.kind].fairUse;
   const sessions = await loadWeekSessions(server.id, now);
-  const state = computeRuntimeState(server, user, sessions, now);
-  const plan = getPlan(server.planId);
+  const state = computeRuntimeState(server, user, sessions, now, fairUseEnabled);
+  const plan = findPlan(settings, server.planId);
   const type = getServerType(server.serverType);
   return {
     id: server.id,
     name: server.name,
+    kind: server.kind,
+    fairUseEnabled,
     planId: server.planId,
     planName: plan?.name ?? server.planId,
     serverType: server.serverType,
@@ -101,26 +105,45 @@ export async function getOwnedServer(user: User, id: string): Promise<Server> {
   return server;
 }
 
-export async function countOwnedServers(userId: string): Promise<number> {
+/** Server eines Nutzers, die gegen das Limit zählen – das Limit gilt je Produkt (Minecraft / Discord-Bot) */
+export async function countOwnedServers(userId: string, kind?: ProductKind): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(servers)
-    .where(and(eq(servers.userId, userId), inArray(servers.status, [...OWNED_STATUSES])));
+    .where(and(eq(servers.userId, userId), inArray(servers.status, [...OWNED_STATUSES]), kind ? eq(servers.kind, kind) : undefined));
   return row?.n ?? 0;
 }
 
 /* ------------------------------------------------------------ Verfügbarkeit */
 
 export async function getAvailability() {
+  const settings = await getSettings();
   return {
-    // Kapazität und außerhalb belegte Plätze kommen aus dem Admin-Bereich
-    plans: await planAvailability(),
-    serverTypes: freeHostingConfig.serverTypes.map((t) => ({ id: t.id, available: getEggMapping(t.id) !== null })),
+    // Pakete, Kapazität und außerhalb belegte Plätze kommen aus dem Admin-Bereich
+    plans: (await capacityState(settings)).plans,
+    serverTypes: freeHostingConfig.serverTypes.map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, settings) })),
   };
 }
 
+/** Prüft Paket (existiert, aktiv, passt zum Servertyp), Egg und – außer bei `ignoreCapacity` – freie Plätze. */
 export async function assertConfigAvailable(input: ServerConfigInput, opts: { ignoreCapacity?: boolean } = {}) {
-  if (!getEggMapping(input.serverType)) {
+  const settings = await getSettings();
+  const plan = findPlan(settings, input.planId);
+  const type = getServerType(input.serverType);
+  if (!plan || !plan.enabled) {
+    throw Errors.badRequest('plan_unknown', L('Dieses Paket gibt es nicht (mehr). Bitte wähle ein anderes.', 'This plan does not exist (any more). Please choose another one.'), {
+      planId: L('Dieses Paket gibt es nicht (mehr).', 'This plan does not exist (any more).'),
+    });
+  }
+  if (!type || type.kind !== plan.kind) {
+    throw Errors.badRequest('plan_type_mismatch', L('Dieses Paket passt nicht zum gewählten Servertyp.', 'This plan does not match the selected server type.'), {
+      serverType: L('Dieses Paket passt nicht zum gewählten Servertyp.', 'This plan does not match the selected server type.'),
+    });
+  }
+  if (!settings.products[plan.kind].enabled) {
+    throw Errors.conflict('product_disabled', L('Dieses Angebot ist aktuell nicht verfügbar.', 'This offer is currently not available.'));
+  }
+  if (!serverTypeAvailable(input.serverType, settings)) {
     throw Errors.badRequest('server_type_unavailable', L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'), {
       serverType: L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'),
     });
@@ -142,10 +165,11 @@ export async function assertConfigAvailable(input: ServerConfigInput, opts: { ig
  * desselben Nutzers werden ersetzt – es zählt immer die letzte.
  */
 export async function savePendingServer(userId: string, input: ServerConfigInput, status: 'pending' | 'waitlist' = 'pending'): Promise<string> {
-  const plan = getPlan(input.planId)!;
+  const plan = findPlan(await getSettings(), input.planId);
+  if (!plan) throw Errors.badRequest('plan_unknown', L('Dieses Paket gibt es nicht (mehr).', 'This plan does not exist (any more).'));
   const now = new Date();
   const id = uuid();
-  await db.transaction(async (tx) => {
+  await writeTx(async (tx) => {
     await tx.delete(servers).where(and(eq(servers.userId, userId), eq(servers.status, 'pending')));
     // Unbestätigte Wartelisten-Anfragen (noch ohne Platz) werden ebenfalls ersetzt
     await tx.delete(servers).where(and(eq(servers.userId, userId), eq(servers.status, 'waitlist'), isNull(servers.waitlistPosition)));
@@ -153,6 +177,7 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
       id,
       userId,
       name: input.name,
+      kind: plan.kind,
       planId: plan.id,
       serverType: input.serverType,
       version: input.version,
@@ -170,37 +195,41 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
 
 /**
  * Wandelt offene Anfragen in echte Server um – sobald E-Mail bestätigt und
- * Panel-Konto verknüpft ist. Das Server-Limit wird per Zeilensperre geprüft.
+ * Panel-Konto verknüpft ist. Das Server-Limit wird in einer Schreib-Transaktion geprüft (Schreiber sind serialisiert).
  */
 export async function activatePendingServers(user: User, ip?: string): Promise<string[]> {
   if (!user.emailVerifiedAt || !user.pteroUserId) return [];
   const activated: string[] = [];
-  await db.transaction(async (tx) => {
-    await tx.select({ id: users.id }).from(users).where(eq(users.id, user.id)).for('update');
+  const max = await maxServersPerUser();
+  await writeTx(async (tx) => {
     const pending = await tx
       .select()
       .from(servers)
       .where(and(eq(servers.userId, user.id), eq(servers.status, 'pending')))
       .orderBy(desc(servers.createdAt));
-    const [{ n: owned } = { n: 0 }] = await tx
-      .select({ n: count() })
+    const ownedRows = await tx
+      .select({ kind: servers.kind, n: count() })
       .from(servers)
-      .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])));
-    let slots = Math.max(0, (await maxServersPerUser()) - owned);
+      .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])))
+      .groupBy(servers.kind);
+    // Das Limit gilt je Produkt: z. B. ein Minecraft-Server UND ein Discord-Bot
+    const slotsLeft: Record<string, number> = {};
+    for (const kind of ['minecraft', 'discord'] as const) slotsLeft[kind] = Math.max(0, max - Number(ownedRows.find((r) => r.kind === kind)?.n ?? 0));
     const now = new Date();
     for (const p of pending) {
-      if (slots > 0) {
+      if ((slotsLeft[p.kind] ?? 0) > 0) {
         await tx
           .update(servers)
           .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFrom(now, cycleRules) })
           .where(and(eq(servers.id, p.id), eq(servers.status, 'pending')));
         activated.push(p.id);
-        slots--;
+        slotsLeft[p.kind]!--;
       } else {
         await tx.delete(servers).where(and(eq(servers.id, p.id), eq(servers.status, 'pending')));
       }
     }
   });
+  const settings = await getSettings();
   for (const id of activated) {
     const [s] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);
     await audit({
@@ -208,11 +237,11 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
       serverId: id,
       actor: 'user',
       action: 'server.create',
-      message: `Server „${s?.name}“ wird erstellt (${getPlan(s?.planId ?? '')?.name ?? s?.planId}, ${s?.serverType} ${s?.version})`,
+      message: `Server „${s?.name}“ wird erstellt (${findPlan(settings, s?.planId ?? '')?.name ?? s?.planId}, ${s?.serverType} ${s?.version})`,
       ip,
     });
     // Direkt anlegen – schlägt das fehl, übernimmt der Worker die Wiederholung.
-    await provisionServer(id, 'user');
+    await provisionServer(id, 'user', ip);
   }
   return activated;
 }
@@ -225,8 +254,14 @@ export const serverLimitReached = (max: number) =>
   Errors.conflict(
     'server_limit_reached',
     max === 1
-      ? L('Du hast bereits einen kostenlosen Server. Pro Account ist aktuell ein Free-Server möglich.', 'You already have a free server. One free server per account is currently possible.')
-      : L(`Du hast bereits ${max} kostenlose Server – mehr sind pro Account aktuell nicht möglich.`, `You already have ${max} free servers – that is the current maximum per account.`),
+      ? L(
+          'Du hast davon bereits einen kostenlosen Server. Pro Account ist aktuell ein Minecraft-Server und ein Discord-Bot möglich.',
+          'You already have a free server of this kind. One Minecraft server and one Discord bot per account are currently possible.',
+        )
+      : L(
+          `Du hast davon bereits ${max} kostenlose Server – mehr sind pro Account und Produkt aktuell nicht möglich.`,
+          `You already have ${max} free servers of this kind – that is the current maximum per account and product.`,
+        ),
   );
 
 export const registrationClosed = () =>
@@ -245,7 +280,8 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
   const max = settings.registration.maxServersPerUser;
-  if ((await countOwnedServers(user.id)) >= max) throw serverLimitReached(max);
+  const kind = findPlan(settings, input.planId)?.kind ?? 'minecraft';
+  if ((await countOwnedServers(user.id, kind)) >= max) throw serverLimitReached(max);
   if (settings.registration.mode === 'preregistration') {
     // Early Access: angemeldete Nutzer kommen direkt (bestätigt) auf die Warteliste – ein Platz pro Person
     if (await hasWaitlistEntry(user.id)) throw alreadyOnWaitlist();

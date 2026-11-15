@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight, Plus } from 'lucide-react';
-import { localePath, type Locale, type ServerDTO } from '@chfree/shared';
+import { localePath, productKinds, type Locale, type ServerDTO } from '@chfree/shared';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink } from '@/components/ui/button';
 import { Alert, StatusDot } from '@/components/ui/primitives';
@@ -8,6 +8,7 @@ import { formatters, getDict, resolveLang, type Dictionary } from '@/i18n';
 import { apiServer, requireUser } from '@/lib/api/server';
 import { pageMetadata } from '@/lib/seo';
 import { getSite } from '@/lib/site-settings';
+import { siteTexts } from '@/lib/site-texts';
 
 type Props = { params: Promise<{ lang: string }>; searchParams: Promise<Record<string, string | undefined>> };
 
@@ -39,7 +40,7 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
   }
 }
 
-function ServerCard({ s, lang }: { s: ServerDTO; lang: Locale }) {
+function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string }) {
   const d = getDict(lang);
   const t = d.my;
   const fmt = formatters(lang);
@@ -57,7 +58,8 @@ function ServerCard({ s, lang }: { s: ServerDTO; lang: Locale }) {
             </span>
           </div>
           <p className="mt-1 text-[13px] text-subtle">
-            {s.planName} · {s.serverTypeName} {s.version === 'latest' ? d.common.latestShort : s.version} · {fmt.mb(s.limits.memoryMb)} RAM
+            {d.start.products[s.kind].name} · {s.planName} · {s.serverTypeName}
+            {s.kind === 'minecraft' && <> {s.version === 'latest' ? d.common.latestShort : s.version}</>} · {fmt.mb(s.limits.memoryMb)} RAM
           </p>
           {s.address && (
             <div className="mt-2">
@@ -101,10 +103,10 @@ function ServerCard({ s, lang }: { s: ServerDTO; lang: Locale }) {
                   </div>
                   <div>
                     <dt className="text-[13px] text-subtle">{d.early.hardwareLabel}</dt>
-                    <dd className="mt-0.5 text-lg font-semibold text-white">{d.early.tiers[s.waitlist.tier]}</dd>
+                    <dd className="mt-0.5 text-lg font-semibold text-white">{twoTiers ? d.early.tiers[s.waitlist.tier] : cpus}</dd>
                   </div>
                 </dl>
-                <p className="text-[13px] leading-relaxed text-subtle">{d.early.tierNote[s.waitlist.tier]}</p>
+                {twoTiers && <p className="text-[13px] leading-relaxed text-subtle">{d.early.tierNote[s.waitlist.tier]}</p>}
               </>
             )}
           </div>
@@ -133,13 +135,15 @@ function ServerCard({ s, lang }: { s: ServerDTO; lang: Locale }) {
               <p className="mt-0.5 text-sm text-gray-100">
                 {f.isPaused && f.pausedUntil
                   ? t.pausedUntil(fmt.dateTime(f.pausedUntil))
+                  : !s.fairUseEnabled
+                    ? t.alwaysOn
                   : f.online && f.autoStopAt
                     ? t.autoStop(fmt.dateTime(f.autoStopAt))
                     : f.weeklyOfflineFulfilled
                       ? t.weeklyDone
                       : t.weeklyLeft(fmt.duration(f.weeklyOfflineRemainingSeconds, { maxUnits: 1 }))}
               </p>
-              <p className="mt-0.5 text-[13px] text-subtle">{t.rulesShort}</p>
+              <p className="mt-0.5 text-[13px] text-subtle">{s.fairUseEnabled ? t.rulesShort : t.alwaysOnHint}</p>
             </div>
           </div>
         )}
@@ -163,15 +167,24 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const hasPending = servers.some((s) => s.status === 'pending');
   const onWaitlist = servers.some((s) => s.status === 'waitlist');
   const transitional = servers.some((s) => ['provisioning', 'provisioning_failed', 'expiring'].includes(s.status) || s.powerState === 'installing');
-  const owned = servers.filter((s) => s.status !== 'pending' && s.status !== 'waitlist').length;
+  const ownedServers = servers.filter((s) => s.status !== 'pending' && s.status !== 'waitlist');
+  const owned = ownedServers.length;
   const mode = settings.registration.mode;
+  const x = siteTexts(settings, lang);
+  // Das Limit gilt je Produkt – ein weiterer Server ist möglich, solange ein Angebot noch nicht ausgeschöpft ist
+  const freeKind = productKinds.some(
+    (k) =>
+      settings.products[k].enabled &&
+      settings.products[k].plans.length > 0 &&
+      ownedServers.filter((s) => s.kind === k).length < settings.registration.maxServersPerUser,
+  );
   const maintenance = settings.maintenance.enabled;
   // Weiteren Server anfordern: offen bis zur Obergrenze, Early Access nur ein Platz pro Person, geschlossen gar nicht
   const canCreate =
     !maintenance &&
     !hasPending &&
     !onWaitlist &&
-    (mode === 'open' ? owned < settings.registration.maxServersPerUser : mode === 'preregistration' ? owned === 0 : false);
+    (mode === 'open' ? freeKind : mode === 'preregistration' ? owned === 0 : false);
 
   return (
     <div className="container-page py-12 sm:py-16">
@@ -219,7 +232,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {!user.panelLinked && hasPending && <PanelSetupCard email={user.email} />}
 
           {servers.map((s) => (
-            <ServerCard key={s.id} s={s} lang={lang} />
+            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} />
           ))}
 
           {res.ok && servers.length === 0 && (
