@@ -540,6 +540,13 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
         <SendToChannel kind="tickets" disabled={!status.botReady} hint="Oder im Kanal selbst: /ticketpanel" />
       </Section>
 
+      <Section
+        title="Server per Direktnachricht starten"
+        description="Mitglieder schreiben dem Bot privat „!start“. Er antwortet auf Deutsch und Englisch mit einem Button je Server; ein Klick startet den Server über das Panel. Läuft der Server schon, sagt der Bot das. Kommt er nicht hoch, verweist er auf die Konsole im Panel. Fair-Use-Pausen gelten weiter."
+      >
+        <Toggle checked={d.dmStart} onChange={(dmStart) => set({ dmStart })} label="„!start“ per Direktnachricht erlauben" hint="Funktioniert nur für verknüpfte Discord-Konten und nur für die eigenen Server." />
+      </Section>
+
       <Section title="Befehle des Bots" description="Alle Befehle sind nur für Mitglieder mit dem Recht „Administrator“.">
         <dl className="divide-y divide-line rounded-lg border border-line px-4">
           <Row label="/rolle geben · nehmen">Gibt oder nimmt einem Mitglied eine Rolle.</Row>

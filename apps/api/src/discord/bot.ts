@@ -11,6 +11,7 @@ import { discordTickets, servers, users } from '../db/schema';
 import { env } from '../env';
 import { audit } from '../services/audit.service';
 import { buildCommands } from './commands';
+import { START_PREFIX, onDirectMessage, onStartButton } from './dm-start';
 import { TICKET, closeButton, deleteButton, rolePanelMessage, ticketPanelMessage, welcomeMessage } from './messages';
 import {
   CHANNEL,
@@ -679,7 +680,13 @@ async function commandMaintenance(i: Interaction, settings: DiscordSettings, log
 
 async function onInteraction(i: Interaction, log: BotLogger): Promise<void> {
   const cfg = await discordConfig();
-  if (!cfg.botReady || i.guild_id !== cfg.settings.guildId) return;
+  if (!cfg.botReady) return;
+  // Server-Start per Direktnachricht: der einzige Button, der außerhalb des Servers funktioniert
+  if (i.type === 3 && i.data?.custom_id?.startsWith(START_PREFIX)) {
+    if (!cfg.settings.dmStart) return;
+    return onStartButton(i).catch((err) => log.warn({ err: discordErrorText(err) }, 'Discord: Server-Start per Nachricht fehlgeschlagen'));
+  }
+  if (i.guild_id !== cfg.settings.guildId) return;
   const settings = cfg.settings;
   try {
     if (i.type === 2) {
@@ -758,6 +765,8 @@ export async function handleDiscordEvent(type: string, d: any, log: BotLogger): 
     case 'INVITE_DELETE':
       memory.invites.delete(d.code);
       return;
+    case 'MESSAGE_CREATE':
+      return onDirectMessage(d);
     case 'INTERACTION_CREATE':
       return onInteraction(d, log);
   }

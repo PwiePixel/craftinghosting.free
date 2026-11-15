@@ -65,6 +65,8 @@ export interface DiscordSettings {
   ticketCategoryId: string;
   /** Höchstzahl offener Tickets je Mitglied */
   maxOpenTickets: number;
+  /** Mitglieder können dem Bot per Direktnachricht „!start“ schreiben und ihren Server starten */
+  dmStart: boolean;
   /** Hinweis auf der Website, warum Discord nötig ist (leer = Standardtext) */
   requiredNote: Localized;
   welcome: DiscordWelcomeSettings;
@@ -140,6 +142,7 @@ export function defaultDiscordSettings(): DiscordSettings {
     supportRoleId: '',
     ticketCategoryId: '',
     maxOpenTickets: 2,
+    dmStart: true,
     requiredNote: { de: '', en: '' },
     welcome: defaultDiscordWelcome(),
     rolePanels: defaultDiscordRolePanels(),
@@ -210,6 +213,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
     supportRoleId: snowflake(i.supportRoleId),
     ticketCategoryId: snowflake(i.ticketCategoryId),
     maxOpenTickets: int(i.maxOpenTickets, d.maxOpenTickets, 1, discordLimits.maxOpenTickets),
+    dmStart: bool(i.dmStart, d.dmStart),
     requiredNote: { de: text(note.de, '', 400).trim(), en: text(note.en, '', 400).trim() },
     welcome: {
       enabled: bool(w.enabled, d.welcome.enabled),

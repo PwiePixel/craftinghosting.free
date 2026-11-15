@@ -14,8 +14,8 @@ import { discordRequest } from './rest';
 import { discordConfig } from './service';
 import { patchDiscordState } from './store';
 
-/** GUILDS | GUILD_MEMBERS (privilegiert: „Server Members Intent“) | GUILD_INVITES */
-const INTENTS = (1 << 0) | (1 << 1) | (1 << 6);
+/** GUILDS | GUILD_MEMBERS (privilegiert: „Server Members Intent“) | GUILD_INVITES | DIRECT_MESSAGES (für „!start“ per Direktnachricht) */
+const INTENTS = (1 << 0) | (1 << 1) | (1 << 6) | (1 << 12);
 const LEASE = 'discord-gateway';
 const LEASE_MS = 90_000;
 const OWNER = randomUUID();

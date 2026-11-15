@@ -99,6 +99,7 @@ Schutz vor Mehrfach-Anmeldungen und Bindung an den eigenen Discord-Server. Alles
 | **Willkommensnachricht** | Embed mit Profilbild und Profil-Banner, Einlader, Beitrittsdatum und Mitgliederzahl. Texte, Farbe, Kanal und Ersatzbild sind einstellbar. |
 | **Rollen-Panels** | Nachrichten mit Buttons zum Selbst-Zuweisen von Rollen (z. B. News/Giveaway/Status oder Free Hosting/Paid Hosting). Senden aus dem Admin-Bereich oder mit `/rollenpanel`. |
 | **Tickets** | Ticket-Panel (`/ticketpanel` oder aus dem Admin). Der Bot erkennt die Server des Nutzers, lässt das Produkt auswählen und schreibt Account-ID und Server-ID ins Ticket. Schließen durch Ersteller oder Team, Löschen durch das Team. |
+| **`!start` per Direktnachricht** | Mitglieder schreiben dem Bot privat `!start`. Er antwortet auf Deutsch und Englisch mit einem Button je Server und startet ihn über die Pterodactyl-API. Läuft der Server schon, sagt er das; kommt er nicht hoch, verweist er auf die Konsole im Panel. Fair-Use-Pausen gelten weiter. Abschaltbar im Admin. |
 | **`/rolle`** | `geben`/`nehmen` für ein Mitglied, `alle` für alle Mitglieder (ohne Bots). |
 | **`/wartung`** | `an`: sichert die Berechtigungen aller Kanäle, sperrt sie für alle außer Administratoren, legt Rolle „Wartung“ und einen Hinweis-Kanal an. `aus`: stellt alles wieder her. |
 
