@@ -24,6 +24,7 @@ import {
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
 import { hadBoostRewards } from '../discord/boost-rewards';
+import { abuseReasonTitle } from './abuse-reasons';
 import { bonusSlotsFor } from '../discord/rewards';
 import { discordGate, syncCustomerRoleSoon } from '../discord/service';
 import { uuid } from '../lib/crypto';
@@ -69,6 +70,7 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     version: server.version,
     status: server.status,
     pendingDeadlineAt: server.status === 'pending' && server.pendingDeadlineAt ? server.pendingDeadlineAt.toISOString() : null,
+    abuse: server.abuseAt ? { at: server.abuseAt.toISOString(), reason: abuseReasonTitle(server.abuseReason) } : null,
     suspensionReason: server.suspensionReason,
     powerState: server.powerState,
     address: server.address,

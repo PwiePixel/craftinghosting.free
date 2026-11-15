@@ -42,6 +42,7 @@ import { deleteAccount } from './account.service';
 import { allJobs } from '../jobs/registry';
 import { pterodactyl } from '../pterodactyl';
 import { pterodactylConfig, suggestEggs } from '../config/pterodactyl.config';
+import { abuseReasonLabel } from './abuse-reasons';
 import { mapLimit } from '../jobs/types';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
@@ -226,6 +227,7 @@ export async function listServersAdmin(
     pausedUntil: iso(s.pausedUntil),
     pauseReason: s.pauseReason,
     pendingReason: s.status === 'pending' ? (reasons.get(s.id) ?? 'stuck') : null,
+    abuse: s.abuseAt ? { at: s.abuseAt.toISOString(), reason: abuseReasonLabel(s.abuseReason) } : null,
     provisioningAttempts: s.provisioningAttempts,
     provisioningError: s.provisioningError,
     panelDescription: s.panelDescription,

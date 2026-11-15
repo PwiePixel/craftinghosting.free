@@ -5,6 +5,7 @@ import { SecurityCard } from '@/components/my/security-card';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink, buttonClasses } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Alert, StatusDot } from '@/components/ui/primitives';
 import { formatters, getDict, resolveLang, type Dictionary } from '@/i18n';
 import { apiServer, requireUser } from '@/lib/api/server';
@@ -92,7 +93,7 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
   }
 }
 
-function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean }) {
+function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null }) {
   const d = getDict(lang);
   const t = d.my;
   const fmt = formatters(lang);
@@ -102,7 +103,21 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord }: { s: ServerD
   const f = s.fairUse;
   const daysLeft = s.cycle.secondsRemaining < 2 * 86400 ? fmt.duration(s.cycle.secondsRemaining) : t.days(s.cycle.daysRemaining);
   return (
-    <article className="surface overflow-hidden">
+    <article className={cn('surface overflow-hidden', s.abuse && 'border-red-400/60 ring-1 ring-red-400/30')}>
+      {s.abuse && (
+        <div className="border-b border-red-400/30 bg-red-400/[0.1] px-6 py-4" role="alert">
+          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-red-100">
+            <span className="rounded bg-red-500 px-1.5 py-0.5 text-[11px] tracking-[0.08em] text-white uppercase">{t.abuseBadge}</span>
+            {s.abuse.reason[lang]}
+          </p>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-red-100/90">{t.abuseText(fmt.date(s.abuse.at))}</p>
+          {discordUrl && (
+            <a href={discordUrl} target="_blank" rel="noopener noreferrer" className={buttonClasses('danger', 'sm', 'mt-3 border-red-300/50 text-red-100')}>
+              <DiscordIcon className="size-4" /> {t.abuseTicket}
+            </a>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -342,7 +357,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {!user.panelLinked && hasPending && <PanelSetupCard email={user.email} />}
 
           {servers.map((s) => (
-            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} />
+            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
           ))}
 
           {res.ok && servers.length === 0 && (

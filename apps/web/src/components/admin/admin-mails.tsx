@@ -7,7 +7,7 @@
  *  – Abuse-Mails von Hand senden und alle Abuse-Mails ansehen
  */
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, Send } from 'lucide-react';
 import type { AdminAbuseDTO, AdminDiscordWaitingDTO } from '@chfree/shared';
 import { Labeled, NumberInput, Toggle } from '@/components/admin/admin-settings';
@@ -164,7 +164,12 @@ const AUTO_LABEL: Record<string, string> = {
   'fair_use.pause_violation': 'automatisch · Start während einer Pause',
 };
 
-/** Abuse-Bereich: Abuse-Mail senden und alle Abuse-Mails ansehen */
+type AbuseServer = { id: string; name: string; kind: string; status: string; flagged: boolean };
+type AbusePreview = { title: { de: string; en: string }; body: { de: string; en: string }; locale: 'de' | 'en' | null };
+const validEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());
+const SERVER_STATUS: Record<string, string> = { active: 'aktiv', expiring: 'läuft ab', suspended: 'gesperrt', provisioning: 'wird eingerichtet', provisioning_failed: 'Einrichtung fehlgeschlagen' };
+
+/** Abuse-Bereich: Abuse-Mail senden (mit Vorschau und betroffenem Server), markierte Server und alle Abuse-Mails */
 export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
   const router = useRouter();
   const [data, setData] = useState(initial);
@@ -172,21 +177,64 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
   const [reason, setReason] = useState(initial.reasons[0]?.id ?? 'other');
   const [note, setNote] = useState({ de: '', en: '' });
   const [suspend, setSuspend] = useState(false);
+  const [serverId, setServerId] = useState('');
+  const [servers, setServers] = useState<AbuseServer[] | null>(null);
+  const [preview, setPreview] = useState<AbusePreview | null>(null);
+  const [previewLang, setPreviewLang] = useState<'de' | 'en'>('de');
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<Message>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const needsNote = reason === 'other';
   const shown = data.mails.filter((m) => !filter.trim() || m.userEmail.includes(filter.trim().toLowerCase()));
+  const noteDe = note.de;
+  const noteEn = note.en;
+
+  // Server des Nutzers laden, sobald eine gültige Adresse eingegeben ist
+  useEffect(() => {
+    setServerId('');
+    if (!validEmail(email)) return void setServers(null);
+    let stop = false;
+    const timer = setTimeout(() => {
+      api<{ servers: AbuseServer[] }>(`/admin/abuse/servers?email=${encodeURIComponent(email.trim())}`)
+        .then((r) => !stop && setServers(r.servers))
+        .catch(() => !stop && setServers(null));
+    }, 400);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [email]);
+
+  // Vorschau: genau der Text, den die Mail enthält – neu geladen, sobald sich etwas ändert
+  useEffect(() => {
+    let stop = false;
+    const timer = setTimeout(() => {
+      api<{ preview: AbusePreview }>('/admin/abuse/preview', {
+        body: { email: validEmail(email) ? email.trim() : 'vorschau@example.com', reason, note: { de: noteDe, en: noteEn }, suspend, serverId: serverId || null },
+      })
+        .then((r) => {
+          if (stop) return;
+          setPreview(r.preview);
+          if (r.preview.locale) setPreviewLang(r.preview.locale);
+        })
+        .catch(() => !stop && setPreview(null));
+    }, 300);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [email, reason, noteDe, noteEn, suspend, serverId]);
 
   async function send() {
-    if (!window.confirm(`Abuse-Mail an ${email} senden${suspend ? ' und alle Server dieses Nutzers sperren' : ''}?`)) return;
+    const target = servers?.find((x) => x.id === serverId);
+    if (!window.confirm(`Abuse-Mail an ${email} senden${target ? ` – Server „${target.name}“ wird als Abuse markiert` : ''}${suspend ? (target ? ' und gesperrt' : ' und alle Server dieses Nutzers werden gesperrt') : ''}?`)) return;
     setPending(true);
     setMessage(null);
     try {
-      const res = await api<{ suspended: number; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend } });
+      const res = await api<{ suspended: number; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend, serverId: serverId || null } });
       setData(res.abuse);
-      setMessage({ ok: true, text: `Abuse-Mail wird versendet${res.suspended ? ` – ${res.suspended} Server gesperrt` : ''}.` });
+      setMessage({ ok: true, text: `Abuse-Mail wird versendet${target ? ' – Server ist als Abuse markiert' : ''}${res.suspended ? ` – ${res.suspended} Server gesperrt` : ''}.` });
       setNote({ de: '', en: '' });
       setSuspend(false);
       router.refresh();
@@ -197,18 +245,49 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
     }
   }
 
+  async function clearFlag(id: string) {
+    try {
+      setData((await api<{ abuse: AdminAbuseDTO }>(`/admin/abuse/${id}/clear`, { body: {} })).abuse);
+      router.refresh();
+    } catch (err) {
+      setMessage({ ok: false, text: errorText(err) });
+    }
+  }
+
   return (
     <div className="space-y-5">
       <section className="surface p-5 sm:p-6">
         <h2 className="text-[15px] font-semibold text-white">Abuse-Mail senden</h2>
         <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted">
-          Verwarnt einen Nutzer per E-Mail (und unter „Meine Server“). Der Text zum gewählten Grund ist vorbereitet und geht in der Sprache des Nutzers raus; dein eigener
-          Text wird darunter angefügt. Auf Wunsch werden gleichzeitig alle Server des Nutzers gesperrt.
+          Verwarnt einen Nutzer per E-Mail (und unter „Meine Server“). Wählst du den betroffenen Server aus, wird er dort rot als „Abuse“ markiert – mit dem Hinweis, ein
+          Ticket auf Discord zu öffnen. Rechts siehst du genau den Text, den die Mail enthält.
         </p>
-        <div className="mt-5 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+        <div className="mt-5 grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
             <Labeled label="E-Mail-Adresse des Nutzers">
               <input className="input" type="email" value={email} placeholder="nutzer@example.com" onChange={(e) => setEmail(e.target.value)} />
+            </Labeled>
+            <Labeled
+              label="Betroffener Server"
+              hint={
+                !validEmail(email)
+                  ? 'Erst die E-Mail-Adresse eingeben – dann erscheinen hier die Server des Nutzers.'
+                  : servers === null
+                    ? 'Server werden geladen …'
+                    : servers.length === 0
+                      ? 'Zu dieser Adresse gibt es keinen Account oder keinen Server.'
+                      : 'Der ausgewählte Server wird unter „Meine Server“ als Abuse markiert.'
+              }
+            >
+              <select className="input" value={serverId} disabled={!servers || servers.length === 0} onChange={(e) => setServerId(e.target.value)}>
+                <option value="">kein bestimmter Server</option>
+                {(servers ?? []).map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name} – {x.kind === 'discord' ? 'Discord-Bot' : 'Minecraft'}, {SERVER_STATUS[x.status] ?? x.status}
+                    {x.flagged ? ' (bereits markiert)' : ''}
+                  </option>
+                ))}
+              </select>
             </Labeled>
             <Labeled label="Grund">
               <select className="input" value={reason} onChange={(e) => setReason(e.target.value)}>
@@ -220,20 +299,91 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
               </select>
             </Labeled>
             <Labeled label={`Eigener Text (Deutsch)${needsNote ? '' : ' – optional'}`}>
-              <textarea className="input min-h-[96px] py-2.5 leading-relaxed" rows={4} value={note.de} maxLength={3000} onChange={(e) => setNote({ ...note, de: e.target.value })} />
+              <textarea className="input min-h-[84px] py-2.5 leading-relaxed" rows={3} value={note.de} maxLength={3000} onChange={(e) => setNote({ ...note, de: e.target.value })} />
             </Labeled>
             <Labeled label="Eigener Text (Englisch) – optional" hint="Leer = der deutsche Text geht auch an englischsprachige Nutzer.">
-              <textarea className="input min-h-[96px] py-2.5 leading-relaxed" rows={4} value={note.en} maxLength={3000} onChange={(e) => setNote({ ...note, en: e.target.value })} />
+              <textarea className="input min-h-[84px] py-2.5 leading-relaxed" rows={3} value={note.en} maxLength={3000} onChange={(e) => setNote({ ...note, en: e.target.value })} />
             </Labeled>
+            <Toggle
+              checked={suspend}
+              onChange={setSuspend}
+              label={serverId ? 'Diesen Server sofort sperren' : 'Alle Server dieses Nutzers sofort sperren'}
+              hint="Die Mail nennt dann die Sperre. Entsperren geht im Reiter „Server“."
+            />
           </div>
-          <Toggle checked={suspend} onChange={setSuspend} label="Alle Server dieses Nutzers sofort sperren" hint="Die Mail nennt dann die Sperre. Entsperren geht im Reiter „Server“." />
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="danger" icon={<Send />} loading={pending} disabled={!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim()) || (needsNote && !note.de.trim() && !note.en.trim())} onClick={() => void send()}>
-              Abuse-Mail senden
-            </Button>
-            <Note message={message} />
+
+          <div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-gray-200">Vorschau der Mail</p>
+              <div className="flex gap-1 text-[12px]">
+                {(['de', 'en'] as const).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => setPreviewLang(l)}
+                    aria-pressed={previewLang === l}
+                    className={cn('rounded-md border px-2 py-1', previewLang === l ? 'border-blue-400/60 bg-blue-500/10 text-white' : 'border-line-strong text-muted hover:text-white')}
+                  >
+                    {l === 'de' ? 'Deutsch' : 'Englisch'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-2 rounded-lg border border-line bg-black/25 p-4">
+              {preview ? (
+                <>
+                  <p className="text-[12px] text-subtle">Betreff</p>
+                  <p className="text-sm font-semibold text-white">{preview.title[previewLang]}</p>
+                  <p className="mt-3 text-[12px] text-subtle">Text</p>
+                  <div className="mt-1 space-y-2 text-sm leading-relaxed text-gray-200">
+                    {preview.body[previewLang].split('\n').map((line, i) => (
+                      <p key={i} className="break-words">
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-subtle">{needsNote && !note.de.trim() && !note.en.trim() ? 'Bei „Sonstiger Verstoß“ bitte einen eigenen Text eingeben.' : 'Vorschau wird geladen …'}</p>
+              )}
+            </div>
+            <p className="mt-2 text-[13px] text-subtle">
+              {preview?.locale ? `Dieser Nutzer bekommt die Mail auf ${preview.locale === 'de' ? 'Deutsch' : 'Englisch'}.` : 'Jeder Nutzer bekommt die Mail in seiner Sprache.'} Darunter steht in der
+              Mail der Knopf „Meine Server“.
+            </p>
           </div>
         </div>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <Button variant="danger" icon={<Send />} loading={pending} disabled={!validEmail(email) || (needsNote && !note.de.trim() && !note.en.trim())} onClick={() => void send()}>
+            Abuse-Mail senden
+          </Button>
+          <Note message={message} />
+        </div>
+      </section>
+
+      <section className="surface p-5 sm:p-6">
+        <h2 className="text-[15px] font-semibold text-white">Als Abuse markierte Server</h2>
+        <p className="mt-1 text-sm text-muted">Diese Server sind beim Nutzer rot markiert. Hebe die Markierung auf, sobald das Ticket geklärt ist.</p>
+        {data.flagged.length === 0 ? (
+          <p className="mt-4 text-sm text-subtle">Aktuell ist kein Server markiert.</p>
+        ) : (
+          <ul className="mt-4 divide-y divide-line rounded-lg border border-red-400/25">
+            {data.flagged.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3.5 py-3">
+                <span className="min-w-0">
+                  <span className="text-sm font-medium text-white">{f.name}</span>
+                  <span className="ml-2 rounded bg-red-400/15 px-1.5 py-0.5 text-[11px] text-red-200">Abuse</span>
+                  <span className="mt-0.5 block text-[12px] text-subtle">
+                    {f.ownerEmail} · {f.reason} · seit {dateTime(f.at)} · {SERVER_STATUS[f.status] ?? f.status}
+                  </span>
+                </span>
+                <Button variant="secondary" size="sm" onClick={() => void clearFlag(f.id)}>
+                  Markierung aufheben
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="surface p-5 sm:p-6">

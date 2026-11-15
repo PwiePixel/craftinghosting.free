@@ -156,6 +156,9 @@ export const servers = sqliteTable(
     lastProvisionAttemptAt: ts('last_provision_attempt_at'),
     postProvisionDone: integer('post_provision_done', { mode: 'boolean' }).notNull().default(false),
     backupScheduleId: integer('backup_schedule_id'),
+    /** Abuse-Markierung: Zeitpunkt und Grund (ID aus services/abuse-reasons) – gesetzt mit einer Abuse-Mail, aufgehoben im Admin-Bereich */
+    abuseAt: ts('abuse_at'),
+    abuseReason: text('abuse_reason'),
     /** Frist für eine offene Anfrage, die auf die Discord-Verbindung wartet – danach wird sie gelöscht (gesetzt mit der Erinnerungsmail) */
     pendingDeadlineAt: ts('pending_deadline_at'),
     /** Warteliste (Early Access): Platz wird bei der E-Mail-Bestätigung vergeben */

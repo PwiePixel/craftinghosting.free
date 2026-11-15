@@ -475,6 +475,12 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
                   <StatusDot tone={st.tone} /> {st.label}
                 </span>
                 {pendingInfo && <p className={cn('max-w-[240px] text-[11px]', pendingInfo.tone === 'red' ? 'text-red-300' : 'text-subtle')}>{pendingInfo.hint}</p>}
+                {s.abuse && (
+                  <p className="mt-0.5 text-[11px] text-red-300">
+                    <span className="mr-1 rounded bg-red-500/80 px-1 py-px font-semibold text-white">Abuse</span>
+                    {s.abuse.reason}
+                  </p>
+                )}
                 {s.suspensionReason && <p className="text-[11px] text-subtle">Grund: {s.suspensionReason === 'cycle_expired' ? '30 Tage abgelaufen' : s.suspensionReason === 'admin' ? 'vom Team' : s.suspensionReason}</p>}
                 <p className="text-[11px] text-subtle">Power: {s.powerState}</p>
                 {paused && (

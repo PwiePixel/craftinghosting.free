@@ -6,17 +6,20 @@
  * Versendet wird über die Benachrichtigungen (Outbox): Die Nachricht erscheint auch unter „Meine Server“,
  * die E-Mail verschickt der Worker – Fehler stehen im Reiter „E-Mails“.
  */
-import { and, desc, eq, inArray, isNotNull, like, lt, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from 'drizzle-orm';
 import { formatDateTime, freeHostingConfig, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type Locale, type Localized } from '@chfree/shared';
 import { db } from '../db/client';
 import { notifications, servers, users, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
 import { ApiError, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
+import { getDiscordState } from '../discord/store';
+import { ABUSE_REASONS, abuseReasonLabel } from './abuse-reasons';
 import { serverAction } from './admin.service';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { pendingReasonFor } from './server.service';
+import { getSettings, resolveBrand } from './settings.service';
 
 const DAY_MS = 86_400_000;
 const date = (d: Date, l: Locale) => formatDateTime(d, freeHostingConfig.fairUse.timezone, l);
@@ -157,52 +160,6 @@ export async function sendAdminMessage(admin: User, input: { emails: string[]; s
 
 /* ------------------------------------------------------------ Abuse */
 
-/** Gründe für eine Abuse-Mail – Text in beiden Sprachen, der Empfänger bekommt seine Sprache */
-const ABUSE_REASONS: { id: string; label: string; title: Localized; text: Localized }[] = [
-  {
-    id: 'resources',
-    label: 'Übermäßige Auslastung (CPU, RAM, Netzwerk)',
-    title: { de: 'Hinweis: Dein Server belastet unsere Systeme zu stark', en: 'Notice: your server puts too much load on our systems' },
-    text: {
-      de: 'Uns ist aufgefallen, dass dein Server unsere Systeme dauerhaft über das faire Maß hinaus belastet. Die Ressourcen werden zwischen allen Nutzern geteilt.',
-      en: 'We noticed that your server permanently puts more load on our systems than is fair. Resources are shared between all users.',
-    },
-  },
-  {
-    id: 'mining',
-    label: 'Krypto-Mining',
-    title: { de: 'Verstoß gegen die Regeln: Krypto-Mining', en: 'Rule violation: crypto mining' },
-    text: { de: 'Auf deinem Server wurde Krypto-Mining festgestellt. Das ist auf CraftingHosting.free nicht erlaubt.', en: 'Crypto mining was detected on your server. This is not allowed on CraftingHosting.free.' },
-  },
-  {
-    id: 'attacks',
-    label: 'Angriffe, Spam, Portscans',
-    title: { de: 'Verstoß gegen die Regeln: Angriffe oder Spam', en: 'Rule violation: attacks or spam' },
-    text: {
-      de: 'Von deinem Server gingen Angriffe, Spam oder Portscans aus. Das ist auf CraftingHosting.free nicht erlaubt.',
-      en: 'Attacks, spam or port scans originated from your server. This is not allowed on CraftingHosting.free.',
-    },
-  },
-  {
-    id: 'content',
-    label: 'Verbotene Inhalte',
-    title: { de: 'Verstoß gegen die Regeln: unzulässige Inhalte', en: 'Rule violation: prohibited content' },
-    text: { de: 'Auf deinem Server liegen Inhalte, die nach unseren Regeln nicht erlaubt sind.', en: 'Your server hosts content that is not allowed under our rules.' },
-  },
-  {
-    id: 'multi',
-    label: 'Mehrfach-Accounts',
-    title: { de: 'Verstoß gegen die Regeln: mehrere Accounts', en: 'Rule violation: multiple accounts' },
-    text: { de: 'Wir haben Hinweise darauf, dass du mehrere Accounts nutzt, um die Grenzen des kostenlosen Angebots zu umgehen.', en: 'We have indications that you use several accounts to get around the limits of the free offer.' },
-  },
-  {
-    id: 'other',
-    label: 'Sonstiger Verstoß (eigener Text)',
-    title: { de: 'Hinweis zu einem Verstoß gegen unsere Regeln', en: 'Notice about a violation of our rules' },
-    text: { de: '', en: '' },
-  },
-];
-
 /** Automatisch verschickte Meldungen, die ebenfalls in den Abuse-Bereich gehören */
 const AUTO_ABUSE_TYPES = ['fair_use.bot_cpu_stop', 'fair_use.bot_suspended', 'fair_use.pause_violation'];
 
@@ -215,8 +172,16 @@ export async function listAbuse(): Promise<AdminAbuseDTO> {
     .where(or(like(notifications.type, 'abuse.%'), inArray(notifications.type, AUTO_ABUSE_TYPES)))
     .orderBy(desc(notifications.createdAt))
     .limit(200);
+  const flagged = await db
+    .select({ s: servers, email: users.email })
+    .from(servers)
+    .innerJoin(users, eq(users.id, servers.userId))
+    .where(and(isNotNull(servers.abuseAt), ne(servers.status, 'deleted')))
+    .orderBy(desc(servers.abuseAt))
+    .limit(200);
   return {
     reasons: ABUSE_REASONS.map((r) => ({ id: r.id, label: r.label })),
+    flagged: flagged.map(({ s, email }) => ({ id: s.id, name: s.name, ownerEmail: email, reason: abuseReasonLabel(s.abuseReason), at: s.abuseAt!.toISOString(), status: s.status })),
     mails: rows.map(({ n, email, server }) => ({
       id: n.id,
       createdAt: n.createdAt.toISOString(),
@@ -232,42 +197,116 @@ export async function listAbuse(): Promise<AdminAbuseDTO> {
   };
 }
 
-/** Abuse-Mail von Hand: Grund + optionaler eigener Text; auf Wunsch werden die Server des Nutzers gesperrt */
-export async function sendAbuseMail(admin: User, input: { email: string; reason: string; note: Localized; suspend: boolean }, ip?: string): Promise<{ suspended: number }> {
-  const reason = ABUSE_REASONS.find((r) => r.id === input.reason);
-  if (!reason) throw new ApiError(400, 'validation_error', L('Unbekannter Grund.', 'Unknown reason.'));
-  const note = clean(input.note);
-  if (reason.id === 'other' && !note.de) throw new ApiError(400, 'validation_error', L('Bitte einen eigenen Text angeben.', 'Please enter your own text.'));
-  const [user] = await db.select().from(users).where(eq(users.email, input.email.trim().toLowerCase())).limit(1);
-  if (!user) throw new ApiError(404, 'user_not_found', L('Zu dieser E-Mail-Adresse gibt es keinen Account.', 'There is no account for this email address.'));
+/** Server eines Nutzers zur Auswahl im Abuse-Formular */
+export async function listAbuseServers(email: string): Promise<{ id: string; name: string; kind: string; status: string; flagged: boolean }[]> {
+  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, email.trim().toLowerCase())).limit(1);
+  if (!user) return [];
+  const rows = await db
+    .select()
+    .from(servers)
+    .where(and(eq(servers.userId, user.id), inArray(servers.status, ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended'])))
+    .orderBy(desc(servers.createdAt));
+  return rows.map((s) => ({ id: s.id, name: s.name, kind: s.kind, status: s.status, flagged: s.abuseAt !== null }));
+}
 
-  // Erst sperren, dann schreiben – so stimmt der Text der Mail
-  let suspended = 0;
-  if (input.suspend) {
-    const active = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, user.id), inArray(servers.status, ['active', 'expiring'])));
-    for (const s of active) {
-      await serverAction(admin, s.id, 'suspend', ip).then(
-        () => suspended++,
-        () => {},
-      );
-    }
-  }
+export interface AbuseInput {
+  email: string;
+  reason: string;
+  note: Localized;
+  suspend: boolean;
+  /** Betroffener Server (leer = kein bestimmter) */
+  serverId?: string | null;
+}
+
+/** Adresse des Discord-Servers für den Hinweis „öffne ein Ticket“ */
+async function discordLink(): Promise<string> {
+  const settings = await getSettings();
+  const invite = settings.discord.enabled ? (await getDiscordState().catch(() => null))?.inviteCode : null;
+  return invite ? `https://discord.gg/${invite}` : resolveBrand(settings).discordUrl;
+}
+
+/** Betreff und Text einer Abuse-Mail – genau so, wie sie verschickt wird (auch für die Vorschau im Admin-Bereich) */
+function composeAbuse(reasonId: string, noteRaw: Localized, serverName: string | null, suspended: number, discord: string): { title: Localized; body: Localized } {
+  const reason = ABUSE_REASONS.find((r) => r.id === reasonId);
+  if (!reason) throw new ApiError(400, 'validation_error', L('Unbekannter Grund.', 'Unknown reason.'));
+  const note = clean(noteRaw);
   const part = (l: Locale) =>
     [
       reason.text[l],
+      serverName ? (l === 'en' ? `The affected server is “${serverName}”.` : `Betroffen ist dein Server „${serverName}“.`) : '',
       note[l],
       suspended > 0
         ? l === 'en'
-          ? `We have suspended your ${suspended === 1 ? 'server' : 'servers'} for now.`
-          : `Wir haben ${suspended === 1 ? 'deinen Server' : 'deine Server'} vorerst gesperrt.`
+          ? `We have suspended ${serverName || suspended === 1 ? 'the server' : 'your servers'} for now.`
+          : `Wir haben ${serverName || suspended === 1 ? 'den Server' : 'deine Server'} vorerst gesperrt.`
         : l === 'en'
           ? 'Please stop this immediately. In case of repeated violations we suspend or delete the server or the account.'
           : 'Bitte stelle das umgehend ab. Bei wiederholten Verstößen sperren oder löschen wir den Server bzw. den Account.',
-      l === 'en' ? 'If you believe this is a mistake, please contact our support.' : 'Wenn du glaubst, dass ein Irrtum vorliegt, melde dich bitte bei unserem Support.',
+      serverName ? (l === 'en' ? 'The server is marked as “Abuse” under “My servers” until this has been resolved.' : 'Der Server ist unter „Meine Server“ als „Abuse“ markiert, bis das geklärt ist.') : '',
+      l === 'en' ? `To resolve this, please open a ticket on our Discord server: ${discord}` : `Um das zu klären, öffne bitte ein Ticket auf unserem Discord-Server: ${discord}`,
     ]
       .filter(Boolean)
       .join('\n');
-  await notify({ userId: user.id, type: `abuse.${reason.id}`, title: reason.title, body: part, dedupeKey: `abuse:${uuid()}`, email: true });
-  await audit({ userId: user.id, actor: 'admin', action: 'admin.abuse_mail', message: `Abuse-Mail „${reason.label}“ an ${user.email}${suspended ? ` – ${suspended} Server gesperrt` : ''} (durch ${admin.email})`, ip });
+  return { title: reason.title, body: { de: part('de'), en: part('en') } };
+}
+
+async function abuseTarget(input: AbuseInput): Promise<{ user: User | null; server: { id: string; name: string } | null; toSuspend: string[] }> {
+  const [user] = await db.select().from(users).where(eq(users.email, input.email.trim().toLowerCase())).limit(1);
+  if (!user) return { user: null, server: null, toSuspend: [] };
+  const owned = await db.select().from(servers).where(and(eq(servers.userId, user.id), ne(servers.status, 'deleted')));
+  const server = input.serverId ? (owned.find((s) => s.id === input.serverId) ?? null) : null;
+  if (input.serverId && !server) throw new ApiError(404, 'server_not_found', L('Dieser Server gehört nicht zu diesem Nutzer.', 'This server does not belong to this user.'));
+  // Sperren: nur den betroffenen Server – ohne Auswahl alle laufenden Server des Nutzers
+  const candidates = server ? [server] : owned;
+  const toSuspend = input.suspend ? candidates.filter((s) => s.status === 'active' || s.status === 'expiring').map((s) => s.id) : [];
+  return { user, server: server ? { id: server.id, name: server.name } : null, toSuspend };
+}
+
+/** Vorschau der Abuse-Mail in beiden Sprachen */
+export async function previewAbuse(input: AbuseInput): Promise<{ title: Localized; body: Localized; locale: Locale | null }> {
+  const target = await abuseTarget(input).catch(() => ({ user: null, server: null, toSuspend: [] as string[] }));
+  // Ohne bekannten Nutzer zeigt die Vorschau den Text so, als würde ein Server gesperrt
+  const suspended = input.suspend ? Math.max(1, target.toSuspend.length) : 0;
+  return { ...composeAbuse(input.reason, input.note, target.server?.name ?? null, suspended, await discordLink()), locale: target.user?.locale ?? null };
+}
+
+/**
+ * Abuse-Mail von Hand: Grund + optionaler eigener Text. Ist ein Server ausgewählt, wird er unter „Meine Server“
+ * als Abuse markiert; auf Wunsch wird er (bzw. ohne Auswahl alle Server des Nutzers) gesperrt.
+ */
+export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string): Promise<{ suspended: number }> {
+  const reason = ABUSE_REASONS.find((r) => r.id === input.reason);
+  if (!reason) throw new ApiError(400, 'validation_error', L('Unbekannter Grund.', 'Unknown reason.'));
+  if (reason.id === 'other' && !clean(input.note).de) throw new ApiError(400, 'validation_error', L('Bitte einen eigenen Text angeben.', 'Please enter your own text.'));
+  const { user, server, toSuspend } = await abuseTarget(input);
+  if (!user) throw new ApiError(404, 'user_not_found', L('Zu dieser E-Mail-Adresse gibt es keinen Account.', 'There is no account for this email address.'));
+
+  // Erst sperren und markieren, dann schreiben – so stimmt der Text der Mail
+  let suspended = 0;
+  for (const id of toSuspend) {
+    await serverAction(admin, id, 'suspend', ip).then(
+      () => suspended++,
+      () => {},
+    );
+  }
+  if (server) await db.update(servers).set({ abuseAt: new Date(), abuseReason: reason.id }).where(eq(servers.id, server.id));
+  const mail = composeAbuse(reason.id, input.note, server?.name ?? null, suspended, await discordLink());
+  await notify({ userId: user.id, serverId: server?.id ?? null, type: `abuse.${reason.id}`, title: mail.title, body: mail.body, dedupeKey: `abuse:${uuid()}`, email: true });
+  await audit({
+    userId: user.id,
+    serverId: server?.id ?? null,
+    actor: 'admin',
+    action: 'admin.abuse_mail',
+    message: `Abuse-Mail „${reason.label}“ an ${user.email}${server ? ` zu Server „${server.name}“ (als Abuse markiert)` : ''}${suspended ? ` – ${suspended} Server gesperrt` : ''} (durch ${admin.email})`,
+    ip,
+  });
   return { suspended };
+}
+
+/** Abuse-Markierung eines Servers aufheben (z. B. nachdem das Ticket geklärt ist) */
+export async function clearAbuseFlag(admin: User, serverId: string, ip?: string): Promise<void> {
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
+  if (!server || !server.abuseAt) throw new ApiError(404, 'not_found', L('Dieser Server ist nicht als Abuse markiert.', 'This server is not marked as abuse.'));
+  await db.update(servers).set({ abuseAt: null, abuseReason: null }).where(eq(servers.id, serverId));
+  await audit({ userId: server.userId, serverId, actor: 'admin', action: 'admin.abuse_cleared', message: `Abuse-Markierung von Server „${server.name}“ aufgehoben (durch ${admin.email})`, ip });
 }

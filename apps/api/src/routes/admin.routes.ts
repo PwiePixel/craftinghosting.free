@@ -1,4 +1,4 @@
-import { listAbuse, listDiscordWaiting, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
+import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -71,9 +71,28 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /* -------------------------------------------------------------- Abuse */
   app.get('/admin/abuse', async () => ({ abuse: await listAbuse() }));
+  const abuseSchema = z.object({
+    email: emailSchema,
+    reason: z.string().max(40),
+    note: localizedMail(3000).default({ de: '', en: '' }),
+    suspend: z.boolean().default(false),
+    serverId: z.string().uuid().nullable().optional(),
+  });
   app.post('/admin/abuse', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (request) => {
-    const body = z.object({ email: emailSchema, reason: z.string().max(40), note: localizedMail(3000).default({ de: '', en: '' }), suspend: z.boolean().default(false) }).parse(request.body);
-    return { ...(await sendAbuseMail(currentUser(request), body, request.ip)), abuse: await listAbuse() };
+    return { ...(await sendAbuseMail(currentUser(request), abuseSchema.parse(request.body), request.ip)), abuse: await listAbuse() };
+  });
+  /** Vorschau: Betreff und Text der Mail in beiden Sprachen */
+  app.post('/admin/abuse/preview', { config: { rateLimit: { max: 600, timeWindow: '10 minutes' } } }, async (request) => ({ preview: await previewAbuse(abuseSchema.parse(request.body)) }));
+  /** Server eines Nutzers zur Auswahl */
+  app.get('/admin/abuse/servers', async (request) => {
+    const { email } = z.object({ email: emailSchema }).parse(request.query);
+    return { servers: await listAbuseServers(email) };
+  });
+  /** Abuse-Markierung eines Servers aufheben */
+  app.post('/admin/abuse/:id/clear', async (request) => {
+    const { id } = idParams.parse(request.params);
+    await clearAbuseFlag(currentUser(request), id, request.ip);
+    return { abuse: await listAbuse() };
   });
 
   /**
