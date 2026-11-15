@@ -99,7 +99,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.post('/admin/users/:id/:action', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });
-    const action = z.enum(['lock', 'unlock', 'make-admin', 'remove-admin', 'grant-beta', 'revoke-beta']).parse((request.params as { action: string }).action);
+    const action = z.enum(['lock', 'unlock', 'make-admin', 'remove-admin', 'grant-beta', 'revoke-beta', 'reset-two-factor']).parse((request.params as { action: string }).action);
     await userAction(currentUser(request), id, action, request.ip);
     return { ok: true };
   });

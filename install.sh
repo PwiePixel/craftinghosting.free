@@ -601,7 +601,7 @@ collect_config() {
   # SMTP (optional)
   def="${CHF_SMTP_HOST:-$(get_env SMTP_HOST)}"
   if [ "$INTERACTIVE" -eq 1 ]; then
-    info "Mailversand (SMTP) – für Bestätigungs- und Anmeldelinks. Leer lassen = überspringen."
+    info "Mailversand (SMTP) – für die Anmeldecodes und Benachrichtigungen. Leer lassen = überspringen."
   fi
   ask_valid CFG_SMTP_HOST "SMTP-Server (z. B. mail.example.com)" "$def" norm_host
   if [ -n "$CFG_SMTP_HOST" ]; then
@@ -617,7 +617,7 @@ collect_config() {
     ask_valid CFG_MAIL_FROM "Absender-Adresse (leer = SMTP-Benutzer)" "${CHF_MAIL_FROM:-$(get_env MAIL_FROM)}" norm_any
   else
     CFG_SMTP_PORT="587" CFG_SMTP_USER="" CFG_SMTP_PASS="" CFG_MAIL_FROM=""
-    warn "Ohne SMTP werden keine E-Mails verschickt: Anmelde- und Bestätigungslinks stehen dann nur im"
+    warn "Ohne SMTP werden keine E-Mails verschickt: Die Anmeldecodes stehen dann nur im"
     warn "API-Log (journalctl -u chfree-api). Für den echten Betrieb später nachholen: chfree reconfigure"
   fi
 
@@ -1492,7 +1492,7 @@ print_summary() {
 
   ${C_BOLD}So meldest du dich an${C_RESET}
     1. $url/login öffnen und ${CFG_ADMIN_EMAILS:-<Admin-E-Mail>} eintragen
-    2. Den Link aus der E-Mail anklicken$([ -z "$CFG_SMTP_HOST" ] && printf '\n       (ohne SMTP steht der Link im Log:  journalctl -u chfree-api -n 50)')
+    2. Den sechsstelligen Code aus der E-Mail eingeben$([ -z "$CFG_SMTP_HOST" ] && printf '\n       (ohne SMTP steht der Code im Log:  journalctl -u chfree-api -n 50)')
     3. $url/admin aufrufen
 
   ${C_BOLD}Nächste Schritte im Admin-Bereich${C_RESET}

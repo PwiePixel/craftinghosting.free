@@ -2,6 +2,7 @@
  * Admin-Bereich: Übersicht, Listen und Eingriffe (Sperren, Verlängern, Pause aufheben …).
  * Jede Aktion wird im Audit-Log mit actor = admin protokolliert.
  */
+import { resetSecondFactor } from './two-factor.service';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import {
   ADMIN_PAGE_SIZE,
@@ -293,6 +294,7 @@ export async function listUsersAdmin(
     servers: Number(n),
     lastLoginAt: iso(u.lastLoginAt),
     beta: u.beta,
+    twoFactor: u.twoFactorMethod ?? null,
     registrationIp: decryptField(u.registrationIp),
     lastLoginIp: decryptField(u.lastLoginIp),
     createdAt: u.createdAt.toISOString(),
@@ -559,7 +561,7 @@ export async function getPanelInfo(): Promise<AdminPanelDTO> {
   return result;
 }
 
-export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin' | 'grant-beta' | 'revoke-beta';
+export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin' | 'grant-beta' | 'revoke-beta' | 'reset-two-factor';
 
 /**
  * Konten löschen (einzeln oder mehrere). Übersprungen werden das eigene Konto und Admins
@@ -644,6 +646,10 @@ export async function userAction(admin: User, id: string, action: UserAction, ip
     case 'remove-admin':
       await db.update(users).set({ role: 'user' }).where(eq(users.id, id));
       await log('admin.role_changed', `${user.email} ist kein Admin mehr`);
+      return;
+    case 'reset-two-factor':
+      // z. B. Handy verloren oder Passwort vergessen – danach genügt wieder der Code aus der E-Mail
+      await resetSecondFactor(user.id, admin, ip);
       return;
     case 'grant-beta':
       await db.update(users).set({ beta: true }).where(eq(users.id, id));

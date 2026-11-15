@@ -67,7 +67,7 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
           Nutzungsbedingungen und die Sprache, in der du die Website verwendest (für E-Mails und Hinweise). In der ersten Startphase (Early Access) speichern wir zusätzlich
           deinen Platz auf der Warteliste und den Zeitpunkt der Eintragung. Hast du dich schon vorher bei CraftingHosting für das kostenlose Angebot vorgemerkt (z. B. im bisherigen
           System oder über Discord), übernehmen wir diese Vormerkung mit deiner E-Mail-Adresse auf die Warteliste und informieren dich per E-Mail; du kannst den Platz jederzeit
-          löschen. Die Website verwendet keine Passwörter – die Anmeldung erfolgt per E-Mail-Link. Rechtsgrundlage ist
+          löschen. Die Anmeldung erfolgt mit einem sechsstelligen Code, den wir dir per E-Mail schicken. Freiwillig kannst du eine zweite Stufe einrichten: ein eigenes Passwort (wir speichern davon nur einen nicht umkehrbaren Hash) oder eine Authenticator-App (den Schlüssel dafür speichern wir verschlüsselt); dazu Wiederherstellungscodes, ebenfalls nur als Hash. Rechtsgrundlage ist
           die Vertragserfüllung bzw. die Durchführung vorvertraglicher Maßnahmen (Art. 6 Abs. 1 lit. b DSGVO). Zusätzlich speichern wir die IP-Adresse bei der Registrierung
           und bei der letzten Anmeldung (siehe Abschnitt 6).
         </p>
@@ -108,7 +108,7 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>5. E-Mail-Versand</h2>
         <p>
-          Wir versenden E-Mails zur Bestätigung deiner Adresse, mit Anmeldelinks und zu wichtigen Ereignissen deines Servers (z. B. Server bereit, Freischaltung von der
+          Wir versenden E-Mails zur Bestätigung deiner Adresse, mit Anmeldecodes und zu wichtigen Ereignissen deines Servers (z. B. Server bereit, Freischaltung von der
           Warteliste, bevorstehendes Ende der {cycle.days} Tage, bevorstehende Löschung). Die E-Mails werden über den eigenen Mailserver von CraftingHosting versendet; ein externer
           Versanddienstleister wird nicht eingesetzt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Werbe-E-Mails versenden wir nicht.
         </p>
@@ -240,7 +240,7 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
           To provide the service we store your email address, your server configuration (plan, server type, version, name), the time you accepted the terms of use and the
           language in which you use the website (for emails and notices). During the first launch phase (early access) we also store your spot on the waitlist and the time you
           joined. If you had already registered with CraftingHosting for the free offer before (e.g. in the previous system or via Discord), we carry this registration over
-          to the waitlist with your email address and inform you by email; you can delete the spot at any time. The website does not use passwords – you sign in with an email link. The legal basis is the performance of a contract or pre-contractual measures (Art. 6 (1)
+          to the waitlist with your email address and inform you by email; you can delete the spot at any time. You sign in with a six-digit code that we send you by email. Optionally you can set up a second step: your own password (we only store a non-reversible hash of it) or an authenticator app (we store its key in encrypted form); plus recovery codes, also stored only as hashes. The legal basis is the performance of a contract or pre-contractual measures (Art. 6 (1)
           (b) GDPR). In addition, we store the IP address used when registering and when last signing in (see section 6).
         </p>
         <p>
@@ -278,7 +278,7 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>5. Emails</h2>
         <p>
-          We send emails to confirm your address, with sign-in links and about important events of your server (e.g. server ready, unlocked from the waitlist, end of the{' '}
+          We send emails to confirm your address, with sign-in codes and about important events of your server (e.g. server ready, unlocked from the waitlist, end of the{' '}
           {cycle.days} days approaching, upcoming deletion). The emails are sent via CraftingHosting’s own mail server; no external email service provider is used. The legal
           basis is Art. 6 (1) (b) GDPR. We do not send advertising emails.
         </p>

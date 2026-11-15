@@ -19,6 +19,15 @@ export const emailSchema = z
   .max(254, 'v.email_too_long')
   .email('v.email_invalid');
 
+/** Sechsstelliger Code aus der E-Mail bzw. aus der Authenticator-App (Leerzeichen werden ignoriert) */
+export const sixDigitCodeSchema = z
+  .string()
+  .transform((v) => v.replace(/\s/g, ''))
+  .pipe(z.string().regex(/^\d{6}$/, 'v.code_format'));
+
+/** Code aus der E-Mail einlösen */
+export const verifyCodeSchema = z.object({ email: emailSchema, code: sixDigitCodeSchema });
+
 /** Passwort für das Pterodactyl-Panel (wird nur an Pterodactyl übergeben, nie gespeichert). */
 export const panelPasswordSchema = z
   .string()
@@ -94,3 +103,15 @@ export const newsletterTokenSchema = z.object({ token: z.string().min(20).max(20
 export const deleteServerSchema = z.object({ confirmName: z.string().min(1).max(64) });
 
 export const deleteAccountSchema = z.object({ confirmEmail: emailSchema });
+
+/** Eigenes Passwort als zweite Stufe der Anmeldung (dieselben Regeln wie beim Panel-Passwort) */
+export const accountPasswordSchema = z.object({ password: panelPasswordSchema });
+
+/** Zweite Stufe: Passwort, Code aus der App oder ein Wiederherstellungscode */
+export const secondFactorSchema = z
+  .object({
+    password: z.string().max(200).optional(),
+    code: sixDigitCodeSchema.optional(),
+    recovery: z.string().trim().max(40).optional(),
+  })
+  .refine((v) => !!(v.password || v.code || v.recovery), 'v.required');

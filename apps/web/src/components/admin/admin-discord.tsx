@@ -233,6 +233,15 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           </p>
         </div>
       )}
+      {status.roleError && d.customerRoleId && (
+        <div className="rounded-xl border border-red-400/40 bg-red-400/[0.08] p-4 text-sm leading-relaxed text-red-200">
+          <p className="font-semibold text-white">Die Customer-Rolle konnte zuletzt nicht vergeben werden</p>
+          <p className="mt-1">
+            {status.roleError.message} – In Discord unter Servereinstellungen → Rollen die Rolle des Bots über die Customer-Rolle ziehen und danach unten „Customer-Rolle jetzt für
+            alle abgleichen“ klicken.
+          </p>
+        </div>
+      )}
       <Section
         title="Discord-Bot verbinden"
         description="Der Bot verknüpft Website-Accounts mit Discord, prüft die Mitgliedschaft auf eurem Server, vergibt Rollen, begrüßt neue Mitglieder und betreibt das Ticketsystem."
@@ -403,7 +412,12 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
               setMessage(null);
               try {
                 const res = await api<{ checked: number; failed: number }>('/admin/discord/sync-roles', { body: {} });
-                setMessage({ ok: res.failed === 0, text: `Customer-Rolle für ${res.checked} verknüpfte Accounts abgeglichen${res.failed ? `, ${res.failed} fehlgeschlagen` : ''}.` });
+                const fresh = (await api<{ discord: AdminDiscordDTO }>('/admin/discord')).discord;
+                setStatus(fresh);
+                setMessage({
+                  ok: res.failed === 0,
+                  text: `Customer-Rolle für ${res.checked} verknüpfte Accounts abgeglichen${res.failed ? `, ${res.failed} fehlgeschlagen${fresh.roleError ? `: ${fresh.roleError.message}` : ''}` : ''}.`,
+                });
               } catch (err) {
                 setMessage({ ok: false, text: errorText(err) });
               } finally {

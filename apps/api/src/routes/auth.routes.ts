@@ -1,21 +1,36 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { deleteAccount } from '../services/account.service';
 import { eq } from 'drizzle-orm';
-import { deleteAccountSchema, loginLinkSchema, panelSetupSchema, startSchema, tokenSchema, type VerifyResult } from '@chfree/shared';
+import {
+  accountPasswordSchema,
+  deleteAccountSchema,
+  loginLinkSchema,
+  panelSetupSchema,
+  secondFactorSchema,
+  sixDigitCodeSchema,
+  startSchema,
+  tokenSchema,
+  verifyCodeSchema,
+  type SecurityDTO,
+  type TotpSetupDTO,
+  type VerifyResponse,
+  type VerifyResult,
+} from '@chfree/shared';
 import { db } from '../db/client';
-import { servers, users } from '../db/schema';
+import { servers, users, type User } from '../db/schema';
 import { env, panelPublicUrl } from '../env';
 import { ApiError, Errors, L } from '../lib/errors';
 import { assertNotMaintenance } from '../lib/maintenance';
 import { clearSessionCookie, currentUser, requireAuth, setSessionCookie } from '../plugins/auth';
 import { audit } from '../services/audit.service';
 import { createBetaTicket, redeemBetaTicket } from '../services/beta.service';
-import { getUser, requestLoginLink, requestServer, toUserDTO, verifyToken } from '../services/auth.service';
+import { getUser, requestLoginCode, requestServer, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
 import { rememberUserLocale } from '../services/locale.service';
 import { createPanelAccount } from '../services/provisioning.service';
 import { activatePendingServers, hardDeleteServer } from '../services/server.service';
 import { createSession, destroySession } from '../services/session.service';
+import { confirmTotp, disableSecondFactor, enablePasswordFactor, setupTotp, toSecurityDTO } from '../services/two-factor.service';
 
 const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { max, timeWindow } } });
 
@@ -28,21 +43,21 @@ export async function authRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  /** Anmeldelink anfordern (öffentlich). Antwort ist immer gleich. */
-  app.post('/auth/login-link', strict(6, '15 minutes'), async (request) => {
-    const { email } = loginLinkSchema.parse(request.body);
-    try {
-      await requestLoginLink(email, request.lang);
-    } catch (err) {
-      request.log.error({ err }, 'Anmeldelink konnte nicht versendet werden');
-    }
-    return { ok: true };
-  });
+  /** Anmeldecode anfordern (öffentlich). Antwort ist immer gleich. Der alte Pfad /auth/login-link bleibt als Alias. */
+  for (const path of ['/auth/login-code', '/auth/login-link']) {
+    app.post(path, strict(6, '15 minutes'), async (request) => {
+      const { email } = loginLinkSchema.parse(request.body);
+      try {
+        await requestLoginCode(email, request.lang);
+      } catch (err) {
+        request.log.error({ err }, 'Anmeldecode konnte nicht versendet werden');
+      }
+      return { ok: true };
+    });
+  }
 
-  /** E-Mail-Link einlösen: bestätigen + anmelden + nächster Schritt */
-  app.post('/auth/verify', strict(20, '15 minutes'), async (request, reply) => {
-    const { token } = tokenSchema.parse(request.body);
-    const result = await verifyToken(token, { ip: request.ip, locale: request.lang });
+  /** Sitzung anlegen und die Antwort für die Website bauen */
+  const signIn = async (request: FastifyRequest, reply: FastifyReply, result: { user: User; next: VerifyResult['next']; existingPanelAccount: boolean; waitlist: VerifyResult['waitlist'] }) => {
     const session = await createSession(result.user.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
     setSessionCookie(reply, session.token, session.expiresAt);
     const body: VerifyResult = {
@@ -53,6 +68,51 @@ export async function authRoutes(app: FastifyInstance) {
       waitlist: result.waitlist,
     };
     return body;
+  };
+
+  /**
+   * Code aus der E-Mail einlösen: bestätigen + anmelden + nächster Schritt. Ist eine zweite Stufe eingeschaltet,
+   * gibt es noch keine Sitzung, sondern ein Ticket für /auth/two-factor.
+   * (Links aus älteren E-Mails funktionieren bis zu ihrem Ablauf weiter: { token }.)
+   */
+  app.post('/auth/verify', strict(15, '15 minutes'), async (request, reply): Promise<VerifyResponse> => {
+    const body = request.body as { token?: unknown } | null;
+    const input = body && typeof body.token === 'string' ? tokenSchema.parse(body) : verifyCodeSchema.parse(body);
+    const step = await verifyLogin(input, { ip: request.ip, locale: request.lang });
+    if (step.kind === 'two_factor') return { twoFactor: { method: step.method, ticket: step.ticket } };
+    return signIn(request, reply, step);
+  });
+
+  /** Zweite Stufe: Passwort, Code aus der Authenticator-App oder Wiederherstellungscode */
+  app.post('/auth/two-factor', strict(15, '15 minutes'), async (request, reply): Promise<VerifyResult> => {
+    const { ticket, ...factor } = secondFactorSchema.and(z.object({ ticket: z.string().min(20).max(400) })).parse(request.body);
+    return signIn(request, reply, await verifyTwoFactor(ticket, factor, { ip: request.ip, locale: request.lang }));
+  });
+
+  /* ------------------------------------------------------------ Sicherheit des Accounts */
+
+  app.get('/account/security', { preHandler: requireAuth }, async (request): Promise<{ security: SecurityDTO }> => ({ security: toSecurityDTO(currentUser(request)) }));
+
+  /** Eigenes Passwort als zweite Stufe einschalten → Wiederherstellungscodes (nur dieses eine Mal sichtbar) */
+  app.post('/account/two-factor/password', { preHandler: requireAuth, ...strict(10, '15 minutes') }, async (request) => {
+    const { password } = accountPasswordSchema.parse(request.body);
+    return { recoveryCodes: await enablePasswordFactor(currentUser(request), password, request.ip) };
+  });
+
+  /** Authenticator-App: Schlüssel und QR-Code erzeugen (wird erst mit /confirm aktiv) */
+  app.post('/account/two-factor/totp/setup', { preHandler: requireAuth, ...strict(10, '15 minutes') }, async (request): Promise<{ setup: TotpSetupDTO }> => ({
+    setup: await setupTotp(currentUser(request)),
+  }));
+
+  app.post('/account/two-factor/totp/confirm', { preHandler: requireAuth, ...strict(15, '15 minutes') }, async (request) => {
+    const { code } = z.object({ code: sixDigitCodeSchema }).parse(request.body);
+    return { recoveryCodes: await confirmTotp(currentUser(request), code, request.ip) };
+  });
+
+  /** Zweite Stufe ausschalten – nur mit dem aktuellen Passwort bzw. Code oder einem Wiederherstellungscode */
+  app.post('/account/two-factor/disable', { preHandler: requireAuth, ...strict(15, '15 minutes') }, async (request) => {
+    await disableSecondFactor(currentUser(request), secondFactorSchema.parse(request.body), request.ip);
+    return { ok: true };
   });
 
   /* ------------------------------------------------------------ Beta-Programm */

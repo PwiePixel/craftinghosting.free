@@ -123,11 +123,11 @@ Geprüft wird jede Minute im Job `sync-power-states` (`apps/api/src/services/bot
 ## So funktioniert es für Nutzer
 
 1. **craftinghosting.free/start** – Minecraft-Server oder Discord-Bot wählen, dann Paket, Servertyp bzw. Laufzeit, Servername und E-Mail angeben (im Early-Access-Modus: „Platz sichern“ → Warteliste, siehe unten)
-2. **E-Mail-Link klicken** – bestätigt die Adresse und meldet an (die Website hat keine eigenen Passwörter)
+2. **Sechsstelligen Code aus der E-Mail eingeben** – bestätigt die Adresse und meldet an (ein Passwort ist nicht nötig)
 3. **Panel-Zugang festlegen** – Benutzername + Passwort werden direkt an Pterodactyl übergeben (nicht gespeichert). Bestehende Crafting-Hosting-Kunden mit gleicher E-Mail werden automatisch mit ihrem vorhandenen Panel-Konto verknüpft.
 4. **Server wird automatisch angelegt** → E-Mail „Server bereit“ mit Link ins Panel
 5. **Im Panel spielen** – alles Weitere läuft automatisch
-6. Nach 30 Tagen + 1 Ruhetag: **Meine Server** (Anmeldung per E-Mail-Link) → „Reaktivieren“. Ohne Reaktivierung wird der Server 48 h nach dem Ruhetag gelöscht (Erinnerung 24 h vorher).
+6. Nach 30 Tagen + 1 Ruhetag: **Meine Server** (Anmeldung mit Code per E-Mail) → „Reaktivieren“. Ohne Reaktivierung wird der Server 48 h nach dem Ruhetag gelöscht (Erinnerung 24 h vorher).
 
 ## Was automatisch passiert (sichtbar im Panel)
 
@@ -151,7 +151,7 @@ Geprüft wird jede Minute im Job `sync-power-states` (`apps/api/src/services/bot
 
 Liegt unter **`/admin`** (deutsch `/de/admin`) – nirgends verlinkt, nicht in `robots.txt` oder der Sitemap, per `X-Robots-Tag` und Meta-Tag auf `noindex`. **Erreichbar ist er nur für angemeldete Admins** (Rolle im Backend bzw. `ADMIN_EMAILS`). Alle anderen – auch nicht angemeldete Besucher und angemeldete Nutzer ohne Admin-Rechte – bekommen dieselbe 404-Seite wie bei jeder unbekannten Adresse; es gibt keinen Login-Hinweis und keine Weiterleitung. Geprüft wird das schon vor dem Rendern (in `apps/web/src/proxy.ts`) und zusätzlich in der API (alle `/admin/*`-Endpunkte antworten für Nicht-Admins mit 404). Optional lässt sich über `ADMIN_PATH` ein zusätzlicher eigener Pfad festlegen.
 
-Anmeldung wie gewohnt per E-Mail-Link (`/login`), danach `/admin` aufrufen. Zugriff haben Konten mit Adresse in `ADMIN_EMAILS` oder nach `node dist/cli.js make-admin du@example.com`.
+Anmeldung wie gewohnt mit Code per E-Mail (`/login`), danach `/admin` aufrufen. Zugriff haben Konten mit Adresse in `ADMIN_EMAILS` oder nach `node dist/cli.js make-admin du@example.com`.
 
 - **Übersicht:** Website-Zustand (Wartung, Registrierungsmodus, Warteliste) mit Wartungs-Schnellschalter, Nutzer, Server nach Status, Pakete, E-Mail-Warteschlange, Pterodactyl-/SMTP-Einstellungen, Zustand aller Jobs (mit „Jetzt ausführen“) – Warnung, wenn der Worker nicht läuft
 - **Einstellungen:** Wartungsmodus (Hinweis DE/EN, voraussichtliches Ende), Registrierung *Offen / Vorregistrierung / Geschlossen*, kostenlose Server pro Person, **Kapazität je Paket** (maximale Plätze + außerhalb belegte Plätze → auf der Website „Noch 12 von 100 Plätzen frei“ bzw. „Ausgebucht“), EPYC-Plätze gesamt und davon außerhalb belegt, Anmeldungen außerhalb der Website, Zahlen auf der Startseite (automatisch + Zusatz oder fester Wert). Wirkt nach wenigen Sekunden – kein Neustart nötig.
@@ -235,7 +235,7 @@ npm run dev                       # Web: http://localhost:3000 · API: http://lo
 
 Im Mock-Modus gibt es drei simulierte Nodes und Eggs für Paper, Vanilla, Forge, Purpur, Fabric, Python und Node.js – damit lässt sich Admin → *Pterodactyl* ohne echtes Panel ausprobieren.
 
-Ohne `SMTP_HOST` erscheinen E-Mails (inkl. Bestätigungslink) in der Konsole der API. Im Mock-Modus wird Pterodactyl simuliert; Chat-Hinweise und Panel-Beschreibungen landen in `apps/api/.pterodactyl-mock.json`.
+Ohne `SMTP_HOST` erscheinen E-Mails (inkl. Anmeldecode) in der Konsole der API. Im Mock-Modus wird Pterodactyl simuliert; Chat-Hinweise und Panel-Beschreibungen landen in `apps/api/.pterodactyl-mock.json`.
 
 ```bash
 npm test                                   # Unit-Tests der Fair-Use-/Zyklus-Regeln
@@ -293,9 +293,11 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 
 | Methode | Pfad | Zweck |
 | --- | --- | --- |
-| POST | `/start` | Server anfordern (E-Mail + Konfiguration) → Bestätigungslink |
-| POST | `/auth/login-link` | Anmeldelink anfordern (Antwort immer gleich) |
-| POST | `/auth/verify` | E-Mail-Link einlösen → Session + nächster Schritt |
+| POST | `/start` | Server anfordern (E-Mail + Konfiguration) → sechsstelliger Code per E-Mail |
+| POST | `/auth/login-code` | Anmeldecode anfordern (Antwort immer gleich) |
+| POST | `/auth/verify` | Code aus der E-Mail einlösen → Session + nächster Schritt – oder Ticket für die zweite Stufe |
+| POST | `/auth/two-factor` | Zweite Stufe: Passwort, Code aus der Authenticator-App oder Wiederherstellungscode → Session |
+| GET/POST | `/account/security` · `/account/two-factor/{password,totp/setup,totp/confirm,disable}` | Zweite Stufe ein- und ausschalten |
 | POST | `/panel/setup` | Panel-Konto anlegen, wartende Server erstellen |
 | GET | `/auth/me` · POST `/auth/logout` · POST `/account/delete` | Konto |
 | GET/POST | `/servers` | eigene Server / weiteren Server (angemeldet) |
@@ -343,9 +345,10 @@ Startet Migration, API, Worker, Website und Caddy (automatisches HTTPS); die ver
 ## Sicherheit
 
 - Keine Pterodactyl-Keys im Browser; alle privilegierten Aufrufe serverseitig
-- Website ohne Passwörter (E-Mail-Links, einmalig, befristet, nur als SHA-256-Hash gespeichert); das Panel-Passwort wird nur an Pterodactyl durchgereicht
+- Anmeldung mit sechsstelligem Code per E-Mail: einmalig, 15 bzw. 30 Minuten gültig, nach fünf Fehlversuchen verbraucht, nur als Hash mit Schlüssel gespeichert; das Panel-Passwort wird nur an Pterodactyl durchgereicht
+- Freiwillige zweite Stufe (Meine Server → Sicherheit): eigenes Passwort (scrypt-Hash) oder Authenticator-App (TOTP, Schlüssel verschlüsselt, Code nicht wiederverwendbar), acht Wiederherstellungscodes, Sperre nach fünf Fehlversuchen; Zurücksetzen im Admin unter *Nutzer*
 - Panel-Zugang erst **nach** E-Mail-Bestätigung – niemand kann für fremde Adressen ein Panel-Konto mit eigenem Passwort anlegen
-- Kurze Anmeldung: Session-Cookie ohne Ablaufdatum (endet mit dem Schließen des Browsers), Abmeldung nach 30 min Inaktivität, spätestens nach 12 h – danach neu per E-Mail-Link anmelden (`SESSION_IDLE_MINUTES`, `SESSION_MAX_HOURS`, `SESSION_PERSISTENT`)
+- Kurze Anmeldung: Session-Cookie ohne Ablaufdatum (endet mit dem Schließen des Browsers), Abmeldung nach 30 min Inaktivität, spätestens nach 12 h – danach neu mit Code per E-Mail anmelden (`SESSION_IDLE_MINUTES`, `SESSION_MAX_HOURS`, `SESSION_PERSISTENT`)
 - Session-Cookie HttpOnly/Secure/SameSite=Lax, CSRF-Header + Origin-Prüfung, Rate-Limits, zod-Validierung, Server-Limit per Zeilensperre
 - Antworten verraten nicht, ob eine E-Mail-Adresse existiert
 - Admin-Bereich unter geheimem Pfad, 404 für alle anderen, `noindex`

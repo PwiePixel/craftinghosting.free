@@ -17,7 +17,7 @@ import {
 } from '@chfree/shared';
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
-import { discordGate } from '../discord/service';
+import { discordGate, syncCustomerRoleSoon } from '../discord/service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
@@ -252,6 +252,8 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
     // Direkt anlegen – schlägt das fehl, übernimmt der Worker die Wiederholung.
     await provisionServer(id, 'user', ip);
   }
+  // Mit dem ersten Server gibt es auf Discord die Customer-Rolle
+  if (activated.length > 0) syncCustomerRoleSoon(user.id);
   return activated;
 }
 
@@ -418,4 +420,6 @@ export async function hardDeleteServer(server: Server): Promise<void> {
   const now = new Date();
   await closeOpenSession(server.id, now, 'deleted');
   await db.update(servers).set({ status: 'deleted', deletedAt: now, pteroServerId: null }).where(eq(servers.id, server.id));
+  // War es der letzte Server, entfällt die Customer-Rolle
+  syncCustomerRoleSoon(server.userId);
 }

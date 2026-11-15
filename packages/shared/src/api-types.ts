@@ -33,7 +33,27 @@ export interface UserDTO {
   createdAt: string;
 }
 
-/** Nächster Schritt nach dem Klick auf einen E-Mail-Link */
+/** Zweite Stufe bei der Anmeldung: eigenes Passwort oder Authenticator-App */
+export type TwoFactorMethod = 'password' | 'totp';
+
+/** Sicherheit des Accounts („Meine Server“) */
+export interface SecurityDTO {
+  method: TwoFactorMethod | null;
+  /** Noch unbenutzte Wiederherstellungscodes */
+  recoveryCodesLeft: number;
+}
+
+/** Einrichtung der Authenticator-App: Schlüssel zum Abtippen, Link zum Öffnen der App und QR-Code (Bild als data:-Adresse) */
+export interface TotpSetupDTO {
+  secret: string;
+  uri: string;
+  qr: string;
+}
+
+/** Antwort auf die Code-Eingabe: fertig angemeldet – oder es fehlt noch die zweite Stufe */
+export type VerifyResponse = VerifyResult | { twoFactor: { method: TwoFactorMethod; ticket: string } };
+
+/** Nächster Schritt nach der Bestätigung des Codes aus der E-Mail */
 export type VerifyNext = 'panel_setup' | 'done' | 'overview' | 'waitlist';
 
 export interface VerifyResult {
@@ -295,6 +315,8 @@ export interface AdminUserDTO {
   lastLoginAt: string | null;
   /** Beta-Zugang freigeschaltet */
   beta: boolean;
+  /** Zweite Stufe bei der Anmeldung (null = aus) */
+  twoFactor: TwoFactorMethod | null;
   /** IP-Adressen (verschlüsselt gespeichert, nur im Admin-Bereich sichtbar) */
   registrationIp: string | null;
   lastLoginIp: string | null;
@@ -888,5 +910,7 @@ export interface AdminDiscordDTO {
   commandsAt: string | null;
   setupAt: string | null;
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
+  /** Letzter Fehler beim Vergeben der Customer-Rolle */
+  roleError: { at: string; message: string } | null;
   linkedUsers: number;
 }

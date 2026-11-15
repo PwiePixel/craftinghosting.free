@@ -121,7 +121,7 @@ export async function GET() {
     '## How it works',
     '',
     '1. Choose a product, plan and name on the website and enter an email address.',
-    '2. Confirm the email address via the link and set a username and password for the panel.',
+    '2. Confirm the email address with the six-digit code from the email and set a username and password for the panel.',
     '3. The server is created automatically. Start it, upload files and manage it in the Pterodactyl panel.',
     '',
     '## Frequently asked questions',

@@ -65,6 +65,8 @@ export interface DiscordState {
   /** Zeitpunkt, zu dem die Befehle zuletzt registriert wurden */
   commandsAt: string | null;
   setupAt: string | null;
+  /** Letzter Fehler beim Vergeben der Customer-Rolle (null = zuletzt hat es geklappt) */
+  roleError: { at: string; message: string } | null;
   /** Dauerverbindung des Bots (für Willkommensnachricht, Auto-Rollen, Befehle, Buttons) */
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
 }
@@ -78,6 +80,7 @@ const defaultState = (): DiscordState => ({
   guild: null,
   commandsAt: null,
   setupAt: null,
+  roleError: null,
   gateway: { status: 'off', at: new Date(0).toISOString(), error: null },
 });
 

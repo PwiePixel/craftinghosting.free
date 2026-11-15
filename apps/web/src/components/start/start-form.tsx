@@ -1,9 +1,10 @@
 'use client';
 
+import { VerifyFlow } from './verify-flow';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Bot, Check, MailCheck, Pickaxe } from 'lucide-react';
+import { Bot, Check, Pickaxe } from 'lucide-react';
 import {
   createServerSchema,
   formatMb,
@@ -142,30 +143,16 @@ export function StartForm({
     });
   }
 
+  // Nach dem Absenden: Code aus der E-Mail eingeben – danach geht es direkt mit dem Panel-Zugang weiter
   if (sentTo) {
     return (
       <div className="surface p-8 sm:p-10">
-        <span className="flex size-11 items-center justify-center rounded-full bg-blue-500/15">
-          <MailCheck className="size-5 text-blue-400" aria-hidden />
-        </span>
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight text-white">{s.sentTitle}</h1>
-        <p className="mt-3 leading-relaxed text-muted">
+        <p className="mb-6 text-sm leading-relaxed text-muted">
           {s.sentBefore}
           <span className="text-white">{sentTo}</span>
           {early ? e.sentAfter(name.trim()) : s.sentAfter(name.trim())}
         </p>
-        <ul className="mt-6 space-y-2 text-sm text-muted">
-          <li>· {s.sentValid}</li>
-          <li>· {s.sentSpam}</li>
-        </ul>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Button variant="secondary" loading={form.pending} onClick={submit}>
-            {s.resend}
-          </Button>
-          <Button variant="ghost" icon={<ArrowLeft />} onClick={() => setSentTo(null)}>
-            {s.changeDetails}
-          </Button>
-        </div>
+        <VerifyFlow embedded email={sentTo} onBack={() => setSentTo(null)} />
       </div>
     );
   }

@@ -2,16 +2,19 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, CircleX, LoaderCircle } from 'lucide-react';
-import { localePath, type VerifyResult, type WaitlistInfo } from '@chfree/shared';
-import { ButtonLink } from '@/components/ui/button';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowUpRight, Check, CircleX, KeyRound, LoaderCircle, MailCheck, ShieldCheck } from 'lucide-react';
+import { localePath, type TwoFactorMethod, type VerifyResponse, type VerifyResult, type WaitlistInfo } from '@chfree/shared';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { Alert, Field } from '@/components/ui/primitives';
 import { useDict, useLang } from '@/i18n/client';
 import { api, ApiClientError } from '@/lib/api/client';
 import { PanelSetupForm } from './panel-setup-form';
 
 type State =
   | { kind: 'loading' }
+  | { kind: 'code' }
+  | { kind: 'twoFactor'; method: TwoFactorMethod; ticket: string }
   | { kind: 'error'; message: string }
   | { kind: 'setup'; email: string }
   | { kind: 'done'; email: string; panelUrl: string; existing: boolean }
@@ -63,35 +66,244 @@ export function DoneCard({ email, panelUrl, existing }: { email: string; panelUr
   );
 }
 
-export function VerifyFlow({ token }: { token?: string }) {
+const RESEND_SECONDS = 45;
+const fieldError = (err: unknown, key: string) => (err instanceof ApiClientError ? (err.fields?.[key] ?? err.message) : null);
+
+/** Eingabe des sechsstelligen Codes aus der E-Mail. Ohne bekannte Adresse wird sie mit abgefragt. */
+function CodeStep({ email: knownEmail, onResult, onBack }: { email?: string; onResult: (res: VerifyResponse) => void; onBack?: () => void }) {
+  const dict = useDict();
+  const a = dict.auth;
+  const emailLabel = dict.login.email;
+  const [email, setEmail] = useState(knownEmail ?? '');
+  const [code, setCode] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [wait, setWait] = useState(knownEmail ? RESEND_SECONDS : 0);
+  const digits = code.replace(/\D/g, '');
+
+  useEffect(() => {
+    if (wait <= 0) return;
+    const timer = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [wait]);
+
+  const submit = useCallback(
+    async (value: string) => {
+      if (pending || value.length !== 6 || !email.trim()) return;
+      setPending(true);
+      setError(null);
+      try {
+        onResult(await api<VerifyResponse>('/auth/verify', { body: { email: email.trim().toLowerCase(), code: value } }));
+      } catch (err) {
+        setError(fieldError(err, 'code') ?? a.codeHint);
+        setCode('');
+      } finally {
+        setPending(false);
+      }
+    },
+    [pending, email, onResult, a.codeHint],
+  );
+
+  return (
+    <form
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit(digits);
+      }}
+    >
+      <span className="flex size-11 items-center justify-center rounded-full bg-blue-500/15">
+        <MailCheck className="size-5 text-blue-400" aria-hidden />
+      </span>
+      <h1 className="mt-6 text-2xl font-semibold tracking-tight text-white">{a.codeTitle}</h1>
+      <p className="mt-2 leading-relaxed text-muted">
+        {knownEmail ? (
+          <>
+            {a.codeTextBefore}
+            <span className="text-white">{knownEmail}</span>
+            {a.codeTextAfter}
+          </>
+        ) : (
+          a.codeTextNoEmail
+        )}
+      </p>
+      <div className="mt-6 space-y-5">
+        {error && <Alert tone="error">{error}</Alert>}
+        {info && !error && <Alert tone="success">{info}</Alert>}
+        {!knownEmail && (
+          <Field label={emailLabel} htmlFor="verify-email">
+            <input id="verify-email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+        )}
+        <Field label={a.codeLabel} htmlFor="verify-code" hint={a.codeHint}>
+          <input
+            id="verify-code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9 ]*"
+            maxLength={7}
+            autoFocus={!!knownEmail}
+            className="input h-14 text-center font-mono text-2xl tracking-[0.4em]"
+            placeholder="••••••"
+            value={code}
+            onChange={(e) => {
+              const next = e.target.value.replace(/[^\d ]/g, '');
+              setCode(next);
+              // Vollständig eingegeben (oder eingefügt) → gleich prüfen
+              const d = next.replace(/\D/g, '');
+              if (d.length === 6) void submit(d);
+            }}
+          />
+        </Field>
+        <Button type="submit" size="lg" loading={pending} disabled={digits.length !== 6 || !email.trim()} className="w-full">
+          {a.codeSubmit}
+        </Button>
+      </div>
+      <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+        <button
+          type="button"
+          disabled={wait > 0 || !email.trim()}
+          className="text-blue-400 hover:text-blue-300 disabled:text-subtle"
+          onClick={async () => {
+            setError(null);
+            setInfo(null);
+            try {
+              await api('/auth/login-code', { body: { email: email.trim().toLowerCase() } });
+              setInfo(a.resent);
+              setWait(RESEND_SECONDS);
+            } catch (err) {
+              setError(err instanceof ApiClientError ? err.message : a.codeSpam);
+            }
+          }}
+        >
+          {wait > 0 ? a.resendIn(wait) : a.resend}
+        </button>
+        {onBack && (
+          <button type="button" className="inline-flex items-center gap-1.5 text-muted hover:text-white" onClick={onBack}>
+            <ArrowLeft className="size-4" aria-hidden /> {a.otherEmail}
+          </button>
+        )}
+      </div>
+      <p className="mt-3 text-[13px] text-subtle">{a.codeSpam}</p>
+    </form>
+  );
+}
+
+/** Zweite Stufe: Passwort oder Code aus der Authenticator-App – oder ein Wiederherstellungscode */
+function TwoFactorStep({ method, ticket, onResult }: { method: TwoFactorMethod; ticket: string; onResult: (res: VerifyResult) => void }) {
+  const a = useDict().auth;
+  const [value, setValue] = useState('');
+  const [recovery, setRecovery] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isPassword = method === 'password' && !recovery;
+
+  return (
+    <form
+      noValidate
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (pending || !value.trim()) return;
+        setPending(true);
+        setError(null);
+        try {
+          const factor = recovery ? { recovery: value.trim() } : method === 'password' ? { password: value } : { code: value.replace(/\s/g, '') };
+          onResult(await api<VerifyResult>('/auth/two-factor', { body: { ticket, ...factor } }));
+        } catch (err) {
+          setError(fieldError(err, recovery ? 'recovery' : method === 'password' ? 'password' : 'code') ?? a.lostAccess);
+          setValue('');
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      <span className="flex size-11 items-center justify-center rounded-full bg-blue-500/15">
+        {method === 'password' ? <KeyRound className="size-5 text-blue-400" aria-hidden /> : <ShieldCheck className="size-5 text-blue-400" aria-hidden />}
+      </span>
+      <h1 className="mt-6 text-2xl font-semibold tracking-tight text-white">{a.twoFactorTitle}</h1>
+      <p className="mt-2 leading-relaxed text-muted">{method === 'password' ? a.passwordText : a.totpText}</p>
+      <div className="mt-6 space-y-5">
+        {error && <Alert tone="error">{error}</Alert>}
+        <Field label={recovery ? a.recoveryLabel : method === 'password' ? a.passwordLabel : a.totpLabel} htmlFor="second-factor" hint={recovery ? a.recoveryHint : undefined}>
+          <input
+            id="second-factor"
+            key={recovery ? 'recovery' : method}
+            type={isPassword ? 'password' : 'text'}
+            inputMode={!recovery && method === 'totp' ? 'numeric' : undefined}
+            autoComplete={isPassword ? 'current-password' : 'one-time-code'}
+            autoFocus
+            className={isPassword ? 'input' : 'input h-12 text-center font-mono text-xl tracking-[0.25em]'}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </Field>
+        <Button type="submit" size="lg" loading={pending} disabled={!value.trim()} className="w-full">
+          {a.twoFactorSubmit}
+        </Button>
+      </div>
+      <div className="mt-6 space-y-2 text-sm">
+        <button
+          type="button"
+          className="text-blue-400 hover:text-blue-300"
+          onClick={() => {
+            setRecovery((r) => !r);
+            setValue('');
+            setError(null);
+          }}
+        >
+          {recovery ? a.useNormal : a.useRecovery}
+        </button>
+        <p className="text-[13px] text-subtle">{a.lostAccess}</p>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Bestätigung und Anmeldung: Code aus der E-Mail → (falls eingerichtet) zweite Stufe → nächster Schritt.
+ * `embedded` = ohne eigenen Rahmen (z. B. innerhalb des Anmelde- oder Bestellformulars).
+ * Links aus älteren E-Mails (`token`) funktionieren bis zu ihrem Ablauf weiter.
+ */
+export function VerifyFlow({ token, email, embedded = false, onBack }: { token?: string; email?: string; embedded?: boolean; onBack?: () => void }) {
   const router = useRouter();
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
-  const [state, setState] = useState<State>(token ? { kind: 'loading' } : { kind: 'error', message: v.incomplete });
+  const [state, setState] = useState<State>(token ? { kind: 'loading' } : { kind: 'code' });
   const started = useRef(false);
+
+  const handle = useCallback(
+    (res: VerifyResponse) => {
+      if ('twoFactor' in res) return setState({ kind: 'twoFactor', method: res.twoFactor.method, ticket: res.twoFactor.ticket });
+      if (res.next === 'overview') {
+        router.replace(localePath(lang, 'myServers'));
+        router.refresh();
+      } else if (res.next === 'waitlist' && res.waitlist) {
+        setState({ kind: 'waitlist', waitlist: res.waitlist });
+      } else if (res.next === 'panel_setup') {
+        setState({ kind: 'setup', email: res.user.email });
+      } else {
+        setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount });
+      }
+    },
+    [router, lang],
+  );
 
   useEffect(() => {
     if (!token || started.current) return;
     started.current = true;
-    api<VerifyResult>('/auth/verify', { body: { token } })
-      .then((res) => {
-        if (res.next === 'overview') {
-          router.replace(localePath(lang, 'myServers'));
-          router.refresh();
-        } else if (res.next === 'waitlist' && res.waitlist) {
-          setState({ kind: 'waitlist', waitlist: res.waitlist });
-        } else if (res.next === 'panel_setup') {
-          setState({ kind: 'setup', email: res.user.email });
-        } else {
-          setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount });
-        }
-      })
+    api<VerifyResponse>('/auth/verify', { body: { token } })
+      .then(handle)
       .catch((err) => setState({ kind: 'error', message: err instanceof ApiClientError ? err.message : v.failed }));
-  }, [token, router, lang, v.failed]);
+  }, [token, handle, v.failed]);
 
   return (
-    <div className="surface mx-auto max-w-lg p-7 sm:p-9">
+    <div className={embedded ? undefined : 'surface mx-auto max-w-lg p-7 sm:p-9'}>
+      {state.kind === 'code' && <CodeStep email={email} onResult={handle} onBack={onBack} />}
+      {state.kind === 'twoFactor' && <TwoFactorStep method={state.method} ticket={state.ticket} onResult={handle} />}
+
       {state.kind === 'loading' && (
         <div className="flex flex-col items-center py-10 text-center">
           <LoaderCircle className="size-8 animate-spin text-blue-400" aria-hidden />

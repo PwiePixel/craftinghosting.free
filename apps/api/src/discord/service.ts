@@ -218,13 +218,28 @@ async function applyCustomerRole(user: Pick<User, 'id' | 'discordId'>, desired: 
     await botRequest(desired ? 'PUT' : 'DELETE', path, { reason: desired ? 'Hat einen Server bei CraftingHosting.free' : 'Hat keinen Server mehr' });
   } catch (err) {
     if (err instanceof DiscordApiError && err.code === DISCORD_CODES.unknownMember) applied = false; // nicht (mehr) auf dem Server – keine Rolle
-    else ok = false;
+    else {
+      ok = false;
+      // Sichtbar machen, warum es nicht klappt (häufig: Bot-Rolle steht unter der Customer-Rolle) – im Protokoll und im Admin-Bereich
+      const reason = discordErrorText(err);
+      console.warn(`[discord] Customer-Rolle konnte nicht ${desired ? 'vergeben' : 'entfernt'} werden: ${reason}`);
+      await patchDiscordState({ roleError: { at: new Date().toISOString(), message: reason } }).catch(() => {});
+    }
   }
+  // discordSyncAt merkt nur FEHLVERSUCHE (nächster Versuch frühestens nach 30 Minuten). Nach einem Erfolg wird es geleert,
+  // damit eine spätere Änderung – z. B. der erste Server nach dem Verknüpfen – beim nächsten Abgleich sofort greift.
   await db
     .update(users)
-    .set(ok ? { discordCustomerRole: applied, discordSyncAt: new Date() } : { discordSyncAt: new Date() })
+    .set(ok ? { discordCustomerRole: applied, discordSyncAt: null } : { discordSyncAt: new Date() })
     .where(eq(users.id, user.id));
+  if (ok && desired) await clearRoleError();
   return ok;
+}
+
+/** Letzten Fehler der Rollenvergabe vergessen, sobald sie wieder klappt */
+async function clearRoleError(): Promise<void> {
+  const state = await getDiscordState();
+  if (state.roleError) await patchDiscordState({ roleError: null }).catch(() => {});
 }
 
 /** Customer-Rolle eines Accounts sofort abgleichen (nach Verknüpfung, Server-Erstellung, Löschung) */
@@ -233,6 +248,11 @@ export async function syncCustomerRole(userId: string): Promise<void> {
   if (!cfg.botReady || !cfg.settings.customerRoleId) return;
   const [row] = await db.select({ id: users.id, discordId: users.discordId, desired: sql<number>`${hasServer(users.id)}` }).from(users).where(eq(users.id, userId)).limit(1);
   if (row?.discordId) await applyCustomerRole(row, !!row.desired, cfg);
+}
+
+/** Wie syncCustomerRole, aber ohne zu warten und ohne Fehler nach außen – für Stellen, an denen ein Server entsteht oder verschwindet */
+export function syncCustomerRoleSoon(userId: string): void {
+  void syncCustomerRole(userId).catch((err) => console.warn(`[discord] Abgleich der Customer-Rolle fehlgeschlagen: ${discordErrorText(err)}`));
 }
 
 /**
@@ -405,6 +425,7 @@ export async function discordAdminStatus(): Promise<AdminDiscordDTO> {
     commandsAt: state.commandsAt,
     setupAt: state.setupAt,
     gateway: state.gateway,
+    roleError: state.roleError,
     linkedUsers: Number(linked?.n ?? 0),
   };
 }

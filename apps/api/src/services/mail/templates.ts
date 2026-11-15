@@ -14,6 +14,8 @@ interface LayoutInput {
   /** true = Absätze dürfen **fett** und Links enthalten (Newsletter) */
   rich?: boolean;
   cta?: { label: string; url: string };
+  /** Sechsstelliger Code, groß und gut lesbar dargestellt (Anmeldung, Bestätigung) */
+  code?: string;
   footnote?: string;
   /** Zusätzliche Zeile im Fuß mit Link (z. B. Newsletter abbestellen) */
   footerLink?: { text: string; label: string; url: string };
@@ -55,6 +57,11 @@ function layout(subject: string, input: LayoutInput): MailContent {
       </td></tr></table>
       <p style="margin:0 0 16px;color:#9ca3af;font-size:12px;line-height:1.5">${escapeHtml(c.buttonHint)}<br><span style="color:#60a5fa;word-break:break-all">${escapeHtml(input.cta.url)}</span></p>`
     : '';
+  // Code in zwei Dreiergruppen – leichter abzulesen und einzutippen
+  const codeShown = input.code ? `${input.code.slice(0, 3)} ${input.code.slice(3)}` : '';
+  const code = input.code
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:8px 0 24px"><tr><td style="border-radius:10px;background:#0b0d14;border:1px solid #2a3350;padding:16px 26px;font-family:SFMono-Regular,Consolas,Menlo,monospace;font-size:32px;font-weight:700;letter-spacing:6px;color:#ffffff">${escapeHtml(codeShown)}</td></tr></table>`
+    : '';
   const html = `<!doctype html><html lang="${input.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head>
 <body style="margin:0;padding:0;background:#0b0d14;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
 <span style="display:none;max-height:0;overflow:hidden">${escapeHtml(input.preheader)}</span>
@@ -63,7 +70,7 @@ function layout(subject: string, input: LayoutInput): MailContent {
     <tr><td style="padding:0 4px 20px;font-size:17px;font-weight:700;color:#ffffff">Crafting Hosting <span style="display:inline-block;margin-left:4px;padding:2px 8px;border-radius:999px;background:#1e3a8a;color:#bfdbfe;font-size:11px;font-weight:700;letter-spacing:.06em">FREE</span></td></tr>
     <tr><td style="background:#111522;border:1px solid #1f2937;border-radius:12px;padding:32px 28px">
       <h1 style="margin:0 0 16px;color:#ffffff;font-size:22px;line-height:1.3">${escapeHtml(input.heading)}</h1>
-      ${paragraphs}${cta}
+      ${paragraphs}${code}${cta}
       ${input.footnote ? `<p style="margin:0;color:#6b7280;font-size:12px;line-height:1.5">${escapeHtml(input.footnote)}</p>` : ''}
     </td></tr>
     <tr><td style="padding:20px 4px;color:#6b7280;font-size:12px;line-height:1.5">
@@ -80,6 +87,7 @@ function layout(subject: string, input: LayoutInput): MailContent {
     input.heading,
     '',
     ...input.paragraphs.flatMap((p) => [p, '']),
+    input.code ? `Code: ${input.code}\n` : '',
     input.cta ? `${input.cta.label}: ${input.cta.url}\n` : '',
     input.footnote ?? '',
     '',
@@ -89,76 +97,84 @@ function layout(subject: string, input: LayoutInput): MailContent {
   return { subject, html, text };
 }
 
-export function verifyServerMail(serverName: string, url: string, locale: Locale): MailContent {
+/** Gültigkeit der Codes in Minuten – steht so auch in den E-Mails */
+export const CODE_MINUTES = { verify_email: 30, login: 15 } as const;
+
+const codeNote = {
+  de: (minutes: number) => `Der Code ist ${minutes} Minuten gültig und kann nur einmal verwendet werden. Gib ihn nur auf craftinghosting.free ein und nie an andere weiter – wir fragen nie per Nachricht danach.`,
+  en: (minutes: number) => `The code is valid for ${minutes} minutes and can only be used once. Only enter it on craftinghosting.free and never share it – we never ask for it by message.`,
+};
+
+export function verifyServerMail(serverName: string, code: string, locale: Locale): MailContent {
   if (locale === 'en') {
-    return layout('Confirm your email – your server is waiting', {
+    return layout(`${code} is your code – your server is waiting`, {
       locale,
-      preheader: `One click and we will create “${serverName}”.`,
+      preheader: `Enter the code and we will create “${serverName}”.`,
       heading: 'Almost there!',
       paragraphs: [
-        `Confirm your email address – then set your password for the Pterodactyl panel and we will create your Minecraft server “${serverName}” automatically.`,
+        `Enter this code on the website to confirm your email address. Then set your password for the Pterodactyl panel and we will create your server “${serverName}” automatically.`,
       ],
-      cta: { label: 'Confirm email & create server', url },
-      footnote: 'This link is valid for 24 hours. If you did not request a server, simply ignore this email – nothing will happen.',
+      code,
+      footnote: `${codeNote.en(CODE_MINUTES.verify_email)} If you did not request a server, simply ignore this email – nothing will happen.`,
     });
   }
-  return layout('Bestätige deine E-Mail – dein Server wartet', {
+  return layout(`${code} ist dein Code – dein Server wartet`, {
     locale,
-    preheader: `Ein Klick, dann erstellen wir „${serverName}“.`,
+    preheader: `Code eingeben, dann erstellen wir „${serverName}“.`,
     heading: 'Fast geschafft!',
     paragraphs: [
-      `Bestätige deine E-Mail-Adresse – danach legst du dein Passwort für das Pterodactyl-Panel fest und wir erstellen deinen Minecraft-Server „${serverName}“ automatisch.`,
+      `Gib diesen Code auf der Website ein, um deine E-Mail-Adresse zu bestätigen. Danach legst du dein Passwort für das Pterodactyl-Panel fest und wir erstellen deinen Server „${serverName}“ automatisch.`,
     ],
-    cta: { label: 'E-Mail bestätigen & Server erstellen', url },
-    footnote: 'Der Link ist 24 Stunden gültig. Wenn du keinen Server angefordert hast, ignoriere diese E-Mail einfach – es passiert nichts.',
+    code,
+    footnote: `${codeNote.de(CODE_MINUTES.verify_email)} Wenn du keinen Server angefordert hast, ignoriere diese E-Mail einfach – es passiert nichts.`,
   });
 }
 
-export function verifyWaitlistMail(serverName: string, url: string, locale: Locale): MailContent {
+export function verifyWaitlistMail(serverName: string, code: string, locale: Locale, minutes: number = CODE_MINUTES.verify_email): MailContent {
   if (locale === 'en') {
-    return layout('Confirm your email – secure your early-access spot', {
+    return layout(`${code} is your code – secure your early-access spot`, {
       locale,
-      preheader: 'One click and your spot on the waitlist is yours.',
+      preheader: 'Enter the code and your spot on the waitlist is yours.',
       heading: 'Secure your spot',
       paragraphs: [
-        `Confirm your email address to get your place on the waitlist for the first free start phase of CraftingHosting.free. The first spots get a server on our AMD EPYC, the following ones on our Intel Xeon.`,
+        `Enter this code on the website to confirm your email address and get your place on the waitlist for the first free start phase of CraftingHosting.free. The first spots get a server on our AMD EPYC, the following ones on our Intel Xeon.`,
         `As soon as it's your turn, we'll create “${serverName}” and send you an email.`,
       ],
-      cta: { label: 'Confirm email & secure spot', url },
-      footnote: 'This link is valid for 24 hours. If you did not sign up, simply ignore this email.',
+      code,
+      footnote: `${codeNote.en(minutes)} If you did not sign up, simply ignore this email.`,
     });
   }
-  return layout('Bestätige deine E-Mail – sichere dir deinen Platz', {
+  return layout(`${code} ist dein Code – sichere dir deinen Platz`, {
     locale,
-    preheader: 'Ein Klick und dein Platz auf der Warteliste gehört dir.',
+    preheader: 'Code eingeben und dein Platz auf der Warteliste gehört dir.',
     heading: 'Sichere dir deinen Platz',
     paragraphs: [
-      'Bestätige deine E-Mail-Adresse, um deinen Platz auf der Warteliste für die erste kostenlose Startphase von CraftingHosting.free zu bekommen. Die ersten Plätze bekommen einen Server auf unserem AMD EPYC, die folgenden auf unseren Intel Xeon.',
+      'Gib diesen Code auf der Website ein, um deine E-Mail-Adresse zu bestätigen und deinen Platz auf der Warteliste für die erste kostenlose Startphase von CraftingHosting.free zu bekommen. Die ersten Plätze bekommen einen Server auf unserem AMD EPYC, die folgenden auf unseren Intel Xeon.',
       `Sobald du an der Reihe bist, erstellen wir „${serverName}“ und schicken dir eine E-Mail.`,
     ],
-    cta: { label: 'E-Mail bestätigen & Platz sichern', url },
-    footnote: 'Der Link ist 24 Stunden gültig. Wenn du dich nicht angemeldet hast, ignoriere diese E-Mail einfach.',
+    code,
+    footnote: `${codeNote.de(minutes)} Wenn du dich nicht angemeldet hast, ignoriere diese E-Mail einfach.`,
   });
 }
 
-export function loginMail(url: string, locale: Locale): MailContent {
+export function loginMail(code: string, locale: Locale, minutes: number = CODE_MINUTES.login): MailContent {
   if (locale === 'en') {
-    return layout('Your sign-in link for CraftingHosting.free', {
+    return layout(`${code} is your sign-in code for CraftingHosting.free`, {
       locale,
-      preheader: 'Signed in with one click – no password.',
-      heading: 'Sign in',
-      paragraphs: ['Click the button to sign in to CraftingHosting.free. There you can see the status of your server and reactivate it.'],
-      cta: { label: 'Sign in now', url },
-      footnote: 'This link is valid for 30 minutes and can only be used once. If this was not you, ignore this email.',
+      preheader: 'Enter the code on the website to sign in.',
+      heading: 'Your sign-in code',
+      paragraphs: ['Enter this code on the website to sign in to CraftingHosting.free. There you can see the status of your server and reactivate it.'],
+      code,
+      footnote: `${codeNote.en(minutes)} If this was not you, ignore this email – without the code nobody can sign in.`,
     });
   }
-  return layout('Dein Anmeldelink für CraftingHosting.free', {
+  return layout(`${code} ist dein Anmeldecode für CraftingHosting.free`, {
     locale,
-    preheader: 'Mit einem Klick angemeldet – ohne Passwort.',
-    heading: 'Anmelden',
-    paragraphs: ['Klicke auf den Button, um dich bei CraftingHosting.free anzumelden. Dort siehst du den Status deines Servers und kannst ihn reaktivieren.'],
-    cta: { label: 'Jetzt anmelden', url },
-    footnote: 'Der Link ist 30 Minuten gültig und kann nur einmal verwendet werden. Wenn du das nicht warst, ignoriere diese E-Mail.',
+    preheader: 'Gib den Code auf der Website ein, um dich anzumelden.',
+    heading: 'Dein Anmeldecode',
+    paragraphs: ['Gib diesen Code auf der Website ein, um dich bei CraftingHosting.free anzumelden. Dort siehst du den Status deines Servers und kannst ihn reaktivieren.'],
+    code,
+    footnote: `${codeNote.de(minutes)} Wenn du das nicht warst, ignoriere diese E-Mail – ohne den Code kann sich niemand anmelden.`,
   });
 }
 

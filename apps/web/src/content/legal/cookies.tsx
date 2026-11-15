@@ -55,7 +55,7 @@ export function CookiesDe({ site }: { site: PublicSiteDTO }) {
           rows={[
             [
               site.session.cookieName,
-              'Anmeldung: enthält eine zufällige Kennung deiner Sitzung, damit du nach dem Klick auf den E-Mail-Link angemeldet bleibst. Nicht per JavaScript auslesbar (HttpOnly), nur über HTTPS (Secure), SameSite=Lax. Wird erst beim Anmelden gesetzt.',
+              'Anmeldung: enthält eine zufällige Kennung deiner Sitzung, damit du nach der Eingabe des Codes aus der E-Mail angemeldet bleibst. Nicht per JavaScript auslesbar (HttpOnly), nur über HTTPS (Secure), SameSite=Lax. Wird erst beim Anmelden gesetzt.',
               sessionDuration(site, 'de'),
             ],
             ['chf_lang', 'Merkt sich deine Sprachwahl (de/en). Wird nur gesetzt, wenn du die Sprache umschaltest.', '12 Monate'],
@@ -110,7 +110,7 @@ export function CookiesDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>Cookies löschen</h2>
         <p>
-          Du kannst die Cookies jederzeit in den Einstellungen deines Browsers löschen. Ohne das Anmelde-Cookie musst du dich erneut per E-Mail-Link anmelden; ohne
+          Du kannst die Cookies jederzeit in den Einstellungen deines Browsers löschen. Ohne das Anmelde-Cookie musst du dich erneut mit einem Code per E-Mail anmelden; ohne
           chf_consent erscheint der Hinweis wieder.
         </p>
       </section>
@@ -136,7 +136,7 @@ export function CookiesEn({ site }: { site: PublicSiteDTO }) {
           rows={[
             [
               site.session.cookieName,
-              'Sign-in: contains a random identifier of your session so that you stay signed in after clicking the email link. Not readable by JavaScript (HttpOnly), HTTPS only (Secure), SameSite=Lax. Only set when you sign in.',
+              'Sign-in: contains a random identifier of your session so that you stay signed in after entering the code from the email. Not readable by JavaScript (HttpOnly), HTTPS only (Secure), SameSite=Lax. Only set when you sign in.',
               sessionDuration(site, 'en'),
             ],
             ['chf_lang', 'Remembers your language choice (de/en). Only set when you switch the language.', '12 months'],
@@ -191,7 +191,7 @@ export function CookiesEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>Deleting cookies</h2>
         <p>
-          You can delete the cookies at any time in your browser settings. Without the sign-in cookie you have to sign in again via email link; without chf_consent the
+          You can delete the cookies at any time in your browser settings. Without the sign-in cookie you have to sign in again with a code sent by email; without chf_consent the
           notice appears again.
         </p>
       </section>

@@ -12,6 +12,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function VerifyPage({ params, searchParams }: Props) {
   await resolveLang(params);
+  // Ohne Angabe: Formular für E-Mail-Adresse und Code. `token` stammt aus Links älterer E-Mails.
   const { token } = await searchParams;
   return (
     <div className="container-page py-14 sm:py-20">

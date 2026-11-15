@@ -40,6 +40,20 @@ export const users = sqliteTable(
     /** Customer-Rolle auf dem Discord-Server: zuletzt gesetzter Stand und Zeitpunkt des letzten Abgleichs */
     discordCustomerRole: integer('discord_customer_role', { mode: 'boolean' }).notNull().default(false),
     discordSyncAt: ts('discord_sync_at'),
+    /**
+     * Zweite Stufe bei der Anmeldung (nach dem Code per E-Mail): eigenes Passwort oder Authenticator-App.
+     * Passwort nur als scrypt-Hash, TOTP-Schlüssel verschlüsselt (encryptField), Wiederherstellungscodes als Hash.
+     */
+    twoFactorMethod: text('two_factor_method', { enum: ['password', 'totp'] }),
+    passwordHash: text('password_hash'),
+    totpSecret: text('totp_secret'),
+    /** Schlüssel während der Einrichtung – wird erst nach der Bestätigung mit einem Code aktiv */
+    totpPending: text('totp_pending'),
+    /** Zuletzt verwendeter Zeitschritt – derselbe Code gilt nicht zweimal */
+    totpLastStep: integer('totp_last_step'),
+    twoFactorRecovery: text('two_factor_recovery', { mode: 'json' }).$type<string[]>(),
+    twoFactorFails: integer('two_factor_fails').notNull().default(0),
+    twoFactorLockedUntil: ts('two_factor_locked_until'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
     updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
   },
@@ -72,11 +86,13 @@ export const emailTokens = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    /** verify_email: Bestätigung + Anmeldung · login: Anmeldelink */
+    /** verify_email: Bestätigung + Anmeldung · login: Anmeldung – beide per sechsstelligem Code aus der E-Mail */
     type: text('type', { enum: ['verify_email', 'login'] }).notNull(),
     tokenHash: text('token_hash').notNull(),
     expiresAt: ts('expires_at').notNull(),
     usedAt: ts('used_at'),
+    /** Fehlversuche bei der Code-Eingabe – nach fünf ist der Code verbraucht */
+    attempts: integer('attempts').notNull().default(0),
     createdAt: ts('created_at').notNull().$defaultFn(now),
   },
   (t) => [uniqueIndex('email_tokens_hash_uq').on(t.tokenHash), index('email_tokens_user_idx').on(t.userId, t.type)],

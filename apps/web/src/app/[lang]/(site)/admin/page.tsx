@@ -663,7 +663,7 @@ function WaitlistTab({
       <Card title="Personen hinzufügen">
         <p className="mb-4 text-sm leading-relaxed text-muted">
           Für Personen, die sich schon vorher eingetragen haben – z. B. im alten System oder per Discord. Sie bekommen einen echten Platz, erscheinen in der Liste oben, zählen in
-          der öffentlichen Zahl mit und werden wie alle anderen freigeschaltet. Fehlende Konten werden angelegt; die Personen melden sich später per E-Mail-Link an.
+          der öffentlichen Zahl mit und werden wie alle anderen freigeschaltet. Fehlende Konten werden angelegt; die Personen melden sich später mit einem Code per E-Mail an.
         </p>
         {plans.length > 0 ? (
           <WaitlistAddForm plans={plans} />

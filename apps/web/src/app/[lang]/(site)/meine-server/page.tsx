@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
-import { localePath, productKinds, type DiscordMeDTO, type Locale, type ServerDTO } from '@chfree/shared';
+import { localePath, productKinds, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
+import { SecurityCard } from '@/components/my/security-card';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink, buttonClasses } from '@/components/ui/button';
@@ -232,6 +233,8 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const discordRes = settings.discord.available ? await apiServer<{ discord: DiscordMeDTO }>('/discord/me', lang) : null;
   const discordMe = discordRes?.ok ? discordRes.data.discord : null;
   const discordResult = query.discord ? d.discord.results[query.discord] : undefined;
+  const securityRes = await apiServer<{ security: SecurityDTO }>('/account/security', lang);
+  const security = securityRes.ok ? securityRes.data.security : null;
   const servers = res.ok ? res.data.servers : [];
   const hasPending = servers.some((s) => s.status === 'pending');
   const onWaitlist = servers.some((s) => s.status === 'waitlist');
@@ -353,6 +356,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
         </div>
 
         <div className="mt-10">
+          {security && <SecurityCard security={security} />}
           <AccountActions email={user.email} />
         </div>
       </div>
