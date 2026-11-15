@@ -133,6 +133,7 @@ CREATE TABLE `servers` (
 	`paused_at` integer,
 	`paused_until` integer,
 	`pause_reason` text,
+	`overload_since` integer,
 	`provisioning_attempts` integer DEFAULT 0 NOT NULL,
 	`provisioning_error` text,
 	`last_provision_attempt_at` integer,

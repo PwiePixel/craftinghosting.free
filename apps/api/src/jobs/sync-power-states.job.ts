@@ -10,7 +10,9 @@ import { db } from '../db/client';
 import { servers, type Server } from '../db/schema';
 import { pterodactyl, PterodactylError } from '../pterodactyl';
 import { audit } from '../services/audit.service';
+import { enforceBotFairUse } from '../services/bot-fair-use';
 import { applyPowerState } from '../services/power-state';
+import { getSettings } from '../services/settings.service';
 import { runPostProvision } from '../services/provisioning.service';
 import { mapLimit, type JobDefinition } from './types';
 
@@ -41,7 +43,8 @@ export const syncPowerStatesJob: JobDefinition = {
         ),
       );
 
-    const stats = { checked: 0, changed: 0, sessionsOpened: 0, sessionsClosed: 0, reconciled: 0, postProvisioned: 0, errors: 0 };
+    const stats = { checked: 0, changed: 0, sessionsOpened: 0, sessionsClosed: 0, reconciled: 0, postProvisioned: 0, botFairUse: 0, errors: 0 };
+    const settings = await getSettings();
     const ptero = pterodactyl();
 
     const { failed } = await mapLimit(rows, 8, async (server) => {
@@ -76,6 +79,15 @@ export const syncPowerStatesJob: JobDefinition = {
       if (res.state !== server.powerState) stats.changed++;
       if (result.opened) stats.sessionsOpened++;
       if (result.closed) stats.sessionsClosed++;
+
+      // Fair-Use-System für Discord-Bots: CPU-Dauerlast und Inaktivität (Bots laufen sonst durchgehend)
+      if (server.kind === 'discord' && server.status === 'active' && server.postProvisionDone) {
+        try {
+          if (await enforceBotFairUse({ ...server, powerState: res.state }, res, now, settings.botFairUse)) stats.botFairUse++;
+        } catch (err) {
+          log.warn({ err, serverId: server.id }, 'Fair-Use-Prüfung für Discord-Bot fehlgeschlagen – nächster Versuch folgt');
+        }
+      }
 
       if (!server.postProvisionDone && res.state !== 'installing') {
         try {

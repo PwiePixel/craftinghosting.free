@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Build-Kontext: Projektwurzel  →  docker build -f apps/api/Dockerfile .
+# Debian-Basis (glibc): Die verschlüsselte SQLite-Datenbank nutzt das native Modul libSQL.
 
-FROM node:22-alpine AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -13,18 +14,30 @@ COPY packages/shared packages/shared
 COPY apps/api apps/api
 RUN npm run build -w @chfree/api
 
-# Laufzeit-Image: alle Abhängigkeiten sind in dist/ gebündelt – keine node_modules nötig
-FROM node:22-alpine AS runtime
+# Laufzeit-Abhängigkeiten der API (ohne Dev-Pakete) – gebraucht wird daraus zur Laufzeit nur libSQL,
+# alles andere ist in dist/ gebündelt.
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+RUN npm ci --omit=dev --ignore-scripts -w @chfree/api
+
+FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN addgroup -S app && adduser -S app -G app && mkdir -p /app/data && chown app:app /app/data
-# Beschreibbarer Ordner (z. B. Zustand des Pterodactyl-Mock-Modus) – in docker-compose als Volume
-ENV PTERODACTYL_MOCK_STATE_FILE=/app/data/pterodactyl-mock.json
+# /data: verschlüsselte Datenbank (und Zustand des Mock-Modus) – in docker-compose ein Volume, das API und Worker teilen
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app && mkdir -p /data && chown app:app /data
+ENV DATABASE_PATH=/data/chfree.db \
+    PTERODACTYL_MOCK_STATE_FILE=/data/pterodactyl-mock.json
+COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/apps/api/dist ./dist
 COPY --from=build --chown=app:app /app/apps/api/drizzle ./drizzle
 USER app
+VOLUME /data
 EXPOSE 4000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:4000/api/v1/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Standard: API. Für den Worker:   command: ["node", "dist/worker.js"]
 #              Für Migrationen:     command: ["node", "dist/migrate.js"]
 CMD ["node", "dist/index.js"]

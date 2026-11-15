@@ -1,10 +1,12 @@
 [Unit]
 Description=CraftingHosting.free API
-After=network.target mariadb.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=chfree
+Group=chfree
 WorkingDirectory=/opt/craftinghosting-free/apps/api
 EnvironmentFile=/opt/craftinghosting-free/.env
 Environment=NODE_ENV=production
@@ -12,6 +14,19 @@ Environment=RUN_JOBS_IN_API=false
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=5
+
+# Absicherung: der Dienst darf nur in das Datenverzeichnis schreiben
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/chfree
 
 [Install]
 WantedBy=multi-user.target

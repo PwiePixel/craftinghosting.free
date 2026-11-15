@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "35ab93db-c048-44b6-8ee0-8e9126a764a4",
+  "id": "ffd48303-233e-4d3d-a753-6d56a437fd90",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit_logs": {
@@ -895,6 +895,13 @@
         "pause_reason": {
           "name": "pause_reason",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "overload_since": {
+          "name": "overload_since",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

@@ -83,6 +83,7 @@ export const de = {
     plans: 'Pakete',
     how: 'Ablauf',
     rules: 'Regeln',
+    discord: 'Discord-Bots',
     faq: 'FAQ',
     status: 'Status',
     donate: 'Spenden',
@@ -162,13 +163,31 @@ export const de = {
       points: (fairUseOn: boolean) => [
         `${botTypes.map((t) => t.name).join(' oder ')} – discord.py, discord.js & Co.`,
         'Pterodactyl-Panel: Konsole, Dateimanager, SFTP, Startparameter',
-        fairUseOn ? `Fair-Use wie bei Minecraft: max. ${fairUse.maxSessionHours} h am Stück` : 'Dauerbetrieb: kein Laufzeitlimit pro Tag',
+        fairUseOn ? `Fair-Use wie bei Minecraft: max. ${fairUse.maxSessionHours} h am Stück` : 'Durchgehend online: kein Laufzeitlimit, keine Pflicht-Pausen',
+        'Fair-Use für Bots: keine CPU-Dauerlast, Platz für aktive Bots',
         `${cycle.days} Tage Laufzeit, kostenlos verlängerbar`,
       ],
       rows: { ram: 'Arbeitsspeicher', cpu: 'CPU', disk: 'NVMe-Speicher', runtime: 'Laufzeit', runtimeValue: botTypes.map((t) => t.name).join(' / ') },
       create: (name: string) => `${name} erstellen`,
       termsLink: 'Nutzungsbedingungen für Discord-Bots',
       soon: 'Discord-Bot-Hosting startet in Kürze.',
+      /** Fair-Use-System für Bots – Werte kommen aus dem Admin-Bereich */
+      rulesLabel: 'Fair-Use für Discord-Bots',
+      rulesTitle: 'Durchgehend online – und trotzdem fair.',
+      rulesText:
+        'Bots brauchen keine Pausen. Damit die gemeinsame Node für alle schnell bleibt, achtet ein automatisches System auf die Auslastung statt auf die Laufzeit – und warnt per E-Mail, bevor etwas passiert.',
+      rules: (r: { cpuThresholdPercent: number; cpuWindowMinutes: number; cooldownMinutes: number; maxStrikes: number; strikeWindowDays: number; inactiveDays: number }): [string, string, string][] => [
+        ['24/7', 'durchgehend online', 'Kein Laufzeitlimit, keine Pflicht-Offline-Zeit. Dein Bot läuft, solange du ihn laufen lässt.'],
+        [
+          `${r.cpuThresholdPercent} %`,
+          'CPU – keine Dauerlast',
+          `Lastspitzen sind okay. Bleibt die CPU ${r.cpuWindowMinutes} Minuten am Stück über ${r.cpuThresholdPercent} % des Limits, wird der Bot nach einer Vorwarnung gestoppt und pausiert ${r.cooldownMinutes} Minuten.${r.maxStrikes > 0 ? ` ${r.maxStrikes} Stopps in ${r.strikeWindowDays} Tagen führen zur Sperre.` : ''}`,
+        ],
+        ...(r.inactiveDays > 0
+          ? ([[`${r.inactiveDays} Tage`, 'offline = Platz frei', 'Plätze sind für aktive Bots. Wer so lange am Stück offline ist, gibt seinen Platz frei – reaktivieren geht mit einem Klick.']] as [string, string, string][])
+          : []),
+        [`${cycle.days} Tage`, 'Laufzeit', `Wie bei Minecraft: danach kostenlos verlängern${hasRest ? ` (${afterRest})` : ''}.`],
+      ],
     },
     planLeft: (left: string, total: string) => `Noch ${left} von ${total} Plätzen frei`,
     planFull: 'Aktuell ausgebucht',
@@ -178,7 +197,7 @@ export const de = {
     premiumPoints: ['Mehr RAM & CPU', 'Weniger Einschränkungen', 'Direkt bei Crafting Hosting'],
     premiumCta: 'Angebote ansehen',
 
-    rulesLabel: 'Fair-Use',
+    rulesLabel: 'Fair-Use für Minecraft-Server',
     rulesTitle: 'Fair für alle – und vollautomatisch.',
     rulesText:
       'Damit kostenloses Hosting dauerhaft für viele funktioniert, gelten drei Regeln. Unser System kümmert sich selbst darum und warnt vorher – im Minecraft-Chat, im Panel und per E-Mail.',
@@ -258,10 +277,10 @@ export const de = {
     noPlans: 'Für dieses Angebot gibt es gerade keine Pakete.',
     acceptRulesBot: 'Nutzungsbedingungen für Discord-Bots',
     acceptSummaryBot: (fairUseOn: boolean) =>
-      `: ${fairUseOn ? `max. ${fairUse.maxSessionHours} h am Stück, ${fairUse.weeklyOfflineHours} h pro Woche offline, ` : ''}Verlängerung nach ${cycle.days} Tagen${hasRest ? ` und ${rest}` : ''}, keine Selfbots, kein Spam. Hinweise zum `,
+      `: ${fairUseOn ? `max. ${fairUse.maxSessionHours} h am Stück, ${fairUse.weeklyOfflineHours} h pro Woche offline, ` : ''}Verlängerung nach ${cycle.days} Tagen${hasRest ? ` und ${rest}` : ''}, Fair-Use-System für Bots (keine CPU-Dauerlast, aktive Nutzung), keine Selfbots, kein Spam. Hinweise zum `,
     fairTitleBot: 'Laufzeit, kurz erklärt',
     fairTextBot: (fairUseOn: boolean) =>
-      `${fairUseOn ? `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline. ` : 'Dein Bot darf dauerhaft laufen. '}Nach ${cycle.days} Tagen ${hasRest ? `und ${rest.replace(/^1 /, 'einem ')} ` : ''}verlängerst du mit einem Klick – wir erinnern dich vorher per E-Mail.`,
+      `${fairUseOn ? `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline. ` : 'Dein Bot darf durchgehend online sein. Fair bleibt es durch zwei Regeln: keine CPU-Dauerlast und kein tagelanger Leerlauf – Details in den Nutzungsbedingungen für Discord-Bots. '}Nach ${cycle.days} Tagen ${hasRest ? `und ${rest.replace(/^1 /, 'einem ')} ` : ''}verlängerst du mit einem Klick – wir erinnern dich vorher per E-Mail.`,
     fairTitle: 'Fair-Use, kurz erklärt',
     fairText: `Max. ${fairUse.maxSessionHours} h am Stück, mind. ${fairUse.weeklyOfflineHours} h pro Woche offline, nach ${cycle.days} Tagen ${hasRest ? `und ${rest.replace(/^1 /, 'einem ')} ` : ''}mit einem Klick verlängern. Alles automatisch – mit Hinweis im Chat, bevor etwas passiert.`,
 
@@ -388,8 +407,9 @@ export const de = {
     runtime: 'Laufzeit',
     activeUntil: (date: string, left: string) => `Aktiv bis ${date} · noch ${left}`,
     fairUse: 'Fair-Use',
-    alwaysOn: 'Dauerbetrieb – kein Laufzeitlimit pro Tag',
-    alwaysOnHint: `Es gilt nur die Laufzeit von ${cycle.days} Tagen.`,
+    alwaysOn: 'Durchgehend online – kein Laufzeitlimit',
+    alwaysOnHint: 'Fair-Use für Bots: keine CPU-Dauerlast, nicht tagelang offline.',
+    cpuPause: (dt: string) => `Pause bis ${dt} (CPU-Dauerlast)`,
     pausedUntil: (dt: string) => `Pause bis ${dt}`,
     autoStop: (dt: string) => `Automatischer Stopp ${dt}`,
     weeklyDone: 'Offline-Zeit diese Woche erfüllt',
@@ -484,7 +504,7 @@ export const de = {
               q: 'Läuft mein Discord-Bot rund um die Uhr?',
               a: ctx.discordFairUse
                 ? `Für Discord-Bots gilt dasselbe Fair-Use-System wie für Minecraft-Server: höchstens ${fairUse.maxSessionHours} Stunden am Stück und ${fairUse.weeklyOfflineHours} Stunden Offline-Zeit pro Woche. Nach ${cycle.days} Tagen verlängerst du kostenlos.`
-                : `Ja – für Discord-Bots gibt es kein tägliches Laufzeitlimit. Es gilt nur die Laufzeit von ${cycle.days} Tagen, die du kostenlos verlängern kannst. Einen Anspruch auf eine bestimmte Verfügbarkeit gibt es bei einem kostenlosen Angebot nicht.`,
+                : `Ja – Discord-Bots dürfen durchgehend online sein, es gibt kein Laufzeitlimit und keine Pflicht-Pausen. Stattdessen gilt ein eigenes Fair-Use-System für Bots: keine CPU-Dauerlast (bei anhaltender Volllast wird der Bot nach einer Vorwarnung kurz pausiert) und aktive Nutzung (ein Bot, der tagelang offline ist, gibt seinen Platz frei). Dazu kommt die Laufzeit von ${cycle.days} Tagen, die du kostenlos verlängerst. Die genauen Werte stehen in den Nutzungsbedingungen für Discord-Bots.`,
             },
             {
               q: 'Was ist bei Discord-Bots nicht erlaubt?',

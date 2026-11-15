@@ -6,3 +6,7 @@
 .git
 .pterodactyl-mock.json
 **/.pterodactyl-mock.json
+data
+**/*.db
+**/*.db-wal
+**/*.db-shm

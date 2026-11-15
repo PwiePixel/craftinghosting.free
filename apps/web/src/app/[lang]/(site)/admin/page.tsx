@@ -32,6 +32,10 @@ import { ExternalSpotsForm, WaitlistAddForm, WaitlistManager } from '@/component
 import { Alert, StatusDot } from '@/components/ui/primitives';
 import { formatters, getDict, resolveLang } from '@/i18n';
 import { adminPath } from '@/lib/admin-path';
+
+// Hinweis: Alle <Link> im Admin-Bereich haben prefetch={false}. Die Tab- und Seiten-Links unterscheiden sich nur im
+// Query-String und liegen hinter einem umgeschriebenen (geheimen) Pfad – das Vorab-Laden von Next.js gerät dabei im
+// Produktions-Build in eine Dauerschleife aus Anfragen.
 import { apiServer } from '@/lib/api/server';
 import { cn } from '@/lib/utils';
 
@@ -110,7 +114,7 @@ function Pager({ info, href, label }: { info: PageInfo; href: (page: number) => 
       {info.pages > 1 && (
         <div className="flex flex-wrap items-center gap-1">
           {info.page > 1 ? (
-            <Link href={href(info.page - 1)} aria-label="Vorherige Seite" className={cn(btn, 'border-line-strong text-gray-200 hover:bg-white/5')}>
+            <Link prefetch={false} href={href(info.page - 1)} aria-label="Vorherige Seite" className={cn(btn, 'border-line-strong text-gray-200 hover:bg-white/5')}>
               <ChevronLeft className="size-4" aria-hidden />
             </Link>
           ) : (
@@ -124,7 +128,7 @@ function Pager({ info, href, label }: { info: PageInfo; href: (page: number) => 
                 …
               </span>
             ) : (
-              <Link
+              <Link prefetch={false}
                 key={n}
                 href={href(n)}
                 aria-current={n === info.page ? 'page' : undefined}
@@ -135,7 +139,7 @@ function Pager({ info, href, label }: { info: PageInfo; href: (page: number) => 
             ),
           )}
           {info.page < info.pages ? (
-            <Link href={href(info.page + 1)} aria-label="Nächste Seite" className={cn(btn, 'border-line-strong text-gray-200 hover:bg-white/5')}>
+            <Link prefetch={false} href={href(info.page + 1)} aria-label="Nächste Seite" className={cn(btn, 'border-line-strong text-gray-200 hover:bg-white/5')}>
               <ChevronRight className="size-4" aria-hidden />
             </Link>
           ) : (
@@ -267,7 +271,7 @@ function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: Site
           </div>
           <div className="flex flex-wrap gap-2">
             {settings && <MaintenanceQuickToggle settings={settings} />}
-            <Link href={`${base}?tab=settings`} className="inline-flex h-9 items-center rounded-lg border border-line-strong px-3.5 text-sm text-gray-200 hover:bg-white/5">
+            <Link prefetch={false} href={`${base}?tab=settings`} className="inline-flex h-9 items-center rounded-lg border border-line-strong px-3.5 text-sm text-gray-200 hover:bg-white/5">
               Einstellungen
             </Link>
           </div>
@@ -789,10 +793,10 @@ export default async function AdminPage({ params, searchParams }: Props) {
           <h1 className="mt-2 text-3xl font-semibold tracking-[-0.02em] text-white">Admin</h1>
         </div>
         <div className="flex gap-4 text-sm">
-          <Link href={localePath('de', 'home')} className="text-muted hover:text-white">
+          <Link prefetch={false} href={localePath('de', 'home')} className="text-muted hover:text-white">
             Website
           </Link>
-          <Link href={localePath('de', 'myServers')} className="text-muted hover:text-white">
+          <Link prefetch={false} href={localePath('de', 'myServers')} className="text-muted hover:text-white">
             Meine Server
           </Link>
         </div>
@@ -800,7 +804,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
 
       <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line" aria-label="Admin-Bereiche">
         {TABS.map((t) => (
-          <Link
+          <Link prefetch={false}
             key={t.id}
             href={`${base}?tab=${t.id}`}
             className={cn(

@@ -274,6 +274,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
+    botFairUse: s.botFairUse,
     stats,
   };
   publicCache = { value, at: Date.now() };

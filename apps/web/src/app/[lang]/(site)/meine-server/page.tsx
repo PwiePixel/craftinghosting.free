@@ -134,7 +134,9 @@ function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; t
               <p className="text-[13px] text-subtle">{t.fairUse}</p>
               <p className="mt-0.5 text-sm text-gray-100">
                 {f.isPaused && f.pausedUntil
-                  ? t.pausedUntil(fmt.dateTime(f.pausedUntil))
+                  ? f.pauseReason === 'cpu_overload'
+                    ? t.cpuPause(fmt.dateTime(f.pausedUntil))
+                    : t.pausedUntil(fmt.dateTime(f.pausedUntil))
                   : !s.fairUseEnabled
                     ? t.alwaysOn
                   : f.online && f.autoStopAt

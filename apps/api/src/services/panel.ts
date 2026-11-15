@@ -71,6 +71,11 @@ export function desiredPanelDescription(server: Server, now: Date, l: Locale = '
     case 'active':
       if (server.pausedUntil && server.pausedUntil > now) {
         const weekly = server.pauseReason === 'weekly_offline';
+        if (server.pauseReason === 'cpu_overload') {
+          return en
+            ? `${prefix} · Fair-use break until ${fmtDateTime(server.pausedUntil, l)} (sustained CPU load)`
+            : `${prefix} · Fair-Use-Pause bis ${fmtDateTime(server.pausedUntil, l)} (CPU-Dauerlast)`;
+        }
         const why = en
           ? weekly
             ? 'weekly offline time'

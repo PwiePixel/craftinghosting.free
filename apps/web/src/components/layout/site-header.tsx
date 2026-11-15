@@ -45,9 +45,11 @@ export function SiteHeader({
   const switchHref = switchLocalePath(pathname, other);
   const donateHref = localePath(lang, 'donate');
 
-  const nav = [
+  const nav: { href: string; label: string; wide?: boolean }[] = [
     { href: sectionPath(lang, 'plans'), label: t.nav.plans },
-    { href: sectionPath(lang, 'how'), label: t.nav.how },
+    { href: sectionPath(lang, 'discord'), label: t.nav.discord },
+    // „Ablauf“ erscheint in der Desktop-Leiste erst ab sehr breiten Fenstern – sonst wird es zu eng
+    { href: sectionPath(lang, 'how'), label: t.nav.how, wide: true },
     { href: sectionPath(lang, 'rules'), label: t.nav.rules },
     { href: localePath(lang, 'faq'), label: t.nav.faq },
     { href: localePath(lang, 'status'), label: t.nav.status },
@@ -74,14 +76,14 @@ export function SiteHeader({
         <Logo href={localePath(lang, 'home')} />
 
         {!minimal && (
-          <nav className="hidden items-center gap-7 lg:flex" aria-label={t.nav.main}>
+          <nav className="hidden items-center gap-5 lg:flex xl:gap-7" aria-label={t.nav.main}>
             {nav.map((item) => (
-              <Link key={item.href} href={item.href} className={cn('text-sm transition-colors', pathname === item.href ? 'text-white' : 'text-muted hover:text-white')}>
+              <Link key={item.href} href={item.href} className={cn('text-sm whitespace-nowrap transition-colors', item.wide && 'hidden 2xl:inline', pathname === item.href ? 'text-white' : 'text-muted hover:text-white')}>
                 {item.label}
               </Link>
             ))}
             {donate && (
-              <Link href={donateHref} className={cn('inline-flex items-center gap-1.5 text-sm transition-colors', pathname === donateHref ? 'text-white' : 'text-muted hover:text-white')}>
+              <Link href={donateHref} className={cn('inline-flex items-center gap-1.5 text-sm whitespace-nowrap transition-colors', pathname === donateHref ? 'text-white' : 'text-muted hover:text-white')}>
                 <Heart className="size-3.5 text-blue-400" aria-hidden />
                 {t.nav.donate}
               </Link>
@@ -92,7 +94,7 @@ export function SiteHeader({
         <div className="flex items-center gap-2">
           {langSwitch('hidden px-2 md:inline-flex')}
           {!(maintenance && signedIn) && (
-          <Link href={localePath(lang, 'myServers')} className="hidden px-2 text-sm text-muted transition-colors hover:text-white sm:inline">
+          <Link href={localePath(lang, 'myServers')} className="hidden px-2 text-sm whitespace-nowrap text-muted transition-colors hover:text-white sm:inline">
             {t.common.myServers}
           </Link>
           )}

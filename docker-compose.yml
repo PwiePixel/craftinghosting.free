@@ -4,7 +4,10 @@
 #    cp .env.example .env        # Werte anpassen (siehe README)
 #    docker compose up -d --build
 #
-#  Dienste: MariaDB · Migration (einmalig) · API · Worker · Web · Caddy (HTTPS)
+#  Dienste: Migration (einmalig) · API · Worker · Web · Caddy (HTTPS)
+#  Datenbank: verschlüsselte SQLite-Datei im Volume "chfree-data" (API und Worker teilen es sich).
+#  WICHTIG: DATABASE_ENCRYPTION_KEY in der .env setzen (openssl rand -hex 32) und getrennt sichern –
+#  ohne den Schlüssel lässt sich die Datenbank nicht mehr öffnen.
 #  Entwicklung mit Mail-Vorschau:  docker compose --profile dev up -d
 # =============================================================================
 
@@ -17,30 +20,14 @@ x-api-env: &api-env
   env_file: .env
   environment:
     NODE_ENV: production
-    DATABASE_URL: mysql://${DB_USER:-chfree}:${DB_PASSWORD:?DB_PASSWORD fehlt}@mariadb:3306/${DB_NAME:-chfree}
+    DATABASE_PATH: /data/chfree.db
+    DATABASE_ENCRYPTION_KEY: ${DATABASE_ENCRYPTION_KEY:?DATABASE_ENCRYPTION_KEY fehlt (openssl rand -hex 32)}
+    PTERODACTYL_MOCK_STATE_FILE: /data/pterodactyl-mock.json
     WEB_INTERNAL_URL: http://web:3000
     RUN_JOBS_IN_API: 'false'
     TZ: UTC
 
 services:
-  mariadb:
-    image: mariadb:11.4
-    logging: *logging
-    restart: unless-stopped
-    environment:
-      MARIADB_DATABASE: ${DB_NAME:-chfree}
-      MARIADB_USER: ${DB_USER:-chfree}
-      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD fehlt}
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD fehlt}
-    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
-    volumes:
-      - mariadb-data:/var/lib/mysql
-    healthcheck:
-      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   migrate:
     logging: *logging
     build: { context: ., dockerfile: apps/api/Dockerfile }
@@ -49,8 +36,8 @@ services:
     command: ['node', 'dist/migrate.js']
     restart: 'no'
     healthcheck: { disable: true }
-    depends_on:
-      mariadb: { condition: service_healthy }
+    volumes:
+      - chfree-data:/data
 
   api:
     logging: *logging
@@ -59,7 +46,7 @@ services:
     <<: *api-env
     restart: unless-stopped
     volumes:
-      - api-data:/app/data
+      - chfree-data:/data
     depends_on:
       migrate: { condition: service_completed_successfully }
     expose: ['4000']
@@ -71,9 +58,9 @@ services:
     <<: *api-env
     command: ['node', 'dist/worker.js']
     restart: unless-stopped
-    # Gleiches Volume wie die API – im Mock-Modus teilen sich beide den simulierten Panel-Zustand
+    # Gleiches Volume wie die API – beide arbeiten auf derselben Datenbank-Datei
     volumes:
-      - api-data:/app/data
+      - chfree-data:/data
     # Der Worker hat keinen HTTP-Port – den HEALTHCHECK des API-Images hier abschalten
     healthcheck: { disable: true }
     depends_on:
@@ -119,7 +106,6 @@ services:
     ports: ['8025:8025', '1025:1025']
 
 volumes:
-  api-data:
-  mariadb-data:
+  chfree-data:
   caddy-data:
   caddy-config:

@@ -355,7 +355,24 @@ export default async function HomePage({ params }: Props) {
                 <PlanCard key={p.id} plan={p} lang={lang} closed={closed} early={early} unavailable={!discordReady} />
               ))}
             </div>
-            <p className="mt-8 text-sm text-muted">
+            {/* Fair-Use-System für Bots: Werte aus dem Admin-Bereich */}
+            {settings.botFairUse.enabled && !discord.fairUse && (
+              <div className="mt-16 border-t border-line pt-12">
+                <SectionHead label={h.discord.rulesLabel} title={h.discord.rulesTitle}>
+                  {h.discord.rulesText}
+                </SectionHead>
+                <div className="mt-10 grid gap-10 sm:grid-cols-2 sm:gap-8 lg:grid-cols-4">
+                  {h.discord.rules(settings.botFairUse).map(([big, small, text]) => (
+                    <div key={small} className="border-t border-line-strong pt-6">
+                      <p className="text-4xl font-semibold tracking-tight text-white">{big}</p>
+                      <p className="mt-1 text-sm font-medium text-blue-400">{small}</p>
+                      <p className="mt-3 text-[15px] leading-relaxed text-muted">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="mt-10 text-sm text-muted">
               <Link href={localePath(lang, 'discordTerms')} className="text-blue-400 hover:text-blue-300">
                 {h.discord.termsLink}
               </Link>

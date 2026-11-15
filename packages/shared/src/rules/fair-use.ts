@@ -15,7 +15,8 @@ export interface RuntimeSession {
   endedAt: Date | null;
 }
 
-export type PauseReason = 'max_session' | 'weekly_offline' | 'manual';
+/** cpu_overload = Discord-Bot wegen CPU-Dauerlast gestoppt (Fair-Use-System für Bots) */
+export type PauseReason = 'max_session' | 'weekly_offline' | 'manual' | 'cpu_overload';
 
 export interface FairUseInput {
   now: Date;

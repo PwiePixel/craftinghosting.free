@@ -1,17 +1,39 @@
 [Unit]
 Description=CraftingHosting.free Website (Next.js)
-After=network.target chfree-api.service
+After=network-online.target chfree-api.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=chfree
+Group=chfree
 WorkingDirectory=/opt/craftinghosting-free/apps/web
 EnvironmentFile=/opt/craftinghosting-free/.env
 Environment=NODE_ENV=production
 Environment=PORT=3000
+# HOSTNAME bewusst NICHT auf 127.0.0.1 setzen: Der Standalone-Server von Next.js leitet interne
+# Umschreibungen sonst an sich selbst weiter (Endlosschleife). Er lauscht deshalb auf 0.0.0.0 –
+# von außen erreichbar ist er trotzdem nicht, weil systemd unten nur Loopback-Verkehr zulässt.
+Environment=HOSTNAME=0.0.0.0
 ExecStart=/usr/bin/node .next/standalone/apps/web/server.js
 Restart=always
 RestartSec=5
+
+# Absicherung: der Dienst darf nur in das Datenverzeichnis schreiben
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/craftinghosting-free/apps/web/.next
+# Netzwerk: nur Loopback (Reverse Proxy → Website, Website → API). Der Port 3000 ist damit nicht öffentlich.
+IPAddressDeny=any
+IPAddressAllow=localhost
 
 [Install]
 WantedBy=multi-user.target

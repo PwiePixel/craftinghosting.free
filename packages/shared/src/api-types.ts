@@ -277,6 +277,8 @@ export interface SiteSettings {
     locations: HardwareLocation[];
     cpus: string[];
   };
+  /** Fair-Use-System für Discord-Bots (Dauerbetrieb, aber faire Nutzung der geteilten Hardware) */
+  botFairUse: BotFairUseSettings;
   /** Spenden-Seite (Zahlungslink von SumUp) */
   donate: {
     enabled: boolean;
@@ -304,6 +306,32 @@ export interface WaitlistBlock {
   count: number;
   /** Zeitpunkt des Hinzufügens */
   at: string | null;
+}
+
+/**
+ * Fair-Use-System für Discord-Bots. Bots dürfen durchgehend online sein – statt Laufzeit-Pausen
+ * gelten Regeln für die geteilte Hardware:
+ *  1. CPU-Dauerlast: liegt die CPU-Last länger als `cpuWindowMinutes` am Stück über `cpuThresholdPercent`
+ *     des Paket-Limits, wird der Bot nach einer Vorwarnung gestoppt und pausiert `cooldownMinutes`.
+ *  2. Verwarnungen: `maxStrikes` solcher Stopps innerhalb von `strikeWindowDays` Tagen → Sperre durch das System.
+ *  3. Inaktivität: ist der Bot `inactiveDays` Tage am Stück offline, wird der Platz freigegeben
+ *     (Laufzeit endet vorzeitig, Reaktivierung wie nach den 30 Tagen).
+ */
+export interface BotFairUseSettings {
+  enabled: boolean;
+  /** Schwelle in Prozent des CPU-Limits des Pakets (z. B. 90) */
+  cpuThresholdPercent: number;
+  /** So viele Minuten am Stück über der Schwelle gelten als Dauerlast */
+  cpuWindowMinutes: number;
+  /** Pause nach einem automatischen Stopp */
+  cooldownMinutes: number;
+  /** Stopps innerhalb von `strikeWindowDays`, ab denen der Bot gesperrt wird (0 = nie sperren) */
+  maxStrikes: number;
+  strikeWindowDays: number;
+  /** Tage am Stück offline, nach denen der Platz freigegeben wird (0 = aus) */
+  inactiveDays: number;
+  /** Erinnerung per E-Mail so viele Tage vorher */
+  inactiveWarningDays: number;
 }
 
 export interface HardwareLocation {
@@ -393,6 +421,7 @@ export interface PublicSiteDTO {
   products: Record<ProductKind, PublicProductDTO>;
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
+  botFairUse: BotFairUseSettings;
   stats: { users: number; activeServers: number; uptime: number | null } | null;
 }
 

@@ -121,7 +121,9 @@ export const servers = sqliteTable(
     /** Fair-Use-Pause */
     pausedAt: ts('paused_at'),
     pausedUntil: ts('paused_until'),
-    pauseReason: text('pause_reason', { enum: ['max_session', 'weekly_offline', 'manual'] }),
+    pauseReason: text('pause_reason', { enum: ['max_session', 'weekly_offline', 'manual', 'cpu_overload'] }),
+    /** Fair-Use für Discord-Bots: seit wann die CPU-Last ununterbrochen über der Schwelle liegt (null = normal) */
+    overloadSince: ts('overload_since'),
 
     /** Provisionierung */
     provisioningAttempts: integer('provisioning_attempts').notNull().default(0),

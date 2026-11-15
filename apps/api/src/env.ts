@@ -123,9 +123,8 @@ const schema = z
       for (const key of ['PTERODACTYL_URL', 'PTERODACTYL_APP_KEY', 'PTERODACTYL_CLIENT_KEY'] as const) {
         if (!env[key]) ctx.addIssue({ code: 'custom', path: [key], message: `${key} ist im Live-Modus erforderlich` });
       }
-      if (env.PTERODACTYL_LOCATION_IDS.length === 0) {
-        ctx.addIssue({ code: 'custom', path: ['PTERODACTYL_LOCATION_IDS'], message: 'Mindestens eine Location-ID angeben' });
-      }
+      // PTERODACTYL_LOCATION_IDS ist optional: Nodes werden im Admin-Bereich zugewiesen (Admin → Pterodactyl),
+      // ohne Zuweisung nutzt die Anlage alle Locations des Panels.
     }
   });
 

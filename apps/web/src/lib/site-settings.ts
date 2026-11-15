@@ -37,6 +37,7 @@ export const fallbackSite: PublicSiteDTO = {
   products: { minecraft: fallbackProduct('minecraft'), discord: fallbackProduct('discord') },
   hardware: { ...defaults.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
   donate: { enabled: false, url: null },
+  botFairUse: defaults.botFairUse,
   stats: null,
 };
 

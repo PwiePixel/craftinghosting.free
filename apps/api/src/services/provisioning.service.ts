@@ -28,8 +28,7 @@ function locationsFor(tier: Server['nodeTier']): number[] {
   const ids = (list: string[]) => list.map(Number).filter((n) => Number.isInteger(n) && n > 0);
   const tiered = tier === 'epyc' ? ids(env.PTERODACTYL_LOCATION_IDS_EPYC) : tier === 'xeon' ? ids(env.PTERODACTYL_LOCATION_IDS_XEON) : [];
   if (tiered.length) return tiered;
-  const general = ids(env.PTERODACTYL_LOCATION_IDS);
-  return general.length ? general : [1];
+  return ids(env.PTERODACTYL_LOCATION_IDS);
 }
 
 /**
@@ -38,15 +37,22 @@ function locationsFor(tier: Server['nodeTier']): number[] {
  * Rückgabe null = keine Node zugewiesen → automatische Platzierung über die Locations.
  */
 async function pickAllocation(server: Server, settings: SiteSettings): Promise<number | null> {
-  const nodeIds = settings.products[server.kind].nodeIds;
-  if (nodeIds.length === 0) {
-    if (server.kind === 'discord' && env.PTERODACTYL_MODE === 'live') {
-      throw new Error('Für Discord-Bots ist noch keine Node zugewiesen (Admin → Pterodactyl)');
-    }
-    return null;
-  }
   const ptero = pterodactyl();
-  const nodes = await ptero.listNodes();
+  let nodeIds = settings.products[server.kind].nodeIds;
+  let nodes: Awaited<ReturnType<typeof ptero.listNodes>> | null = null;
+  if (nodeIds.length === 0) {
+    if (server.kind === 'discord') {
+      if (env.PTERODACTYL_MODE === 'live') throw new Error('Für Discord-Bots ist noch keine Node zugewiesen (Admin → Pterodactyl)');
+      return null;
+    }
+    // Minecraft ohne feste Nodes: automatische Platzierung – aber nie auf den Nodes, die für Discord-Bots reserviert sind
+    const botNodes = settings.products.discord.nodeIds;
+    if (botNodes.length === 0) return null;
+    nodes = await ptero.listNodes();
+    nodeIds = nodes.map((n) => n.id).filter((id) => !botNodes.includes(id));
+    if (nodeIds.length === 0) throw new Error('Alle Nodes sind für Discord-Bots reserviert – bitte eine Node für Minecraft zuweisen (Admin → Pterodactyl)');
+  }
+  nodes ??= await ptero.listNodes();
   let best: { id: number; count: number } | null = null;
   for (const nodeId of nodeIds) {
     const node = nodes.find((n) => n.id === nodeId);
@@ -56,6 +62,15 @@ async function pickAllocation(server: Server, settings: SiteSettings): Promise<n
   }
   if (!best) throw new Error(`Keine freie Allokation (Port) auf den zugewiesenen Nodes (${nodeIds.join(', ')}) – bitte im Panel Allokationen anlegen`);
   return best.id;
+}
+
+/** Locations für die automatische Platzierung: aus der .env – sonst alle Locations des Panels */
+async function deployLocations(tier: Server['nodeTier']): Promise<number[]> {
+  const fromEnv = locationsFor(tier);
+  if (fromEnv.length) return fromEnv;
+  const all = await pterodactyl().listLocations();
+  if (all.length === 0) throw new Error('Im Panel ist keine Location eingerichtet');
+  return all.map((l) => l.id);
 }
 
 const eggCache = new Map<string, { egg: PteroEgg; at: number }>();
@@ -186,7 +201,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         // Ressourcen aus dem Snapshot des Servers – das Paket kann inzwischen geändert oder entfernt worden sein
         limits: { memory: server.memoryMb, swap: plan?.swapMb ?? 0, disk: server.diskMb, io: plan?.ioWeight ?? 500, cpu: server.cpuPercent },
         featureLimits: { databases: plan?.databases ?? 0, allocations: plan?.allocations ?? 1, backups: plan?.backups ?? 0 },
-        locationIds: locationsFor(server.nodeTier),
+        locationIds: allocationId ? [] : await deployLocations(server.nodeTier),
         ...(allocationId ? { allocationId } : {}),
         startOnCompletion: pterodactylConfig.startOnCompletion,
       });

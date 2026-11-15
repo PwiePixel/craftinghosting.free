@@ -39,6 +39,16 @@ export function defaultSiteSettings(): SiteSettings {
     products: { minecraft: defaultProduct('minecraft'), discord: defaultProduct('discord') },
     hardware: { locations: freeHostingConfig.hardware.locations.map((l) => ({ ...l })), cpus: [...freeHostingConfig.hardware.cpus] },
     donate: { enabled: false, url: '' },
+    botFairUse: {
+      enabled: true,
+      cpuThresholdPercent: 90,
+      cpuWindowMinutes: 30,
+      cooldownMinutes: 30,
+      maxStrikes: 3,
+      strikeWindowDays: 7,
+      inactiveDays: 7,
+      inactiveWarningDays: 2,
+    },
     stats: {
       show: true,
       users: { mode: 'auto', value: 0, offset: 0 },
@@ -271,6 +281,8 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
   const products = obj(i.products);
   const hw = obj(i.hardware);
   const dn = obj(i.donate);
+  const bf = obj(i.botFairUse);
+  const inactiveDays = int(bf.inactiveDays, d.botFairUse.inactiveDays, 0, 365);
   const usedIds = new Set<string>();
   const cpus = Array.isArray(hw.cpus)
     ? hw.cpus
@@ -308,6 +320,17 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
     hardware: { locations: normalizeLocations(hw.locations, d.hardware.locations), cpus },
     // Ohne gültigen Zahlungslink bleibt die Spenden-Seite aus
     donate: { enabled: bool(dn.enabled, false) && donateUrl !== '', url: donateUrl },
+    botFairUse: {
+      enabled: bool(bf.enabled, d.botFairUse.enabled),
+      cpuThresholdPercent: int(bf.cpuThresholdPercent, d.botFairUse.cpuThresholdPercent, 50, 100),
+      cpuWindowMinutes: int(bf.cpuWindowMinutes, d.botFairUse.cpuWindowMinutes, 5, 1440),
+      cooldownMinutes: int(bf.cooldownMinutes, d.botFairUse.cooldownMinutes, 5, 1440),
+      maxStrikes: int(bf.maxStrikes, d.botFairUse.maxStrikes, 0, 50),
+      strikeWindowDays: int(bf.strikeWindowDays, d.botFairUse.strikeWindowDays, 1, 90),
+      inactiveDays,
+      // Die Erinnerung liegt immer vor der Freigabe
+      inactiveWarningDays: Math.min(int(bf.inactiveWarningDays, d.botFairUse.inactiveWarningDays, 0, 30), Math.max(0, inactiveDays - 1)),
+    },
     stats: {
       show: bool(st.show, d.stats.show),
       users: { mode: su.mode === 'manual' ? 'manual' : 'auto', value: int(su.value, 0, 0, 100_000_000), offset: int(su.offset, 0, 0, 100_000_000) },

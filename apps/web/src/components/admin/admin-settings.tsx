@@ -254,6 +254,46 @@ export function SettingsForm({
       </Section>
 
       <Section
+        title="Fair-Use für Discord-Bots"
+        description="Discord-Bots dürfen durchgehend online sein. Damit die geteilte Bot-Node für alle schnell bleibt, gelten statt Laufzeit-Pausen diese Regeln – sie werden automatisch durchgesetzt (jede Minute geprüft) und stehen mit genau diesen Werten in den Nutzungsbedingungen für Discord-Bots (/discord-bot/terms-of-use)."
+      >
+        <Toggle
+          checked={s.botFairUse.enabled}
+          onChange={(v) => patch('botFairUse', { enabled: v })}
+          label="Fair-Use-System für Discord-Bots aktiv"
+          hint="Aus = keine automatische Prüfung; es gelten nur die Paket-Limits und der 30-Tage-Zyklus."
+        />
+        <div className="grid gap-5 md:grid-cols-3">
+          <Labeled label="CPU-Schwelle (%)" hint="Anteil am CPU-Limit des Pakets, ab dem die Last als „hoch“ zählt (50–100).">
+            <NumberInput value={s.botFairUse.cpuThresholdPercent} min={50} max={100} onChange={(v) => patch('botFairUse', { cpuThresholdPercent: v })} />
+          </Labeled>
+          <Labeled label="Dauerlast ab (Minuten)" hint="So lange am Stück über der Schwelle → Stopp. Zur Halbzeit kommt eine Vorwarnung per E-Mail.">
+            <NumberInput value={s.botFairUse.cpuWindowMinutes} min={5} max={1440} onChange={(v) => patch('botFairUse', { cpuWindowMinutes: v })} />
+          </Labeled>
+          <Labeled label="Pause nach Stopp (Minuten)" hint="Erst danach lässt sich der Bot wieder starten.">
+            <NumberInput value={s.botFairUse.cooldownMinutes} min={5} max={1440} onChange={(v) => patch('botFairUse', { cooldownMinutes: v })} />
+          </Labeled>
+          <Labeled label="Sperre ab Verwarnungen" hint="Jeder automatische Stopp ist eine Verwarnung. 0 = nie automatisch sperren.">
+            <NumberInput value={s.botFairUse.maxStrikes} min={0} max={50} onChange={(v) => patch('botFairUse', { maxStrikes: v })} />
+          </Labeled>
+          <Labeled label="… innerhalb von (Tagen)" hint="Zeitfenster, in dem die Verwarnungen gezählt werden.">
+            <NumberInput value={s.botFairUse.strikeWindowDays} min={1} max={90} onChange={(v) => patch('botFairUse', { strikeWindowDays: v })} />
+          </Labeled>
+          <div />
+          <Labeled label="Inaktiv nach (Tagen offline)" hint="So viele Tage am Stück offline → Platz wird freigegeben (Laufzeit endet vorzeitig, reaktivierbar). 0 = aus.">
+            <NumberInput value={s.botFairUse.inactiveDays} min={0} max={365} onChange={(v) => patch('botFairUse', { inactiveDays: v })} />
+          </Labeled>
+          <Labeled label="Erinnerung (Tage vorher)" hint="E-Mail, bevor der Platz freigegeben wird. 0 = keine Erinnerung.">
+            <NumberInput value={s.botFairUse.inactiveWarningDays} min={0} max={30} onChange={(v) => patch('botFairUse', { inactiveWarningDays: v })} />
+          </Labeled>
+        </div>
+        <p className="text-[13px] leading-relaxed text-subtle">
+          Gesperrte Bots (Grund „abuse“) hebst du unter „Server“ mit „Entsperren“ wieder auf. Das klassische Fair-Use-System (24 h am Stück, Wochen-Offline-Zeit) lässt sich
+          für Discord-Bots oben unter „Produkte &amp; Pakete“ zusätzlich einschalten – empfohlen ist: aus.
+        </p>
+      </Section>
+
+      <Section
         title="Hardware & Standorte"
         description="Angaben zur Hardware auf der Website: Sie erscheinen auf der Startseite, in den FAQ und in den Rechtstexten (z. B. „Standorte: DE“)."
       >
