@@ -113,6 +113,8 @@ const schema = z
 
     /** Adresse von YouTube (Kanalseiten und Feeds für den Social Ping). Nur für Tests ändern. */
     YOUTUBE_BASE_URL: z.string().url().default('https://www.youtube.com'),
+    /** Adresse von TikTok (Profilseiten für den Social Ping). Nur für Tests ändern. */
+    TIKTOK_BASE_URL: z.string().url().default('https://www.tiktok.com'),
     /** Nur für Tests: Feeds auch von lokalen Adressen abrufen */
     SOCIAL_FEED_ALLOW_PRIVATE: z.string().optional(),
 

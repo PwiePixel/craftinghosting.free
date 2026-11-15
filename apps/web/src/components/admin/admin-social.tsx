@@ -86,7 +86,7 @@ export function SocialSection({ d, set, status, dirty }: { d: DiscordSettings; s
   return (
     <Section
       title="Social Ping (neue Videos)"
-      description="Hinterlege Konten per Link – der Bot prüft alle 5 Minuten, ob dort ein neues Video erschienen ist, und postet es mit Link in den Kanal. Unterstützt werden YouTube-Kanäle (z. B. youtube.com/@name) und beliebige RSS-/Atom-Feeds. Beim Hinzufügen merkt sich der Bot die vorhandenen Videos; gemeldet wird alles, was danach neu erscheint."
+      description="Hinterlege Konten per Link – der Bot prüft alle 5 Minuten, ob dort ein neues Video erschienen ist, und postet es mit Link in den Kanal. Unterstützt werden YouTube-Kanäle (youtube.com/@name), TikTok-Profile (tiktok.com/@name) und beliebige RSS-/Atom-Feeds. Beim Hinzufügen merkt sich der Bot die vorhandenen Videos; gemeldet wird alles, was danach neu erscheint."
     >
       <Toggle checked={s.enabled} onChange={(enabled) => setS({ enabled })} label="Social Ping einschalten" />
       <div className="grid gap-4 sm:grid-cols-2">
@@ -157,7 +157,7 @@ export function SocialSection({ d, set, status, dirty }: { d: DiscordSettings; s
           <input
             className="input max-w-md"
             value={link}
-            placeholder="https://www.youtube.com/@name"
+            placeholder="https://www.youtube.com/@name oder https://www.tiktok.com/@name"
             aria-label="Link zum Konto"
             onChange={(e) => setLink(e.target.value)}
             onKeyDown={(e) => {
@@ -174,6 +174,10 @@ export function SocialSection({ d, set, status, dirty }: { d: DiscordSettings; s
             Jetzt prüfen
           </Button>
         </div>
+        <p className="mt-2 text-[13px] leading-relaxed text-subtle">
+          TikTok bietet keinen offiziellen Feed. Der Bot liest dafür die öffentliche Profilseite (die letzten zehn Videos) – das funktioniert nur bei öffentlichen Konten und kann
+          ausfallen, wenn TikTok die Seite ändert oder Abrufe vom Server blockiert. Ein Fehler steht dann beim Konto.
+        </p>
         <div className="mt-2 min-h-5">
           {message ? <Note message={message} /> : dirty && s.accounts.length > 0 && <span className="text-[13px] text-amber-300">„Testen“ und „Jetzt prüfen“ arbeiten mit dem gespeicherten Stand – bitte zuerst speichern.</span>}
         </div>

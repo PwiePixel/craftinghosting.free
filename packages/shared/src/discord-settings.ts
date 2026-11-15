@@ -93,7 +93,7 @@ export interface DiscordSettings {
 
 export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5, rewardTiers: 10, boostTiers: 8, boostSlots: 4, socialAccounts: 10 } as const;
 
-/** Konto, dessen neue Videos der Bot meldet (YouTube-Kanal oder ein beliebiger RSS-/Atom-Feed) */
+/** Konto, dessen neue Videos der Bot meldet (YouTube-Kanal, TikTok-Profil oder ein beliebiger RSS-/Atom-Feed) */
 export interface SocialAccount {
   id: string;
   /** Link, wie er im Admin-Bereich eingegeben wurde */

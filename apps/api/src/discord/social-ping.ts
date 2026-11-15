@@ -2,8 +2,12 @@
  * Social Ping: Der Bot meldet neue Videos hinterlegter Konten in einem Discord-Kanal
  * (Admin → Discord → Social Ping).
  *
- * Unterstützt werden YouTube-Kanäle (Link auf den Kanal, z. B. youtube.com/@name – der Bot ermittelt daraus den
- * öffentlichen Feed des Kanals, ein API-Schlüssel ist nicht nötig) und beliebige RSS-/Atom-Feeds.
+ * Unterstützt werden
+ *  – YouTube-Kanäle (Link auf den Kanal, z. B. youtube.com/@name – der Bot ermittelt daraus den öffentlichen Feed
+ *    des Kanals, ein API-Schlüssel ist nicht nötig),
+ *  – TikTok-Profile (tiktok.com/@name – TikTok bietet keinen Feed; gelesen wird die öffentliche Einbettungs-Seite
+ *    des Profils mit den neuesten Videos. Das ist keine offizielle Schnittstelle und kann sich ändern),
+ *  – beliebige RSS-/Atom-Feeds.
  * Beim ersten Abruf eines Kontos merkt sich der Bot nur die vorhandenen Videos; gepostet wird alles, was danach
  * neu erscheint. Der Link steht als Text in der Nachricht, damit Discord die Vorschau mit Player anzeigt.
  */
@@ -89,6 +93,51 @@ export function parseFeed(xml: string): { title: string | null; entries: FeedEnt
   return { title, entries };
 }
 
+/* ------------------------------------------------------------ TikTok */
+
+const tiktokProfile = (uniqueId: string) => `${env.TIKTOK_BASE_URL}/embed/@${uniqueId}`;
+const isTikTokUrl = (raw: string) => {
+  try {
+    const u = new URL(raw);
+    return (/(^|\.)tiktok\.com$/i.test(u.hostname) || u.host === new URL(env.TIKTOK_BASE_URL).host) && /^\/embed\/@[\w.]+/.test(u.pathname);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Liest die neuesten Videos aus der Einbettungs-Seite eines TikTok-Profils (tiktok.com/embed/@name).
+ * Die Seite enthält die Daten als JSON; die Video-ID trägt den Zeitpunkt des Hochladens in sich.
+ */
+export function parseTikTok(html: string): { title: string | null; entries: FeedEntry[] } {
+  const raw = /<script id="__FRONTITY_CONNECT_STATE__"[^>]*>([\s\S]*?)<\/script>/.exec(html)?.[1];
+  if (!raw) throw new Error('TikTok hat die Profilseite nicht wie erwartet geliefert (möglicherweise blockiert TikTok den Abruf vom Server).');
+  let data: Record<string, any>;
+  try {
+    data = JSON.parse(raw)?.source?.data ?? {};
+  } catch {
+    throw new Error('Die Antwort von TikTok konnte nicht gelesen werden.');
+  }
+  const page = Object.entries(data).find(([key, value]) => key.startsWith('/embed/@') && value && typeof value === 'object')?.[1] as Record<string, any> | undefined;
+  const user = page?.userInfo ?? {};
+  if (!page || page.isError || !user.id) throw new Error('Dieses TikTok-Konto gibt es nicht (oder es ist nicht öffentlich abrufbar).');
+  if (user.privateAccount) throw new Error('Dieses TikTok-Konto ist privat – private Konten lassen sich nicht abrufen.');
+  const uniqueId = String(user.uniqueId ?? '');
+  const entries: FeedEntry[] = (Array.isArray(page.videoList) ? page.videoList : [])
+    .filter((v: any) => v && /^\d{6,25}$/.test(String(v.id)) && !v.privateItem)
+    .map((v: any): FeedEntry => {
+      const id = String(v.id);
+      // Die oberen 32 Bit der ID sind der Zeitpunkt des Hochladens (Sekunden)
+      const seconds = Number(BigInt(id) >> 32n);
+      const plausible = seconds > 1_400_000_000 && seconds < 4_100_000_000;
+      const desc = String(v.desc ?? '').replace(/\s+/g, ' ').trim();
+      return { id, title: desc.length > 200 ? `${desc.slice(0, 199)}…` : desc || 'Neues TikTok-Video', url: `https://www.tiktok.com/@${v.authorUniqueId || uniqueId}/video/${id}`, publishedAt: plausible ? new Date(seconds * 1000).toISOString() : null };
+    })
+    // Neueste zuerst – angepinnte ältere Videos stehen bei TikTok sonst oben
+    .sort((a: FeedEntry, b: FeedEntry) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
+  return { title: user.nickname ? `${user.nickname} (@${uniqueId})` : `@${uniqueId}`, entries };
+}
+
 /** Lokale und interne Adressen werden nicht abgerufen (außer im Test) */
 function assertPublicUrl(raw: string): URL {
   const url = new URL(raw);
@@ -99,7 +148,7 @@ function assertPublicUrl(raw: string): URL {
   return url;
 }
 
-async function fetchText(raw: string): Promise<string> {
+async function fetchText(raw: string, opts: { allowError?: boolean } = {}): Promise<string> {
   const url = assertPublicUrl(raw);
   const res = await fetch(url, {
     redirect: 'follow',
@@ -107,9 +156,16 @@ async function fetchText(raw: string): Promise<string> {
     // YouTube zeigt ohne diese Angabe in der EU eine Zustimmungsseite statt des Kanals
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; feed-reader)', 'Accept-Language': 'en', Cookie: 'SOCS=CAI', Accept: 'application/atom+xml, application/rss+xml, application/xml, text/xml, text/html;q=0.8' },
   });
-  if (!res.ok) throw new Error(`Die Adresse antwortet mit Fehler ${res.status}.`);
+  if (!res.ok && !opts.allowError) throw new Error(`Die Adresse antwortet mit Fehler ${res.status}.`);
   const text = await res.text();
   return text.slice(0, 3_000_000);
+}
+
+/** Lädt die Einträge eines Kontos – je nach Plattform aus dem Feed oder aus der TikTok-Profilseite */
+async function loadEntries(feedUrl: string): Promise<{ title: string | null; entries: FeedEntry[] }> {
+  // TikTok antwortet bei unbekannten Konten mit einem Fehlerstatus, liefert die Seite aber trotzdem mit
+  if (isTikTokUrl(feedUrl)) return parseTikTok(await fetchText(feedUrl, { allowError: true }));
+  return parseFeed(await fetchText(feedUrl));
 }
 
 const YT_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'];
@@ -118,6 +174,7 @@ const youtubeFeed = (channelId: string) => `${env.YOUTUBE_BASE_URL}/feeds/videos
 /**
  * Macht aus einem eingegebenen Link den Feed, den der Bot abfragt:
  *  – YouTube: /channel/UC…, /@name, /c/name, /user/name oder direkt der Feed
+ *  – TikTok: tiktok.com/@name (auch der Link zu einem einzelnen Video des Profils)
  *  – alles andere: die Adresse selbst muss ein RSS-/Atom-Feed sein
  */
 export async function resolveSocialAccount(input: string): Promise<{ url: string; feedUrl: string; name: string; latest: FeedEntry | null }> {
@@ -126,6 +183,14 @@ export async function resolveSocialAccount(input: string): Promise<{ url: string
     url = new URL(input.trim().startsWith('http') ? input.trim() : `https://${input.trim()}`);
   } catch {
     throw new Error('Das ist kein gültiger Link.');
+  }
+  // TikTok: Profil-Link → Einbettungs-Seite des Profils
+  if (/(^|\.)tiktok\.com$/i.test(url.hostname)) {
+    const uniqueId = /^\/(?:embed\/)?@([\w.]{2,40})/.exec(url.pathname)?.[1];
+    if (!uniqueId) throw new Error('Bitte den Link zum TikTok-Profil angeben, z. B. https://www.tiktok.com/@name (Kurzlinks wie vm.tiktok.com gehen nicht).');
+    const feedUrl = tiktokProfile(uniqueId);
+    const profile = await loadEntries(feedUrl);
+    return { url: `https://www.tiktok.com/@${uniqueId}`, feedUrl, name: (profile.title ?? `@${uniqueId}`).slice(0, 80), latest: profile.entries[0] ?? null };
   }
   const base = new URL(env.YOUTUBE_BASE_URL);
   // Die zweite Bedingung gilt nur im Test, wenn YouTube durch eine lokale Adresse ersetzt ist
@@ -144,7 +209,7 @@ export async function resolveSocialAccount(input: string): Promise<{ url: string
   }
   const feed = parseFeed(await fetchText(feedUrl));
   if (feed.entries.length === 0 && !feed.title) {
-    throw new Error(isYoutube ? 'Der Feed dieses Kanals konnte nicht gelesen werden.' : 'Unter dieser Adresse liegt kein RSS-/Atom-Feed. Unterstützt werden YouTube-Kanäle und Feeds.');
+    throw new Error(isYoutube ? 'Der Feed dieses Kanals konnte nicht gelesen werden.' : 'Unter dieser Adresse liegt kein RSS-/Atom-Feed. Unterstützt werden YouTube-Kanäle, TikTok-Profile und Feeds.');
   }
   return { url: url.toString(), feedUrl, name: (feed.title ?? url.hostname).slice(0, 80), latest: feed.entries[0] ?? null };
 }
@@ -165,7 +230,7 @@ export async function sendSocialTest(accountId: string): Promise<void> {
   const account = cfg.accounts.find((a) => a.id === accountId);
   if (!account) throw new Error('Dieses Konto gibt es nicht (mehr). Bitte zuerst speichern.');
   if (!cfg.channelId) throw new Error('Es ist noch kein Kanal eingetragen.');
-  const entry = parseFeed(await fetchText(account.feedUrl)).entries[0];
+  const entry = (await loadEntries(account.feedUrl)).entries[0];
   if (!entry) throw new Error('Dieses Konto hat noch kein Video.');
   await botRequest('POST', `/channels/${cfg.channelId}/messages`, { json: messageFor(cfg, account, entry) });
 }
@@ -189,15 +254,19 @@ export async function checkSocialAccounts(): Promise<{ accounts: number; posted:
       const prev = state[key];
       const now = new Date().toISOString();
       try {
-        const entries = parseFeed(await fetchText(account.feedUrl)).entries;
+        const entries = (await loadEntries(account.feedUrl)).entries;
         if (!prev?.initialized) {
           // Erster erfolgreicher Abruf: nur merken, nichts posten
           next[key] = { initialized: true, seen: entries.map((e) => e.id).slice(0, 100), checkedAt: now, error: null, latest: entries[0] ?? null, posted: 0 };
           continue;
         }
         const seen = new Set(prev.seen);
+        // TikTok zeigt nur die letzten Videos; taucht ein älteres wieder auf (z. B. neu angepinnt), ist es nicht „neu“.
+        // Die IDs sind dort nach Zeit geordnet – gemeldet wird nur, was neuer ist als alles bisher Bekannte.
+        const newest = isTikTokUrl(account.feedUrl) ? prev.seen.filter((id) => /^\d+$/.test(id)).reduce((max, id) => (BigInt(id) > max ? BigInt(id) : max), 0n) : null;
+        const isNew = (e: FeedEntry) => !seen.has(e.id) && (newest === null || BigInt(e.id) > newest);
         // Feeds führen das Neueste zuerst – gepostet wird in der Reihenfolge des Erscheinens
-        const fresh = entries.filter((e) => !seen.has(e.id)).reverse();
+        const fresh = entries.filter(isNew).reverse();
         let posted = prev.posted;
         let error: string | null = null;
         const done: string[] = [];
