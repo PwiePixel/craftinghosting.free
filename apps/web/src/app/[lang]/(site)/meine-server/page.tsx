@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ArrowUpRight, Plus } from 'lucide-react';
+import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
 import { localePath, productKinds, type Locale, type ServerDTO } from '@chfree/shared';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink } from '@/components/ui/button';
@@ -219,6 +219,19 @@ export default async function MyServersPage({ params, searchParams }: Props) {
             <Alert tone="info" title={t.maintenanceTitle}>
               {t.maintenanceText}
             </Alert>
+          )}
+          {user.beta && settings.beta.url && !settings.beta.instance && (
+            <div className="surface flex flex-col gap-4 border-blue-500/40 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="flex items-center gap-2 text-[15px] font-semibold text-white">
+                  <FlaskConical className="size-4 text-blue-400" aria-hidden /> {d.beta.cardTitle}
+                </p>
+                <p className="mt-1 text-sm text-muted">{d.beta.cardText}</p>
+              </div>
+              <ButtonLink href={localePath(lang, 'beta')} variant="secondary" size="sm" className="shrink-0">
+                {d.beta.cardButton}
+              </ButtonLink>
+            </div>
           )}
           {query.neu === '1' && (
             <Alert tone="success" title={t.createdTitle}>

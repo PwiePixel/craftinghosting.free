@@ -6,6 +6,7 @@ import { consentLogs } from '../db/schema';
 import { encryptField, uuid } from '../lib/crypto';
 import { pterodactyl } from '../pterodactyl';
 import { getAvailability } from '../services/server.service';
+import { getLogo } from '../services/logo.service';
 import { allowedHosts, getPublicSite, getSettings } from '../services/settings.service';
 import { getStatus } from '../services/status.service';
 
@@ -62,6 +63,20 @@ export async function metaRoutes(app: FastifyInstance) {
   app.get('/internal/tls-check', async (request, reply) => {
     const domain = String((request.query as { domain?: string }).domain ?? '').toLowerCase();
     return allowedHosts(await getSettings()).has(domain) ? { ok: true } : reply.status(404).send({ ok: false });
+  });
+
+  /** Logo aus dem Admin-Bereich. Die Adresse trägt eine Versionsangabe (?v=…) – darum darf lange zwischengespeichert werden. */
+  app.get('/brand/logo', async (request, reply) => {
+    const logo = await getLogo();
+    if (!logo) return reply.status(404).send({ error: { code: 'not_found', message: 'Kein Logo hinterlegt.' } });
+    return reply
+      .header('Content-Type', logo.mime)
+      .header('Cache-Control', (request.query as { v?: string }).v ? 'public, max-age=31536000, immutable' : 'public, max-age=300')
+      // Falls jemand die Datei direkt öffnet: nichts darin darf ausgeführt werden (SVG)
+      .header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cross-Origin-Resource-Policy', 'cross-origin')
+      .send(logo.bytes);
   });
 
   app.get('/status', async () => {

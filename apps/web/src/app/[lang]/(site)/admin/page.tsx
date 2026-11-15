@@ -201,6 +201,7 @@ const USER_FILTERS = {
   waitlist: 'auf der Warteliste',
   locked: 'gesperrt',
   admins: 'Admins',
+  beta: 'mit Beta-Zugang',
 } as const;
 
 function SearchBar({ tab, q, status, kind }: { tab: Tab; q?: string; status?: string; kind?: string }) {

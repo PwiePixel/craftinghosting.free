@@ -23,6 +23,8 @@ export interface UserDTO {
   panelLinked: boolean;
   panelUsername: string | null;
   role: 'user' | 'admin';
+  /** Darf die Beta-Instanz nutzen (vom Admin freigeschaltet – Admins immer) */
+  beta: boolean;
   /** Sprache für E-Mails und Hinweise im Panel */
   locale: 'de' | 'en';
   createdAt: string;
@@ -205,6 +207,8 @@ export interface AdminUserDTO {
   panelAdminUrl: string | null;
   servers: number;
   lastLoginAt: string | null;
+  /** Beta-Zugang freigeschaltet */
+  beta: boolean;
   /** IP-Adressen (verschlüsselt gespeichert, nur im Admin-Bereich sichtbar) */
   registrationIp: string | null;
   lastLoginIp: string | null;
@@ -293,6 +297,11 @@ export interface SiteSettings {
   /** Gesperrte E-Mail-Adressen und -Domains (Registrierung und Newsletter) */
   blocklist: BlocklistSettings;
   seo: SeoSettings;
+  /** Eigenes Logo (die Bilddatei selbst liegt getrennt in der Datenbank – Upload im Admin-Bereich) */
+  branding: {
+    /** icon = Bild ersetzt den Würfel, der Schriftzug bleibt · full = Bild ersetzt Würfel und Schriftzug */
+    logoMode: 'icon' | 'full';
+  };
   /** Spenden-Seite (Zahlungslink von SumUp) */
   donate: {
     enabled: boolean;
@@ -520,6 +529,15 @@ export interface PublicSiteDTO {
   /** null = keine Hinweisleiste */
   announcement: Omit<AnnouncementSettings, 'enabled'> | null;
   seo: SeoSettings;
+  /** Hochgeladenes Logo (null = Standard-Bildmarke) */
+  logo: { url: string; mode: 'icon' | 'full' } | null;
+  /** Tatsächliche Sitzungsdauer (für die Cookie-Hinweise) */
+  session: { idleMinutes: number; maxHours: number; persistent: boolean; cookieName: string };
+  /**
+   * Beta-Programm: `instance` = diese Installation IST die Beta-Instanz · `url` = Adresse der Beta-Instanz
+   * (nur auf der Hauptseite gesetzt) · `mainUrl` = Adresse der Hauptseite (nur auf der Beta-Instanz)
+   */
+  beta: { instance: boolean; url: string | null; mainUrl: string | null };
   stats: { users: number; activeServers: number; uptime: number | null } | null;
 }
 
@@ -694,6 +712,8 @@ export interface AdminDomainDTO {
   host: string;
   /** Hauptdomain aus der Installation (APP_URL) – nicht entfernbar */
   primary: boolean;
+  /** Domain der Beta-Instanz (vom Installer eingerichtet) – nicht entfernbar */
+  beta?: boolean;
   redirect: boolean;
   /** IP-Adressen, auf die die Domain zeigt */
   addresses: string[];

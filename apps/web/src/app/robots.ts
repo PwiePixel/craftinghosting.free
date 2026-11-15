@@ -9,6 +9,8 @@ const AI_CRAWLERS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Cl
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const settings = await getSite();
   // Im Admin-Bereich abschaltbar (Einstellungen → Suchmaschinen & KI)
+  // Die Beta-Instanz gehört nie in Suchmaschinen
+  if (settings.beta.instance) return { rules: [{ userAgent: '*', disallow: '/' }] };
   if (!settings.seo.indexing) return { rules: [{ userAgent: '*', disallow: '/' }] };
   const privatePaths = [...locales.flatMap((l) => [localePath(l, 'myServers'), localePath(l, 'verify')]), '/api/'];
   return {

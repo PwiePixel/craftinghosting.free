@@ -110,6 +110,17 @@ const schema = z
     RUN_JOBS_IN_API: bool(false),
 
     STATUS_PROVIDER: z.enum(['internal', 'static']).default('internal'),
+
+    /**
+     * Beta-Programm.
+     *  BETA_MODE=true  → diese Installation ist die Beta-Instanz: gleiche Datenbank wie die Hauptseite, aber nur
+     *                    freigeschaltete Nutzer (Admin → Nutzer → Beta-Zugang) kommen hinein; keine Anmeldung, keine Jobs.
+     *  BETA_URL        → auf der HAUPTSEITE: Adresse der Beta-Instanz (z. B. https://beta.craftinghosting.free)
+     *  MAIN_URL        → auf der BETA-Instanz: Adresse der Hauptseite
+     */
+    BETA_MODE: bool(false),
+    BETA_URL: z.string().url().optional().or(z.literal('')),
+    MAIN_URL: z.string().url().optional().or(z.literal('')),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.DATABASE_ENCRYPTION_KEY.length < 32) {

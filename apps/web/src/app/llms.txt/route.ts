@@ -17,6 +17,8 @@ const planLine = (p: PublicPlanDTO) =>
 
 export async function GET() {
   const s = await getSite();
+  // Die Beta-Instanz beschreibt sich nicht selbst – maßgeblich ist die Hauptseite
+  if (s.beta.instance) return new Response('Not found\n', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   const x = siteTexts(s, 'en');
   const t = getDict('en');
   const url = (key: Parameters<typeof localePath>[1]) => `${site.url}${localePath('en', key)}`;

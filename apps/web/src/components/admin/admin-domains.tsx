@@ -47,6 +47,7 @@ function DomainRow({ d, viaTunnel, busy, onToggle, onRemove }: { d: AdminDomainD
               {d.host}
             </a>
             {d.primary && <span className="rounded-md bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-300">Hauptdomain</span>}
+            {d.beta && <span className="rounded-md bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-200">Beta-Instanz</span>}
             {viaTunnel && <span className="rounded-md bg-white/[0.06] px-2 py-0.5 text-xs text-gray-300">über Tunnel</span>}
           </p>
           <p className="mt-1 text-[13px] text-muted">
@@ -54,7 +55,8 @@ function DomainRow({ d, viaTunnel, busy, onToggle, onRemove }: { d: AdminDomainD
             {' · '}
             {d.addresses.length ? `DNS: ${d.addresses.join(', ')}` : 'kein DNS-Eintrag'}
             {d.pointsHere === true && ' (zeigt auf diesen Server)'}
-            {!d.primary && ` · ${d.redirect ? 'leitet auf die Hauptdomain weiter' : 'liefert die Website aus'}`}
+            {!d.primary && !d.beta && ` · ${d.redirect ? 'leitet auf die Hauptdomain weiter' : 'liefert die Website aus'}`}
+            {d.beta && ' · nur für Nutzer mit Beta-Zugang'}
           </p>
           {d.hint && (
             <p className="mt-2 flex gap-2 text-[13px] leading-relaxed text-amber-300">
@@ -62,13 +64,13 @@ function DomainRow({ d, viaTunnel, busy, onToggle, onRemove }: { d: AdminDomainD
             </p>
           )}
         </div>
-        {!d.primary && (
+        {!d.primary && !d.beta && (
           <Button type="button" variant="ghost" size="sm" icon={<Trash2 />} disabled={busy} onClick={onRemove}>
             Entfernen
           </Button>
         )}
       </div>
-      {!d.primary && (
+      {!d.primary && !d.beta && (
         <div className="mt-4 border-t border-line pt-4">
           <Toggle
             checked={d.redirect}

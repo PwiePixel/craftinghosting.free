@@ -19,7 +19,7 @@ import type { User } from '../db/schema';
 import { env } from '../env';
 import { Errors, L } from '../lib/errors';
 import { audit } from './audit.service';
-import { allowedHosts, getSettings } from './settings.service';
+import { allowedHosts, betaHost, getSettings } from './settings.service';
 
 const BIN = process.env.CLOUDFLARED_BIN || 'cloudflared';
 const METRICS = '127.0.0.1:20241';
@@ -177,6 +177,10 @@ export async function tunnelStatus(): Promise<AdminTunnelDTO> {
 function writeConfig(state: TunnelState) {
   const api = `http://127.0.0.1:${env.API_PORT}`;
   const web = (env.WEB_INTERNAL_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
+  const beta = betaHost();
+  const port = (name: string, fallback: number) => (/^\d{2,5}$/.test(process.env[name] ?? '') ? Number(process.env[name]) : fallback);
+  const betaApi = `http://127.0.0.1:${port('BETA_API_PORT', 4100)}`;
+  const betaWeb = `http://127.0.0.1:${port('BETA_WEB_PORT', 3100)}`;
   const lines = [
     '# Von CraftingHosting.free erzeugt (Admin → Domains → Tunnel) – Änderungen werden überschrieben.',
     `tunnel: ${state.id}`,
@@ -184,13 +188,17 @@ function writeConfig(state: TunnelState) {
     `metrics: ${METRICS}`,
     'no-autoupdate: true',
     'ingress:',
-    ...state.hosts.flatMap((host) => [
-      `  - hostname: ${host}`,
-      '    path: ^/api/',
-      `    service: ${api}`,
-      `  - hostname: ${host}`,
-      `    service: ${web}`,
-    ]),
+    ...state.hosts.flatMap((host) => {
+      // Die Domain der Beta-Instanz geht an deren eigene Dienste (Ports aus install.sh --beta)
+      const isBeta = host === beta;
+      return [
+        `  - hostname: ${host}`,
+        '    path: ^/api/',
+        `    service: ${isBeta ? betaApi : api}`,
+        `  - hostname: ${host}`,
+        `    service: ${isBeta ? betaWeb : web}`,
+      ];
+    }),
     '  - service: http_status:404',
     '',
   ];

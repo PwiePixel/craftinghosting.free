@@ -52,6 +52,9 @@ export const fallbackSite: PublicSiteDTO = {
   newsletter: { enabled: false, footerForm: false, signupCheckbox: false },
   announcement: null,
   seo: defaults.seo,
+  logo: null,
+  session: { idleMinutes: 30, maxHours: 12, persistent: false, cookieName: process.env.SESSION_COOKIE_NAME ?? 'chf_session' },
+  beta: { instance: ['1', 'true', 'yes', 'on'].includes((process.env.BETA_MODE ?? '').toLowerCase()), url: null, mainUrl: process.env.MAIN_URL || null },
   stats: null,
 };
 

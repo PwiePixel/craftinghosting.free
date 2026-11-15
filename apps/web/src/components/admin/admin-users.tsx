@@ -313,7 +313,9 @@ export function UsersTable({
                     {u.emailVerified ? 'bestätigt' : 'nicht bestätigt'} · {u.locale.toUpperCase()}
                   </p>
                 </td>
-                <td className="px-3 py-2.5 text-muted">{u.role === 'admin' ? <span className="text-blue-300">Admin</span> : 'Nutzer'}</td>
+                <td className="px-3 py-2.5 text-muted">{u.role === 'admin' ? <span className="text-blue-300">Admin</span> : 'Nutzer'}
+                  {u.beta && <span className="ml-1.5 rounded bg-amber-400/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-200">Beta</span>}
+                </td>
                 <td className="px-3 py-2.5">{u.status === 'locked' ? <span className="text-red-300">gesperrt</span> : <span className="text-muted">aktiv</span>}</td>
                 <td className="px-3 py-2.5">
                   {u.panelAdminUrl ? (

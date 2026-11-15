@@ -19,7 +19,9 @@ export async function generateMetadata({ params }: { params: Promise<{ lang: str
   const lang = await resolveLang(params);
   const t = getDict(lang).meta;
   // Im Admin-Bereich abschaltbar: Einstellungen → Suchmaschinen & KI
-  const indexing = (await getSite()).seo.indexing;
+  const settings = await getSite();
+  // Die Beta-Instanz wird nie indexiert
+  const indexing = settings.seo.indexing && !settings.beta.instance;
   return {
     metadataBase: new URL(site.url),
     title: { default: t.title, template: '%s | CraftingHosting.free' },

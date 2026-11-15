@@ -632,6 +632,33 @@ return {
     backHome: 'Back to the home page',
   },
 
+  beta: {
+    badge: 'Beta',
+    gateMetaTitle: 'Beta programme',
+    gateTitle: 'You are not part of the beta programme.',
+    gateText: 'This is the beta version of CraftingHosting.free – it is only meant for approved testers. You cannot sign in or register here.',
+    gateHow: 'Have you been given beta access? Then sign in on the main site and open the beta under “My servers”.',
+    toMain: 'Go to the main site',
+    checking: 'Checking your beta access …',
+    expiredTitle: 'This link has expired',
+    expiredText: 'Please open the beta again via “My servers” on the main site.',
+    confirmMetaTitle: 'Open beta',
+    confirmTitle: 'Open the beta site?',
+    confirmText: 'You are switching to the beta version of CraftingHosting.free. There you test new features before they are released to everyone.',
+    confirmPoints: [
+      'The beta works with your real data – changes to your servers are real.',
+      'There may be bugs. Please report them on Discord.',
+      'Your access is checked once more when you switch.',
+    ],
+    confirmButton: 'Yes, open the beta site',
+    back: 'Back to “My servers”',
+    cardTitle: 'Beta programme',
+    cardText: 'You have beta access: test new features before everyone else.',
+    cardButton: 'Open beta',
+    bar: 'Beta version – you are working with real data.',
+    barLink: 'Go to the main site',
+  },
+
   early: {
     badge: 'Early access',
     kicker: 'Early access · First launch phase',

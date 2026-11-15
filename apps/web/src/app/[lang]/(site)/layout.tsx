@@ -24,9 +24,22 @@ export default async function SiteLayout({ children, params }: { children: React
         {t.common.skipToContent}
       </a>
       <AnnouncementBar announcement={site.announcement} lang={lang} />
-      <SiteHeader mode={site.registration.mode} maintenance={site.maintenance.enabled} signedIn={signedIn} donate={site.donate.enabled} />
+      {site.beta.instance && (
+        <div className="border-b border-amber-400/30 bg-amber-400/[0.1] text-sm text-amber-100" role="status">
+          <div className="container-page flex flex-wrap items-center justify-center gap-x-3 gap-y-1 py-2 text-center">
+            <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[11px] font-semibold tracking-[0.08em] uppercase">{t.beta.badge}</span>
+            <span>{t.beta.bar}</span>
+            {site.beta.mainUrl && (
+              <a href={site.beta.mainUrl} className="font-medium text-white underline underline-offset-4 hover:no-underline">
+                {t.beta.barLink}
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+      <SiteHeader mode={site.registration.mode} maintenance={site.maintenance.enabled} signedIn={signedIn} donate={site.donate.enabled} logo={site.logo} />
       <main id="inhalt">{children}</main>
-      <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} />
+      <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} logo={site.logo} />
       <CookieBanner />
     </RuntimeConfig>
   );

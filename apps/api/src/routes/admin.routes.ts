@@ -28,6 +28,7 @@ import {
   userAction,
 } from '../services/admin.service';
 import { audit } from '../services/audit.service';
+import { deleteLogo, saveLogo } from '../services/logo.service';
 import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } from '../services/settings.service';
 import { COMPONENTS } from '../services/status.service';
 import { addWaitlistEntries, nextWaitlistIds, releaseWaitlist, removeWaitlistEntry } from '../services/waitlist.service';
@@ -99,7 +100,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.post('/admin/users/:id/:action', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });
-    const action = z.enum(['lock', 'unlock', 'make-admin', 'remove-admin']).parse((request.params as { action: string }).action);
+    const action = z.enum(['lock', 'unlock', 'make-admin', 'remove-admin', 'grant-beta', 'revoke-beta']).parse((request.params as { action: string }).action);
     await userAction(currentUser(request), id, action, request.ip);
     return { ok: true };
   });
@@ -109,6 +110,18 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!job) throw Errors.notFound(L('Job nicht gefunden.', 'Job not found.'));
     const result = await runJobOnce(job, request.log);
     return { result };
+  });
+
+  /* ------------------------------------------------------------------- Logo */
+  /** Logo hochladen (PNG, JPG, WebP, SVG – höchstens 512 KB). Body: { data: "<Base64 oder data:-URL>" } */
+  app.post('/admin/logo', { bodyLimit: 1024 * 1024 }, async (request) => {
+    const { data } = z.object({ data: z.string().min(10).max(1_000_000) }).parse(request.body);
+    await saveLogo(currentUser(request), data, request.ip);
+    return { ok: true };
+  });
+  app.post('/admin/logo/delete', async (request) => {
+    await deleteLogo(currentUser(request), request.ip);
+    return { ok: true };
   });
 
   /* ---------------------------------------------------------- Einstellungen */

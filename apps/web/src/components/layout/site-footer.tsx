@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { localePath, type Locale } from '@chfree/shared';
-import { Logo } from '@/components/brand/logo';
+import { Logo, type CustomLogo } from '@/components/brand/logo';
 import { NewsletterForm } from '@/components/newsletter/newsletter-form';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 
-export function SiteFooter({ lang, donate = false, newsletter = false }: { lang: Locale; donate?: boolean; newsletter?: boolean }) {
+export function SiteFooter({ lang, donate = false, newsletter = false, logo }: { lang: Locale; donate?: boolean; newsletter?: boolean; logo?: CustomLogo }) {
   const t = getDict(lang);
   const links = [
     { href: localePath(lang, 'faq'), label: t.nav.faq },
@@ -28,7 +28,7 @@ export function SiteFooter({ lang, donate = false, newsletter = false }: { lang:
       <div className="container-page py-12">
         <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
           <div className="max-w-sm">
-            <Logo href={localePath(lang, 'home')} />
+            <Logo href={localePath(lang, 'home')} custom={logo} />
             <p className="mt-4 text-sm leading-relaxed text-muted">
               {t.footer.aboutBefore}
               <a href={site.parentUrl} target="_blank" rel="noopener" className="text-gray-200 underline decoration-line-strong underline-offset-4 hover:text-white">

@@ -41,6 +41,11 @@ CADDY_MARKER="# chfree: Seiten von CraftingHosting.free (von install.sh verwalte
 CADDY_IMPORT="import ${CADDY_DIR}/sites/*.caddy"
 
 MODE="install"
+BETA=0                                  # --beta: Beta-Instanz statt Hauptinstallation
+BETA_MIGRATE="${CHF_BETA_MIGRATE:-no}"  # --migrate: Datenbank-Migrationen der Beta-Version anwenden
+BETA_API_PORT="${CHF_BETA_API_PORT:-4100}"
+BETA_WEB_PORT="${CHF_BETA_WEB_PORT:-3100}"
+BETA_SERVICES=(chfree-beta-api chfree-beta-web)
 ASSUME_YES=0
 PURGE=0
 NO_PULL=0
@@ -126,6 +131,11 @@ Modi:
 
 Optionen:
   -y, --yes      Keine Rückfragen – Werte kommen aus CHF_*-Variablen bzw. der vorhandenen .env
+  --beta         Beta-Instanz einrichten/aktualisieren/entfernen (mit install | update | uninstall): zweite Website
+                 unter beta.<domain> mit DERSELBEN Datenbank. Hinein kommen nur Nutzer mit Beta-Zugang
+                 (Admin → Nutzer → „Beta-Zugang geben“) – alle anderen sehen „Du bist nicht im Beta-Programm“.
+  --migrate      Nur mit --beta: Datenbank-Migrationen der Beta-Version anwenden (vorher Backup). Betrifft auch
+                 die Hauptseite, weil beide dieselbe Datenbank nutzen.
   --no-caddy     Caddy nicht installieren/konfigurieren (eigener Reverse Proxy, siehe deploy/nginx.example.conf)
   --no-pull      Bei "update" kein git pull (Dateien wurden von Hand aktualisiert)
   --dry-run      Nur anzeigen, was am System geändert würde (wie CHF_DRY_RUN=1)
@@ -143,6 +153,8 @@ Variablen für die Installation ohne Rückfragen:
   CHF_WWW               yes | no | auto – auch www.<domain> bedienen (auto: nur bei Hauptdomains)
   CHF_PROXY             caddy (Standard) | none
   CHF_TUNNEL            yes = Cloudflare Tunnel gleich mit vorbereiten (wie 'install.sh tunnel')
+  CHF_BETA_DOMAIN       Domain der Beta-Instanz (Standard: beta.<Hauptdomain>)
+  CHF_BETA_DIR          Ordner der Beta-Instanz (Standard: <Installationsordner>-beta)
   CHF_SKIP_PANEL_CHECK  1 = Verbindung zum Panel nicht prüfen
   CHF_PTERO_LOCATION_IDS  optionale Fallback-Locations (normalerweise leer – Zuordnung im Admin-Bereich)
   CHF_REPO_URL, CHF_BRANCH   Quelle, falls das Skript nicht aus einem Checkout gestartet wird
@@ -161,6 +173,8 @@ parse_args() {
         if [ "$mode_set" -eq 0 ]; then MODE=$1; mode_set=1; else EXTRA_ARGS+=("$1"); fi ;;
       -y | --yes) ASSUME_YES=1 ;;
       --no-caddy) PROXY="none" ;;
+      --beta) BETA=1 ;;
+      --migrate) BETA_MIGRATE="yes" ;;
       --no-pull) NO_PULL=1 ;;
       --dry-run) DRY_RUN=1 ;;
       --purge) PURGE=1 ;;
@@ -626,8 +640,10 @@ collect_config() {
     info "Neuer Datenbank-Schlüssel erzeugt."
   fi
   CFG_ADMIN_PATH="$(get_env ADMIN_PATH)"
-  if [ -z "$CFG_ADMIN_PATH" ] || [ "$CFG_ADMIN_PATH" = "/admin" ]; then
-    CFG_ADMIN_PATH="/team-$(openssl rand -hex 4)"
+  # Der Admin-Bereich liegt unter /admin und ist nur für angemeldete Admins erreichbar (alle anderen sehen 404).
+  # Ein früher erzeugter eigener Pfad (/team-…) bleibt zusätzlich gültig.
+  if [ -z "$CFG_ADMIN_PATH" ]; then
+    CFG_ADMIN_PATH="/admin"
     info "Geheimer Admin-Pfad erzeugt."
   fi
 
@@ -1033,6 +1049,206 @@ flow_tunnel() {
   printf '  Logs:  chfree logs tunnel\n'
 }
 
+# ------------------------------------------------------------------- Beta-Instanz
+# Zweite Installation (eigener Ordner, eigene Ports, eigene Dienste) mit DERSELBEN Datenbank wie die Hauptseite.
+# Auf der Beta-Seite kann man sich nicht anmelden: Hinein kommt nur, wer auf der Hauptseite angemeldet ist und
+# im Admin-Bereich Beta-Zugang bekommen hat. Jobs (Fair-Use, E-Mails …) laufen nur auf der Hauptseite.
+beta_dir() { printf '%s' "${CHF_BETA_DIR:-${MAIN_INSTALL_DIR}-beta}"; }
+
+flow_beta() {
+  detect_os
+  MAIN_INSTALL_DIR="$INSTALL_DIR"
+  local main_env="$ENV_FILE" beta_dir main_domain beta_domain main_url beta_url db key v
+  beta_dir="$(beta_dir)"
+  if ! is_dry; then
+    [ -s "$main_env" ] || die "Die Beta-Instanz braucht die Hauptinstallation ($main_env fehlt). Zuerst: bash install.sh"
+  fi
+
+  step "Beta-Instanz: Einstellungen"
+  main_url="$(get_env APP_URL)"
+  main_domain="$(get_env SITE_DOMAIN)"
+  [ -n "$main_domain" ] || main_domain="$(printf '%s' "$main_url" | sed -e 's#^https\?://##' -e 's#/.*$##')"
+  [ -n "$main_domain" ] || main_domain="craftinghosting.free"
+  [ -n "$main_url" ] || main_url="https://$main_domain"
+  # Datenbank der Hauptseite (absoluter Pfad) – die Beta-Instanz nutzt genau diese Datei
+  db="$(db_path)"
+  key="$(get_env DATABASE_ENCRYPTION_KEY)"
+  beta_domain="${CHF_BETA_DOMAIN:-}"
+  if [ -z "$beta_domain" ] && [ -s "$beta_dir/.env" ]; then
+    beta_domain="$(ENV_FILE="$beta_dir/.env" get_env SITE_DOMAIN)"
+  fi
+  if [ -z "$beta_domain" ]; then
+    beta_domain="beta.$main_domain"
+    if [ "$INTERACTIVE" -eq 1 ]; then ask_valid beta_domain "Domain der Beta-Instanz" "$beta_domain" norm_domain; fi
+  fi
+  beta_url="https://$beta_domain"
+  info "Hauptseite:    $main_url"
+  info "Beta-Instanz:  $beta_url  (Ordner $beta_dir, Ports $BETA_API_PORT/$BETA_WEB_PORT)"
+  info "Datenbank:     $db (gemeinsam mit der Hauptseite)"
+
+  # Ab hier arbeitet alles auf dem Beta-Ordner
+  INSTALL_DIR="$beta_dir"
+  ensure_user_and_dirs
+  fetch_source
+
+  step "Beta-Instanz: Konfiguration schreiben"
+  if is_dry; then
+    info "[dry-run] $main_env → $beta_dir/.env kopieren und anpassen (APP_URL=$beta_url, API_PORT=$BETA_API_PORT, BETA_MODE=true, MAIN_URL=$main_url)"
+    info "[dry-run] $main_env: BETA_URL=$beta_url, BETA_API_PORT=$BETA_API_PORT, BETA_WEB_PORT=$BETA_WEB_PORT"
+  else
+    # Grundlage ist immer die .env der Hauptseite (gleiche Schlüssel, gleiches Panel, gleicher Mailserver)
+    cp "$main_env" "$beta_dir/.env"
+    ENV_FILE="$beta_dir/.env"
+    set_env SITE_DOMAIN "$beta_domain"
+    set_env APP_URL "$beta_url"
+    set_env NEXT_PUBLIC_SITE_URL "$beta_url"
+    set_env API_PORT "$BETA_API_PORT"
+    set_env API_INTERNAL_URL "http://127.0.0.1:$BETA_API_PORT"
+    set_env WEB_INTERNAL_URL "http://127.0.0.1:$BETA_WEB_PORT"
+    set_env DATABASE_PATH "$db"
+    set_env DATABASE_ENCRYPTION_KEY "$key"
+    set_env BETA_MODE true
+    set_env MAIN_URL "$main_url"
+    set_env RUN_JOBS_IN_API false
+    for v in BETA_URL BETA_API_PORT BETA_WEB_PORT; do unset_env "$v"; done
+    chown "$SERVICE_USER:$SERVICE_USER" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    # Die Hauptseite muss wissen, wo die Beta liegt (zeigt Beta-Nutzern den Einstieg unter „Meine Server“)
+    ENV_FILE="$main_env"
+    set_env BETA_URL "$beta_url"
+    set_env BETA_API_PORT "$BETA_API_PORT"
+    set_env BETA_WEB_PORT "$BETA_WEB_PORT"
+    chown "$SERVICE_USER:$SERVICE_USER" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    ENV_FILE="$beta_dir/.env"
+  fi
+  ok "Konfiguration geschrieben"
+
+  install_node
+  build_app
+
+  step "Beta-Instanz: Datenbank"
+  if [ "$BETA_MIGRATE" = "yes" ]; then
+    warn "Migrationen der Beta-Version werden auf die gemeinsame Datenbank angewendet – das betrifft auch die Hauptseite."
+    if ! is_dry && [ -f "$db" ] && [ "${CHF_SKIP_BACKUP:-0}" != "1" ]; then do_backup; fi
+    as_app_in "$INSTALL_DIR/apps/api" "$NODE_BIN" dist/migrate.js
+    ok "Migrationen angewendet"
+  else
+    info "Die Datenbank wird NICHT verändert. Braucht die Beta-Version neue Tabellen/Spalten:"
+    info "  bash install.sh update --beta --migrate   (legt vorher ein Backup an; wirkt auch auf die Hauptseite)"
+  fi
+
+  step "Beta-Instanz: Dienste einrichten"
+  local unit base src
+  for unit in "${BETA_SERVICES[@]}"; do
+    base="${unit/-beta/}"
+    src="$INSTALL_DIR/deploy/systemd/$base.service"
+    if is_dry; then info "[dry-run] $src → $UNIT_DIR/$unit.service (Ordner $INSTALL_DIR, Web-Port $BETA_WEB_PORT)"; continue; fi
+    [ -f "$src" ] || die "Unit-Vorlage fehlt: $src"
+    sed -e "s#$DEFAULT_INSTALL_DIR#$INSTALL_DIR#g" \
+      -e "s#$DEFAULT_DATA_DIR#$DATA_DIR#g" \
+      -e "s#^User=.*#User=$SERVICE_USER#" \
+      -e "s#^Group=.*#Group=$SERVICE_USER#" \
+      -e "s#/usr/bin/node#$NODE_BIN#g" \
+      -e "s#^Description=\(.*\)#Description=\1 – Beta-Instanz#" \
+      -e "s#chfree-api\.service#chfree-beta-api.service#g" \
+      -e "s#^Environment=PORT=.*#Environment=PORT=$BETA_WEB_PORT#" \
+      "$src" >"$UNIT_DIR/$unit.service"
+    chmod 0644 "$UNIT_DIR/$unit.service"
+  done
+  run systemctl daemon-reload
+  run systemctl enable "${BETA_SERVICES[@]}"
+  run systemctl restart "${BETA_SERVICES[@]}"
+  # Hauptseite neu starten, damit sie die Adresse der Beta kennt
+  try systemctl restart chfree-api || true
+  ok "chfree-beta-api und chfree-beta-web laufen (kein Worker – Jobs laufen nur auf der Hauptseite)"
+
+  if [ "$PROXY" = "caddy" ] && { is_dry || command -v caddy >/dev/null 2>&1; }; then
+    step "Beta-Instanz: Caddy (HTTPS für $beta_domain)"
+    local site="$CADDY_DIR/sites/chfree-beta.caddy"
+    CFG_DOMAIN="$beta_domain" CFG_WWW="no" CFG_ACME_EMAIL="$(printf '%s' "$(get_env ADMIN_EMAILS)" | cut -d, -f1)"
+    API_PORT="$BETA_API_PORT" WEB_PORT="$BETA_WEB_PORT"
+    if is_dry; then
+      write_caddy_site "$TMP_DIR/chfree-beta.caddy" no
+      sed 's/^/      /' "$TMP_DIR/chfree-beta.caddy"
+    else
+      install -d -m 0755 "$CADDY_DIR/sites"
+      write_caddy_site "$site" no
+      chmod 0644 "$site"
+      if try caddy validate --adapter caddyfile --config "$CADDY_DIR/Caddyfile"; then
+        try caddy fmt --overwrite "$site" || true
+        try systemctl reload caddy || run systemctl restart caddy
+        ok "Caddy leitet $beta_domain an die Beta-Instanz weiter"
+      else
+        rm -f "$site"
+        warn "Caddy-Konfiguration für $beta_domain ungültig – nicht übernommen. Bitte von Hand eintragen oder den Tunnel nutzen."
+      fi
+    fi
+  else
+    API_PORT="$BETA_API_PORT" WEB_PORT="$BETA_WEB_PORT"
+    info "Kein Caddy: Reverse Proxy für $beta_domain selbst einrichten – /api/* → 127.0.0.1:$BETA_API_PORT, alles andere → 127.0.0.1:$BETA_WEB_PORT"
+  fi
+
+  SERVICES=("${BETA_SERVICES[@]}")
+  wait_for_health
+
+  printf '\n%s════════════════════════════════════════════════════════════════════════%s\n' "$C_GREEN" "$C_RESET"
+  printf '%s  Die Beta-Instanz ist eingerichtet%s\n' "$C_GREEN$C_BOLD" "$C_RESET"
+  printf '%s════════════════════════════════════════════════════════════════════════%s\n\n' "$C_GREEN" "$C_RESET"
+  printf '  Beta-Seite:  %s\n' "$beta_url"
+  printf '  Hauptseite:  %s\n\n' "$main_url"
+  printf '  %sSo funktioniert der Zugang%s\n' "$C_BOLD" "$C_RESET"
+  printf '    • Ohne Beta-Zugang zeigt die Beta-Seite bei jeder Adresse: „Du bist nicht im Beta-Programm“. Anmelden geht dort nicht.\n'
+  printf '    • Zugang vergeben: Hauptseite → /admin → Nutzer → „Beta-Zugang geben“ (Admins haben ihn immer).\n'
+  printf '    • Freigeschaltete Nutzer sehen unter „Meine Server“ die Karte „Beta-Programm“ → bestätigen → Wechsel auf die Beta.\n'
+  printf '    • Wird der Zugang entzogen, endet er sofort.\n\n'
+  printf '  %sWichtig%s\n' "$C_BOLD" "$C_RESET"
+  printf '    • Beta und Hauptseite nutzen dieselbe Datenbank – was Tester ändern, gilt wirklich.\n'
+  printf '    • DNS: %s muss auf diesen Server zeigen (A-Eintrag) – oder über den Tunnel verbinden (Admin → Domains).\n' "$beta_domain"
+  printf '    • Andere Version testen: im Checkout mit der neuen Version  bash install.sh update --beta  ausführen.\n'
+  printf '    • Entfernen:  bash install.sh uninstall --beta   (die Datenbank bleibt unberührt)\n'
+  printf '    • Logs:  chfree logs beta\n\n'
+}
+
+flow_beta_uninstall() {
+  MAIN_INSTALL_DIR="$INSTALL_DIR"
+  local beta_dir site answer=""
+  beta_dir="$(beta_dir)"
+  step "Beta-Instanz entfernen"
+  info "Entfernt werden: die Dienste chfree-beta-api/-web, die Caddy-Seite der Beta und der Eintrag BETA_URL der Hauptseite."
+  info "Die Datenbank und die Hauptseite bleiben unberührt."
+  if [ "$INTERACTIVE" -eq 1 ]; then
+    confirm "Beta-Instanz jetzt entfernen?" n || die "Abgebrochen – nichts wurde geändert."
+  elif [ "$ASSUME_YES" -ne 1 ]; then
+    die "Ohne Terminal bitte ausdrücklich bestätigen: bash install.sh uninstall --beta --yes"
+  fi
+  try systemctl disable --now "${BETA_SERVICES[@]}" || true
+  local unit
+  for unit in "${BETA_SERVICES[@]}"; do run rm -f "$UNIT_DIR/$unit.service"; done
+  try systemctl daemon-reload || true
+  site="$CADDY_DIR/sites/chfree-beta.caddy"
+  if [ -f "$site" ]; then
+    run rm -f "$site"
+    if command -v caddy >/dev/null 2>&1; then try systemctl reload caddy || true; fi
+  fi
+  if ! is_dry && [ -s "$ENV_FILE" ]; then
+    local v
+    for v in BETA_URL BETA_API_PORT BETA_WEB_PORT; do unset_env "$v"; done
+    try systemctl restart chfree-api || true
+  fi
+  ok "Beta-Dienste entfernt – die Hauptseite zeigt keinen Beta-Einstieg mehr"
+  if [ "$PURGE" -eq 1 ] && [ -d "$beta_dir" ]; then
+    if [ "$INTERACTIVE" -eq 1 ]; then
+      ask answer "Programmordner $beta_dir löschen? Zum Bestätigen LÖSCHEN eintippen" ""
+      if [ "$answer" = "LÖSCHEN" ] || [ "$answer" = "LOESCHEN" ]; then run rm -rf "$beta_dir"; ok "$beta_dir gelöscht"; fi
+    else
+      warn "--purge braucht eine Bestätigung am Terminal – $beta_dir bleibt erhalten."
+    fi
+  else
+    info "Der Programmordner $beta_dir bleibt erhalten (löschen: --purge)."
+  fi
+}
+
 install_wrapper() {
   if is_dry; then info "[dry-run] $WRAPPER_PATH schreiben (chfree update|status|logs|backup|reconfigure)"; return 0; fi
   cat >"$WRAPPER_PATH" <<EOF
@@ -1243,7 +1459,7 @@ print_summary() {
   printf '%s  CraftingHosting.free ist eingerichtet%s\n' "$C_BOLD" "$C_RESET"
   printf '%s%s%s\n\n' "$C_GREEN" "$line" "$C_RESET"
   printf '  %sWebsite:%s        %s\n' "$C_BOLD" "$C_RESET" "$url"
-  printf '  %sAdmin-Bereich:%s  %s%s   %s(geheim – als Lesezeichen speichern)%s\n' "$C_BOLD" "$C_RESET" "$url" "$CFG_ADMIN_PATH" "$C_DIM" "$C_RESET"
+  printf '  %sAdmin-Bereich:%s  %s%s   %s(nur für angemeldete Admins – alle anderen sehen eine 404-Seite)%s\n' "$C_BOLD" "$C_RESET" "$url" "/admin" "$C_DIM" "$C_RESET"
   if [ "$CFG_PTERO_MODE" = "live" ]; then
     printf '  %sPterodactyl:%s    %s (live)\n' "$C_BOLD" "$C_RESET" "$CFG_PANEL_URL"
   else
@@ -1254,7 +1470,7 @@ print_summary() {
   ${C_BOLD}So meldest du dich an${C_RESET}
     1. $url/login öffnen und ${CFG_ADMIN_EMAILS:-<Admin-E-Mail>} eintragen
     2. Den Link aus der E-Mail anklicken$([ -z "$CFG_SMTP_HOST" ] && printf '\n       (ohne SMTP steht der Link im Log:  journalctl -u chfree-api -n 50)')
-    3. $url$CFG_ADMIN_PATH aufrufen
+    3. $url/admin aufrufen
 
   ${C_BOLD}Nächste Schritte im Admin-Bereich${C_RESET}
     • Admin → Pterodactyl: Nodes und Eggs zuweisen – Minecraft-Node(s), Discord-Bot-Node,
@@ -1386,9 +1602,10 @@ do_logs() {
   else
     for a in "${EXTRA_ARGS[@]}"; do
       case "$a" in
-        api | worker | web | tunnel) units+=(-u "chfree-$a") ;;
+        api | worker | web | tunnel | beta-api | beta-web) units+=(-u "chfree-$a") ;;
+        beta) units+=(-u chfree-beta-api -u chfree-beta-web) ;;
         caddy) units+=(-u caddy) ;;
-        *) die "Unbekannter Dienst: $a (möglich: api, worker, web, tunnel, caddy)" ;;
+        *) die "Unbekannter Dienst: $a (möglich: api, worker, web, tunnel, beta, caddy)" ;;
       esac
     done
   fi
@@ -1537,6 +1754,13 @@ main() {
   if [ "$MODE" = "help" ]; then usage; exit 0; fi
   init_runtime
   case "$MODE" in
+    install | update | uninstall)
+      if [ "$BETA" -eq 1 ]; then
+        printf '%s\n  CraftingHosting.free – Beta-Instanz%s\n' "$C_BOLD" "$C_RESET"
+        if is_dry; then printf '  %s(Dry-Run: am System wird nichts geändert)%s\n' "$C_YELLOW" "$C_RESET"; fi
+        if [ "$MODE" = "uninstall" ]; then flow_beta_uninstall; else flow_beta; fi
+        exit 0
+      fi ;;&
     install | reconfigure)
       if [ "$MODE" = "reconfigure" ] && ! is_dry && [ ! -s "$ENV_FILE" ]; then
         die "Keine Installation gefunden ($ENV_FILE fehlt). Zuerst installieren: bash install.sh"

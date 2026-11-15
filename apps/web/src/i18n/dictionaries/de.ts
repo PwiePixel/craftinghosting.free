@@ -661,6 +661,38 @@ return {
     backHome: 'Zur Startseite',
   },
 
+  beta: {
+    badge: 'Beta',
+    /** Hinweis für alle ohne Beta-Zugang (auf der Beta-Instanz, bei jeder Adresse) */
+    gateMetaTitle: 'Beta-Programm',
+    gateTitle: 'Du bist nicht im Beta-Programm.',
+    gateText: 'Das hier ist die Beta-Version von CraftingHosting.free – sie ist nur für freigeschaltete Tester gedacht. Anmelden oder registrieren kannst du dich hier nicht.',
+    gateHow: 'Du hast Beta-Zugang bekommen? Dann melde dich auf der Hauptseite an und öffne die Beta unter „Meine Server“.',
+    toMain: 'Zur Hauptseite',
+    /** Ticket einlösen (auf der Beta-Instanz) */
+    checking: 'Dein Beta-Zugang wird geprüft …',
+    expiredTitle: 'Der Link ist abgelaufen',
+    expiredText: 'Bitte öffne die Beta noch einmal über „Meine Server“ auf der Hauptseite.',
+    /** Bestätigungsseite auf der Hauptseite */
+    confirmMetaTitle: 'Beta öffnen',
+    confirmTitle: 'Beta-Seite öffnen?',
+    confirmText: 'Du wechselst auf die Beta-Version von CraftingHosting.free. Dort testest du neue Funktionen, bevor sie für alle erscheinen.',
+    confirmPoints: [
+      'Die Beta arbeitet mit deinen echten Daten – Änderungen an deinen Servern gelten wirklich.',
+      'Es kann Fehler geben. Melde sie uns bitte im Discord.',
+      'Dein Zugang wird beim Wechsel noch einmal geprüft.',
+    ],
+    confirmButton: 'Ja, Beta-Seite öffnen',
+    back: 'Zurück zu „Meine Server“',
+    /** Karte unter „Meine Server“ */
+    cardTitle: 'Beta-Programm',
+    cardText: 'Du hast Beta-Zugang: Teste neue Funktionen vor allen anderen.',
+    cardButton: 'Beta öffnen',
+    /** Leiste auf der Beta-Instanz */
+    bar: 'Beta-Version – du arbeitest mit echten Daten.',
+    barLink: 'Zur Hauptseite',
+  },
+
   early: {
     badge: 'Early Access',
     kicker: 'Early Access · Erste Startphase',

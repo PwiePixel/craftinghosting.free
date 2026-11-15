@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { defaultBrand, defaultRules, DISPOSABLE_EMAIL_DOMAINS, serverTypesOf, type SiteSettings } from '@chfree/shared';
 import { Button } from '@/components/ui/button';
+import { LogoSettings } from './admin-logo';
 import { Labeled, NumberInput, Section, Toggle } from './admin-settings';
 
 type Update = (fn: (prev: SiteSettings) => SiteSettings) => void;
@@ -84,6 +85,8 @@ export function MoreSettings({ s, update }: { s: SiteSettings; update: Update })
 
   return (
     <>
+      <LogoSettings mode={s.branding.logoMode} onMode={(logoMode) => update((p) => ({ ...p, branding: { ...p.branding, logoMode } }))} />
+
       <Section
         title="Regeln: Fair-Use (Minecraft) & Laufzeit"
         description="Diese Werte standen früher fest im Code. Sie gelten sofort für die automatischen Abläufe (Stopps, Pausen, Erinnerungen, Löschungen) und erscheinen überall auf der Website, in den Nutzungsbedingungen, E-Mails und Chat-Hinweisen. Bestehende Server behalten ihr aktuelles Ablaufdatum; eine neue Laufzeit gilt ab der nächsten Verlängerung."

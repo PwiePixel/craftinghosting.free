@@ -54,29 +54,39 @@ async function canonicalRedirect(request: NextRequest): Promise<URL | null> {
   return new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, PRIMARY);
 }
 
-/** Admins sehen die Website auch während der Wartung (Prüfung über die API, 30 s Cache je Session) */
-const adminCache = new Map<string, { at: number; admin: boolean }>();
+/**
+ * Wer ist angemeldet? Geprüft wird über die API (kurzer Zwischenspeicher je Sitzung):
+ *  – admin:    darf den Admin-Bereich sehen (Rolle im Backend bzw. ADMIN_EMAILS) und die Website während der Wartung
+ *  – signedIn: gültige Sitzung – auf der Beta-Instanz gibt es die nur für Nutzer mit Beta-Zugang
+ */
+const sessionCache = new Map<string, { at: number; admin: boolean; signedIn: boolean }>();
 
-async function isAdminSession(request: NextRequest): Promise<boolean> {
+async function sessionInfo(request: NextRequest, ttlMs = 30_000): Promise<{ admin: boolean; signedIn: boolean }> {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!token) return false;
-  const hit = adminCache.get(token);
-  if (hit && Date.now() - hit.at < 30_000) return hit.admin;
-  let admin = false;
+  if (!token) return { admin: false, signedIn: false };
+  const hit = sessionCache.get(token);
+  if (hit && Date.now() - hit.at < ttlMs) return hit;
+  let info = { admin: false, signedIn: false };
   try {
     const res = await fetch(`${API}/api/v1/auth/me`, {
       headers: { cookie: `${SESSION_COOKIE}=${token}`, accept: 'application/json' },
       cache: 'no-store',
       signal: AbortSignal.timeout(2000),
     });
-    if (res.ok) admin = ((await res.json()) as { user?: { role?: string } }).user?.role === 'admin';
+    if (res.ok) info = { signedIn: true, admin: ((await res.json()) as { user?: { role?: string } }).user?.role === 'admin' };
   } catch {
-    admin = hit?.admin ?? false;
+    // API kurz nicht erreichbar → letzter bekannter Stand, sonst „nicht angemeldet“
+    if (hit) info = { admin: hit.admin, signedIn: hit.signedIn };
   }
-  if (adminCache.size > 1000) adminCache.clear();
-  adminCache.set(token, { at: Date.now(), admin });
-  return admin;
+  if (sessionCache.size > 1000) sessionCache.clear();
+  sessionCache.set(token, { at: Date.now(), ...info });
+  return info;
 }
+
+const isAdminSession = async (request: NextRequest) => (await sessionInfo(request)).admin;
+
+/** Beta-Instanz (BETA_MODE=true in der .env): nur für Nutzer mit Beta-Zugang – alle anderen sehen den Hinweis */
+const BETA_INSTANCE = ['1', 'true', 'yes', 'on'].includes((process.env.BETA_MODE ?? '').toLowerCase());
 
 /* ------------------------------------------------------------ Kurzlinks */
 
@@ -92,10 +102,10 @@ const DISCORD_TERMS_ALIASES = new Set([
 
 /* ------------------------------------------------------------ Helfer */
 
-function rewrite(request: NextRequest, pathname: string, headers?: Record<string, string>) {
+function rewrite(request: NextRequest, pathname: string, headers?: Record<string, string>, status?: number) {
   const url = request.nextUrl.clone();
   url.pathname = pathname;
-  const res = NextResponse.rewrite(url);
+  const res = NextResponse.rewrite(url, status ? { status } : undefined);
   for (const [k, v] of Object.entries(headers ?? {})) res.headers.set(k, v);
   return res;
 }
@@ -124,16 +134,29 @@ export async function proxy(request: NextRequest) {
   // Interne Vorschaubilder (/en/opengraph-image, /de/opengraph-image) unverändert
   if (/^\/(de|en)\/opengraph-image/.test(pathname)) return NextResponse.next();
 
-  // Admin-Bereich: nur unter dem geheimen Pfad, nie indexieren, keine Weiterleitung zum Login (verrät nichts)
-  const admin = adminPath();
-  if (pathname === admin || pathname === `/de${admin}`) {
-    return rewrite(request, `/${pathname.startsWith('/de/') ? 'de' : 'en'}/admin`, NOINDEX);
+  // Beta-Instanz: Ohne Beta-Zugang zeigt JEDE Adresse denselben Hinweis („Du bist nicht im Beta-Programm“).
+  // Hinein führt nur der Weg über die Hauptseite: /beta-access löst das Einmal-Ticket ein.
+  if (BETA_INSTANCE) {
+    const betaLocale = /^\/de(\/|$)/.test(pathname) || request.cookies.get(LANG_COOKIE)?.value === 'de' ? 'de' : 'en';
+    if (/^(\/de)?\/beta-access\/?$/.test(pathname)) return rewrite(request, `/${betaLocale}/beta-access`, { ...NOINDEX, 'Cache-Control': 'no-store' });
+    if (!(await sessionInfo(request, 10_000)).signedIn) {
+      return rewrite(request, `/${betaLocale}/beta-gate`, { ...NOINDEX, 'Cache-Control': 'no-store' }, 403);
+    }
+  }
+
+  // Admin-Bereich unter /admin (und optional unter ADMIN_PATH): nur für angemeldete Admins. Alle anderen – auch nicht
+  // angemeldete Besucher – bekommen dieselbe 404-Seite wie bei jeder unbekannten Adresse (verrät nichts, kein Login-Hinweis).
+  const adminPaths = new Set(['/admin', adminPath()]);
+  const adminLang = adminPaths.has(pathname) ? 'en' : pathname.startsWith('/de/') && adminPaths.has(pathname.slice(3)) ? 'de' : null;
+  if (adminLang) {
+    if (!(await isAdminSession(request))) return rewrite(request, `/${adminLang}/__not-found`, { ...NOINDEX, 'Cache-Control': 'no-store' }, 404);
+    return rewrite(request, `/${adminLang}/admin`, { ...NOINDEX, 'Cache-Control': 'no-store' });
   }
 
   const { locale, key, rest, prefix } = resolvePath(pathname);
 
   // Interne Ordner nie direkt erreichbar machen
-  if (/^\/(admin|maintenance)(\/|$)/.test(rest)) return rewrite(request, `/${locale}/__not-found`, NOINDEX);
+  if (/^\/(admin|maintenance|beta-gate|beta-access)(\/|$)/.test(rest)) return rewrite(request, `/${locale}/__not-found`, NOINDEX);
 
   // Kurzlinks und andere Schreibweisen der Discord-Bot-Nutzungsbedingungen
   if (!key && DISCORD_TERMS_ALIASES.has(rest)) {

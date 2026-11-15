@@ -12,7 +12,7 @@ import type { User } from '../db/schema';
 import { env } from '../env';
 import { Errors, L } from '../lib/errors';
 import { audit } from './audit.service';
-import { getSettings, invalidatePublicSite, saveSettings } from './settings.service';
+import { betaHost, getSettings, invalidatePublicSite, saveSettings } from './settings.service';
 import { tunnelStatus } from './tunnel.service';
 
 export const primaryHost = () => new URL(env.APP_URL).hostname;
@@ -59,8 +59,10 @@ export async function domainsOverview(): Promise<AdminDomainsDTO> {
   const settings = await getSettings();
   const [own, tunnel] = await Promise.all([serverAddresses(), tunnelStatus()]);
   const primary = primaryHost();
+  const beta = betaHost();
   const domains = await Promise.all([
     inspect(primary, { primary: true, redirect: false }, own, tunnel.hosts),
+    ...(beta ? [inspect(beta, { primary: false, redirect: false }, own, tunnel.hosts).then((d) => ({ ...d, beta: true }))] : []),
     ...settings.domains.extra.map((d) => inspect(d.host, { primary: false, redirect: d.redirect }, own, tunnel.hosts)),
   ]);
   return { primary, serverAddresses: own, domains, tunnel };
@@ -77,7 +79,7 @@ export async function addDomain(admin: Pick<User, 'email'>, rawHost: string, red
   if (!host) throw Errors.badRequest('invalid_domain', L('Das ist kein gültiger Domainname (Beispiel: free.example.com).', 'This is not a valid domain name (example: free.example.com).'));
   const primary = primaryHost();
   const settings = await getSettings();
-  if (host === primary || host === `www.${primary}` || settings.domains.extra.some((d) => d.host === host)) {
+  if (host === primary || host === `www.${primary}` || host === betaHost() || settings.domains.extra.some((d) => d.host === host)) {
     throw Errors.conflict('domain_exists', L('Diese Domain ist bereits eingetragen.', 'This domain has already been added.'));
   }
   await saveDomains([...settings.domains.extra, { host, redirect, addedAt: new Date().toISOString() }]);

@@ -12,7 +12,7 @@ import { affectedRows, db } from '../db/client';
 import { emailTokens, servers, users, type User } from '../db/schema';
 import { encryptField, generateToken, sha256, uuid } from '../lib/crypto';
 import { Errors, L } from '../lib/errors';
-import { isAdmin } from '../plugins/auth';
+import { canUseBeta, isAdmin } from '../plugins/auth';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { loginMail, verifyServerMail, verifyWaitlistMail, type MailContent } from './mail/templates';
@@ -40,6 +40,7 @@ export function toUserDTO(user: User): UserDTO {
     panelLinked: !!user.pteroUserId,
     panelUsername: user.pteroUsername,
     role: isAdmin(user) ? 'admin' : 'user',
+    beta: canUseBeta(user),
     locale: user.locale,
     createdAt: user.createdAt.toISOString(),
   };

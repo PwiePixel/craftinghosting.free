@@ -231,6 +231,7 @@ export const USER_FILTERS = {
   waitlist: 'auf der Warteliste',
   locked: 'gesperrt',
   admins: 'Admins',
+  beta: 'Beta-Zugang',
 } as const;
 
 /**
@@ -252,6 +253,7 @@ function userConds(filter: { q?: string; status?: string }): SQL[] {
   if (filter.status === 'unverified') conds.push(isNull(users.emailVerifiedAt));
   if (filter.status === 'locked') conds.push(eq(users.status, 'locked'));
   if (filter.status === 'admins') conds.push(adminCond());
+  if (filter.status === 'beta') conds.push(eq(users.beta, true));
   if (filter.status === 'no-servers') conds.push(sql`${userServerCount} = 0`);
   if (filter.status === 'waitlist') conds.push(sql`exists (select 1 from "servers" s_wl where s_wl."user_id" = "users"."id" and s_wl."status" = 'waitlist')`);
   return conds;
@@ -289,6 +291,7 @@ export async function listUsersAdmin(
     panelAdminUrl: panelUserAdminUrl(u.pteroUserId),
     servers: Number(n),
     lastLoginAt: iso(u.lastLoginAt),
+    beta: u.beta,
     registrationIp: decryptField(u.registrationIp),
     lastLoginIp: decryptField(u.lastLoginIp),
     createdAt: u.createdAt.toISOString(),
@@ -550,7 +553,7 @@ export async function getPanelInfo(): Promise<AdminPanelDTO> {
   return result;
 }
 
-export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin';
+export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin' | 'grant-beta' | 'revoke-beta';
 
 /**
  * Konten löschen (einzeln oder mehrere). Übersprungen werden das eigene Konto und Admins
@@ -635,6 +638,15 @@ export async function userAction(admin: User, id: string, action: UserAction, ip
     case 'remove-admin':
       await db.update(users).set({ role: 'user' }).where(eq(users.id, id));
       await log('admin.role_changed', `${user.email} ist kein Admin mehr`);
+      return;
+    case 'grant-beta':
+      await db.update(users).set({ beta: true }).where(eq(users.id, id));
+      await log('admin.beta_granted', `${user.email} hat jetzt Beta-Zugang`);
+      return;
+    case 'revoke-beta':
+      // Wirkt sofort: Die Beta-Instanz prüft die Freigabe bei jeder Anfrage
+      await db.update(users).set({ beta: false }).where(eq(users.id, id));
+      await log('admin.beta_revoked', `Beta-Zugang von ${user.email} entzogen`);
       return;
   }
 }

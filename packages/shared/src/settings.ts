@@ -154,6 +154,7 @@ export function defaultSiteSettings(): SiteSettings {
     announcement: { enabled: false, tone: 'info', text: { de: '', en: '' }, linkUrl: '', linkLabel: { de: '', en: '' } },
     blocklist: { disposable: true, emailDomains: [], emails: [] },
     seo: { title: { de: '', en: '' }, description: { de: '', en: '' }, indexing: true, summary: { de: '', en: '' } },
+    branding: { logoMode: 'icon' },
     botFairUse: {
       enabled: true,
       cpuThresholdPercent: 90,
@@ -517,6 +518,7 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
       emailDomains: list(bl.emailDomains, 500, (x) => normalizeHost(x) !== null),
       emails: list(bl.emails, 2000, (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
     },
+    branding: { logoMode: obj(i.branding).logoMode === 'full' ? 'full' : 'icon' },
     seo: {
       title: loose(seo.title, 90),
       description: loose(seo.description, 220),

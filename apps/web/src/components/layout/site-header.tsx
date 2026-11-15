@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Globe, Heart, Menu, X } from 'lucide-react';
 import { localePath, sectionPath, switchLocalePath, type RegistrationMode } from '@chfree/shared';
-import { Logo } from '@/components/brand/logo';
+import { Logo, type CustomLogo } from '@/components/brand/logo';
 import { buttonClasses } from '@/components/ui/button';
 import { useDict, useLang } from '@/i18n/client';
 import { cn } from '@/lib/utils';
@@ -21,7 +21,10 @@ export function SiteHeader({
   maintenance = false,
   signedIn = false,
   donate = false,
+  logo,
 }: {
+  /** Hochgeladenes Logo aus dem Admin-Bereich */
+  logo?: CustomLogo;
   minimal?: boolean;
   mode?: RegistrationMode;
   maintenance?: boolean;
@@ -73,7 +76,7 @@ export function SiteHeader({
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-background/85 backdrop-blur-md">
       <div className="container-page flex h-16 items-center justify-between gap-6">
-        <Logo href={localePath(lang, 'home')} />
+        <Logo href={localePath(lang, 'home')} custom={logo} />
 
         {!minimal && (
           <nav className="hidden items-center gap-5 lg:flex xl:gap-7" aria-label={t.nav.main}>

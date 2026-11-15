@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { deleteAccount } from '../services/account.service';
 import { eq } from 'drizzle-orm';
 import { deleteAccountSchema, loginLinkSchema, panelSetupSchema, startSchema, tokenSchema, type VerifyResult } from '@chfree/shared';
@@ -9,6 +10,7 @@ import { ApiError, Errors, L } from '../lib/errors';
 import { assertNotMaintenance } from '../lib/maintenance';
 import { clearSessionCookie, currentUser, requireAuth, setSessionCookie } from '../plugins/auth';
 import { audit } from '../services/audit.service';
+import { createBetaTicket, redeemBetaTicket } from '../services/beta.service';
 import { getUser, requestLoginLink, requestServer, toUserDTO, verifyToken } from '../services/auth.service';
 import { rememberUserLocale } from '../services/locale.service';
 import { createPanelAccount } from '../services/provisioning.service';
@@ -51,6 +53,22 @@ export async function authRoutes(app: FastifyInstance) {
       waitlist: result.waitlist,
     };
     return body;
+  });
+
+  /* ------------------------------------------------------------ Beta-Programm */
+
+  /** Hauptseite: Wechsel auf die Beta-Instanz bestätigen → Einmal-Ticket (nur mit Beta-Zugang) */
+  app.post('/beta/enter', { preHandler: requireAuth, ...strict(20, '15 minutes') }, async (request) => {
+    return createBetaTicket(currentUser(request), request.ip);
+  });
+
+  /** Beta-Instanz: Ticket einlösen → Sitzung für die Beta-Seite (prüft die Freigabe erneut) */
+  app.post('/beta/session', strict(20, '15 minutes'), async (request, reply) => {
+    const { ticket } = z.object({ ticket: z.string().min(20).max(400) }).parse(request.body);
+    const user = await redeemBetaTicket(ticket);
+    const session = await createSession(user.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
+    setSessionCookie(reply, session.token, session.expiresAt);
+    return { ok: true, user: toUserDTO(user) };
   });
 
   app.post('/auth/logout', async (request, reply) => {

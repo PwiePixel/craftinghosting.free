@@ -29,6 +29,8 @@ export const users = sqliteTable(
     locale: text('locale', { enum: ['de', 'en'] }).notNull().default('en'),
     lastLoginAt: ts('last_login_at'),
     /** IP bei der Registrierung bzw. beim letzten Login – verschlüsselt (encryptField) */
+    /** Beta-Zugang: darf die Beta-Instanz nutzen (Admin → Nutzer) */
+    beta: integer('beta', { mode: 'boolean' }).notNull().default(false),
     registrationIp: text('registration_ip'),
     lastLoginIp: text('last_login_ip'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
@@ -245,6 +247,17 @@ export const consentLogs = sqliteTable(
   },
   (t) => [index('consent_logs_created_idx').on(t.createdAt)],
 );
+
+/* ----------------------------------------------------------------- assets */
+
+/** Hochgeladene Dateien aus dem Admin-Bereich (z. B. das Logo) – als Base64 in der verschlüsselten Datenbank */
+export const assets = sqliteTable('assets', {
+  key: text('key').primaryKey(),
+  mime: text('mime').notNull(),
+  data: text('data').notNull(),
+  size: integer('size').notNull(),
+  updatedAt: ts('updated_at').notNull().$defaultFn(now),
+});
 
 /* ------------------------------------------------------------- newsletter */
 

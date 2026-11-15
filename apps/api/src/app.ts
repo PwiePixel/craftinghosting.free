@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import { allowedOrigins, env, isProd } from './env';
 import { registerErrorHandler } from './lib/errors';
 import { authPlugin } from './plugins/auth';
+import { betaPlugin } from './plugins/beta';
 import { securityPlugin } from './plugins/security';
 import { adminRoutes } from './routes/admin.routes';
 import { authRoutes } from './routes/auth.routes';
@@ -44,6 +45,7 @@ export async function buildApp() {
 
   await app.register(securityPlugin);
   await app.register(authPlugin);
+  await app.register(betaPlugin);
 
   await app.register(
     async (api) => {

@@ -43,6 +43,11 @@ export const authPlugin = fp(async function authPlugin(app: FastifyInstance) {
       clearSessionCookie(reply);
       return;
     }
+    // Beta-Instanz: Eine Sitzung zählt nur, solange der Nutzer (noch) Beta-Zugang hat – ein Entzug wirkt sofort
+    if (env.BETA_MODE && !canUseBeta(session.user)) {
+      clearSessionCookie(reply);
+      return;
+    }
     request.user = session.user;
     request.sessionId = session.sessionId;
     if (session.refreshed && env.SESSION_PERSISTENT) setSessionCookie(reply, token, session.expiresAt);
@@ -62,6 +67,11 @@ export function currentUser(request: FastifyRequest): User {
 /** Admin: role = admin in der Datenbank oder E-Mail in ADMIN_EMAILS */
 export function isAdmin(user: Pick<User, 'role' | 'email'> | null): boolean {
   return !!user && (user.role === 'admin' || adminEmails.has(user.email.toLowerCase()));
+}
+
+/** Beta-Zugang: vom Admin freigeschaltet (users.beta) – Admins dürfen immer */
+export function canUseBeta(user: Pick<User, 'role' | 'email' | 'beta' | 'status'> | null): boolean {
+  return !!user && user.status === 'active' && (user.beta || isAdmin(user));
 }
 
 /** Nur für Admins – andere bekommen 404 (der Bereich wird nicht verraten). */

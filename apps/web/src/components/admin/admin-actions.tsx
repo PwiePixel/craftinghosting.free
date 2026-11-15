@@ -105,6 +105,8 @@ export function UserActions({ user, self }: { user: AdminUserDTO; self: boolean 
         <ActionButton label="Entsperren" run={act('unlock')} />
       )}
       {user.role === 'admin' ? <ActionButton label="Admin entfernen" confirm="Sicher?" run={act('remove-admin')} /> : <ActionButton label="Zum Admin" confirm="Sicher?" run={act('make-admin')} />}
+      {/* Beta-Zugang: Admins dürfen immer auf die Beta-Instanz – für alle anderen wird er hier vergeben */}
+      {user.role !== 'admin' && (user.beta ? <ActionButton label="Beta entziehen" run={act('revoke-beta')} /> : <ActionButton label="Beta-Zugang geben" run={act('grant-beta')} />)}
     </Actions>
   );
 }

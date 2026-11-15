@@ -62,6 +62,8 @@ export const routes = {
   discordTerms: { en: '/discord-bot/terms-of-use', de: '/de/discord-bot/nutzungsbedingungen', internal: 'discord-bot/nutzungsbedingungen' },
   donate: { en: '/donate', de: '/de/spenden', internal: 'spenden' },
   newsletter: { en: '/newsletter', de: '/de/newsletter', internal: 'newsletter' },
+  /** Beta-Programm: Bestätigungsseite auf der Hauptseite (nur für freigeschaltete Nutzer) */
+  beta: { en: '/beta', de: '/de/beta', internal: 'beta' },
 } as const satisfies Record<string, Record<Locale | 'internal', string>>;
 
 export type RouteKey = keyof typeof routes;

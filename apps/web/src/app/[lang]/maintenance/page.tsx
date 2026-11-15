@@ -38,7 +38,7 @@ export default async function MaintenancePage({ params }: Props) {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(60%_60%_at_50%_0%,rgba(37,99,235,0.16),transparent)]" aria-hidden />
 
       <header className="relative container-page flex h-16 items-center justify-between">
-        <Logo href={localePath(lang, 'home')} />
+        <Logo href={localePath(lang, 'home')} custom={settings.logo} />
         <div className="flex items-center gap-4">
           <MaintenanceLangSwitch />
           {/* Anmelden bleibt möglich – nur Registrieren ist während der Wartung gesperrt */}

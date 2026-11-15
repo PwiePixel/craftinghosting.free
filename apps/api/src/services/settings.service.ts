@@ -24,6 +24,7 @@ import {
   type WaitlistBlock,
 } from '@chfree/shared';
 import { getEggMapping } from '../config/pterodactyl.config';
+import { assets } from '../db/schema';
 import { env } from '../env';
 import { db } from '../db/client';
 import { servers, settings as settingsTable, statusChecks, users } from '../db/schema';
@@ -97,11 +98,23 @@ function applyRuntime(s: SiteSettings) {
   applyRuntimeConfig({ rules: s.rules, brand: resolveBrand(s) });
 }
 
+/** Hostname der Beta-Instanz (nur auf der Hauptseite bekannt) */
+export function betaHost(): string | null {
+  try {
+    return env.BETA_URL ? new URL(env.BETA_URL).hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Alle Hostnamen, unter denen die Website erreichbar sein darf (Hauptdomain, www, weitere Domains aus dem Admin-Bereich) */
 export function allowedHosts(s: Pick<SiteSettings, 'domains'>): Set<string> {
   const primary = new URL(env.APP_URL).hostname;
   const hosts = new Set([primary, `www.${primary}`]);
   for (const d of s.domains.extra) hosts.add(d.host);
+  // Beta-Instanz (install.sh --beta) – z. B. beta.craftinghosting.free
+  const beta = betaHost();
+  if (beta) hosts.add(beta);
   return hosts;
 }
 
@@ -267,6 +280,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
   const s = await getSettings();
   const wl = await waitlistCounts(s);
   const capacity = await capacityState(s);
+  const [logoAt] = await db.select({ updatedAt: assets.updatedAt }).from(assets).where(eq(assets.key, 'logo')).limit(1);
   let stats: PublicSiteDTO['stats'] = null;
   if (s.stats.show) {
     const [u] = await db.select({ n: count() }).from(users).where(isNotNull(users.emailVerifiedAt));
@@ -318,6 +332,13 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
         ? { tone: s.announcement.tone, text: s.announcement.text, linkUrl: s.announcement.linkUrl, linkLabel: s.announcement.linkLabel }
         : null,
     seo: s.seo,
+    logo: logoAt ? { url: `/api/v1/brand/logo?v=${logoAt.updatedAt.getTime()}`, mode: s.branding.logoMode } : null,
+    session: { idleMinutes: env.SESSION_IDLE_MINUTES, maxHours: env.SESSION_MAX_HOURS, persistent: env.SESSION_PERSISTENT, cookieName: env.SESSION_COOKIE_NAME },
+    beta: {
+      instance: env.BETA_MODE,
+      url: env.BETA_MODE ? null : (env.BETA_URL || '').replace(/\/$/, '') || null,
+      mainUrl: env.BETA_MODE ? (env.MAIN_URL || '').replace(/\/$/, '') || null : null,
+    },
     stats,
   };
   publicCache = { value, at: Date.now() };
