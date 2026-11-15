@@ -1,171 +1,133 @@
-# Installation auf Debian 13 (Trixie)
+# Installation auf Debian 12/13 und Ubuntu 22.04/24.04
 
-Alles läuft in Docker: MariaDB, Migration, API, Worker, Website und Caddy (HTTPS automatisch über Let's Encrypt).
-Befehle als `root` (sonst `sudo` davor).
+Die Website läuft auf einem **eigenen Server** und spricht über die API mit deinem Pterodactyl-Panel – das Panel
+kann (und sollte) auf einem anderen Server liegen. Du brauchst nur:
 
-## 0. Voraussetzungen
+- einen frischen Server (root), dessen DNS-Eintrag (A/AAAA) auf ihn zeigt, Ports 80 + 443 offen
+- die Adresse des Panels, z. B. `https://panel.craftinghosting.free`
+- einen **Application-API-Key** (`ptla_…`, Panel → Admin → Application API: Users R/W, Servers R/W, Nests R, Nodes R,
+  Locations R, Allocations R)
+- einen **Client-API-Key** eines Admin-Kontos (`ptlc_…`, Panel → Account → API Credentials)
 
-- Debian 13 VPS/KVM, empfohlen mind. 2 GB RAM (der Next.js-Build braucht kurzzeitig Speicher)
-- DNS: A-Record (und ggf. AAAA) für `craftinghosting.free` **und** `www.craftinghosting.free` → IP des Servers
-- Ports 80 und 443 frei – kein anderer Webserver (Apache/nginx) auf dem System:
-  `ss -ltnp | grep -E ':(80|443) '` muss leer sein, sonst `systemctl disable --now apache2 nginx`
-- Pterodactyl-Panel über HTTPS vom Server aus erreichbar
-
-## 1. System + Docker
+## Schnellweg: `install.sh`
 
 ```bash
-apt update && apt full-upgrade -y
-apt install -y ca-certificates curl unzip openssl
-
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-tee /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-apt update
-apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-docker compose version   # Kontrolle
+git clone https://github.com/PwiePixel/craftinghosting.free.git
+cd craftinghosting.free
+sudo bash install.sh
 ```
 
-## 2. Projekt hochladen
+Das Skript fragt Domain, Panel-Adresse, die beiden API-Keys, die Admin-E-Mail und (optional) SMTP ab, prüft die
+Verbindung zum Panel und erledigt den Rest:
 
-Unter Windows (PowerShell, im Ordner mit der ZIP):
+1. Node.js 22, Caddy und Hilfspakete installieren
+2. Programm nach `/opt/craftinghosting-free` kopieren, bauen
+3. `.env` schreiben (inkl. zufälligem `DATABASE_ENCRYPTION_KEY` und geheimem `ADMIN_PATH`)
+4. verschlüsselte Datenbank unter `/var/lib/chfree/chfree.db` anlegen
+5. systemd-Dienste `chfree-api`, `chfree-worker`, `chfree-web` einrichten und starten
+6. Caddy mit automatischem HTTPS einrichten
 
-```powershell
-scp .\craftinghosting-free.zip root@SERVER-IP:/opt/
-```
+Am Ende zeigt es die Adresse des geheimen Admin-Bereichs. Danach im Admin-Bereich:
 
-Auf dem Server:
+- **Pterodactyl:** Nodes zuweisen (Minecraft-Nodes, eigene Node für Discord-Bots) und Eggs wählen
+  (Python, Node.js – werden automatisch erkannt, „Alle Vorschläge übernehmen“)
+- **Einstellungen:** Pakete, Kapazität, Fair-Use für Discord-Bots, Standorte, Spendenlink
+
+Ohne Rückfragen (z. B. für Automatisierung):
 
 ```bash
-cd /opt && unzip craftinghosting-free.zip && cd craftinghosting-free
+sudo CHF_DOMAIN=craftinghosting.free CHF_PANEL_URL=https://panel.craftinghosting.free \
+     CHF_PTERO_APP_KEY=ptla_… CHF_PTERO_CLIENT_KEY=ptlc_… CHF_ADMIN_EMAIL=du@example.com \
+     bash install.sh --yes
 ```
 
-## 3. `.env` anlegen
+Alle Optionen: `bash install.sh --help` · Probelauf ohne Änderungen: `bash install.sh --dry-run`
+
+## Betrieb
 
 ```bash
-cp .env.example .env && chmod 600 .env
-openssl rand -hex 24   # zweimal ausführen → DB_PASSWORD und DB_ROOT_PASSWORD
-nano .env
+chfree status
 ```
-
-Ändern (alles andere kann bleiben – `DATABASE_URL`, `API_INTERNAL_URL`, `WEB_INTERNAL_URL`, `RUN_JOBS_IN_API` setzt Docker selbst):
-
-| Variable | Wert |
-| --- | --- |
-| `NODE_ENV` | `production` |
-| `SITE_DOMAIN` | `craftinghosting.free` |
-| `DB_PASSWORD`, `DB_ROOT_PASSWORD` | die zwei `openssl`-Werte (nur hex – Sonderzeichen wie `/ @ :` brechen die DB-URL) |
-| `APP_URL`, `NEXT_PUBLIC_SITE_URL` | `https://craftinghosting.free` |
-| `NEXT_PUBLIC_PANEL_URL`, `PTERODACTYL_PUBLIC_URL` | `https://panel.craftinghosting.free` |
-| `PTERODACTYL_MODE` | `live` |
-| `PTERODACTYL_URL` | Panel-Adresse, die der Server erreicht (meist dieselbe) |
-| `PTERODACTYL_APP_KEY` | `ptla_…` – Panel → Admin → Application API: Users R/W, Servers R/W, Nests/Nodes/Locations/Allocations R |
-| `PTERODACTYL_CLIENT_KEY` | `ptlc_…` – als **Admin** eingeloggt → Konto → API-Zugangsdaten |
-| `PTERODACTYL_LOCATION_IDS` | ID(s) der Free-Location (Admin → Locations) |
-| `PTERODACTYL_LOCATION_IDS_EPYC`, `_XEON` | optional: Locations für Early Access – die ersten Wartelisten-Plätze auf EPYC, der Rest auf Xeon (leer = `PTERODACTYL_LOCATION_IDS`) |
-| `PTERODACTYL_EGG_PAPER` usw. | `nestId:eggId` (Admin → Nests → Egg), Zeilen einkommentieren |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Mailserver – ohne SMTP stehen die Mails nur im Log. `MAIL_FROM` leer lassen (dann ist das Postfach der Absender) |
-| `ADMIN_EMAILS` | deine E-Mail-Adresse(n) für den Admin-Bereich |
-| `ADMIN_PATH` | geheimer Pfad des Admin-Bereichs, z. B. Ausgabe von `echo "/team-$(openssl rand -hex 4)"` – nirgends verlinkt, für alle anderen 404 |
-
-`NEXT_PUBLIC_*` wird beim Build fest eingebaut → nach Änderungen immer mit `--build` starten.
-
-Produktregeln (Pakete, Fair-Use-Stunden, 30 Tage, Wartezeit vor Reaktivierung) stehen in
-`packages/shared/src/config/freehosting.config.ts` – vor dem ersten Build prüfen.
-
-## 4. Starten
 
 ```bash
-docker compose up -d --build     # erster Build dauert einige Minuten
-docker compose ps                # migrate = "Exited (0)" ist richtig, Rest "Up"
-docker compose logs -f           # Strg+C beendet nur die Anzeige
+chfree logs api
 ```
-
-Prüfen:
-
-- `https://craftinghosting.free` lädt mit gültigem Zertifikat (Englisch; Deutsch unter `/de`)
-- `curl https://craftinghosting.free/api/v1/health` → `{"ok":true,"db":1,"pterodactylMode":"live"}`
-- `https://craftinghosting.free/status` → Pterodactyl „Operational“
-- Einmal selbst einen Server mit eigener E-Mail erstellen und im Panel prüfen
-
-## 5. Firewall (empfohlen)
 
 ```bash
-apt install -y ufw
-ufw allow 22/tcp          # SSH-Port anpassen, falls geändert – sonst sperrst du dich aus
-ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 443/udp
-ufw enable
+chfree update
 ```
-
-Die Datenbank ist nicht nach außen veröffentlicht, nur Caddy (80/443).
-
-## 6. Betrieb
 
 ```bash
-cd /opt/craftinghosting-free
-
-docker compose logs -f api worker                     # Logs
-docker compose up -d                                  # nach .env-Änderung – erstellt API/Worker mit den neuen Werten neu
-                                                      # (docker compose restart liest die .env NICHT neu ein!)
-docker compose run --rm api node dist/cli.js mail-test du@example.com   # E-Mail-Versand prüfen
-docker compose up -d --build                          # nach Update oder NEXT_PUBLIC_*-Änderung
-docker compose run --rm api node dist/cli.js run all  # alle Jobs einmal manuell
-
-# Datenbank-Backup
-docker compose exec -T mariadb sh -c 'mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction "$MARIADB_DATABASE"' > /root/chfree-$(date +%F).sql
+chfree reconfigure
 ```
 
-**Update:** neue ZIP hochladen, `unzip -o craftinghosting-free.zip -d /opt` (die `.env` ist nicht in der ZIP und bleibt erhalten), dann `docker compose up -d --build`. Neue Datenbank-Migrationen (z. B. Einstellungen, Warteliste, Statusmeldungen) laufen dabei automatisch. Neue Variablen aus `.env.example` (zuletzt `ADMIN_PATH`, `PTERODACTYL_LOCATION_IDS_EPYC/_XEON`, `SESSION_IDLE_MINUTES`, `SESSION_MAX_HOURS`, `SESSION_PERSISTENT`) bei Bedarf in die eigene `.env` übernehmen; `SESSION_TTL_DAYS` wird nicht mehr verwendet und kann raus.
+```bash
+chfree backup
+```
 
-Nach einem Neustart des Servers startet alles von selbst (`restart: unless-stopped`).
+`chfree update` holt den neuesten Stand (git pull), baut neu, wendet Migrationen an und startet die Dienste neu.
+`chfree reconfigure` stellt die Fragen erneut (Domain, Keys, SMTP) – Schlüssel und Admin-Pfad bleiben erhalten.
 
-## Admin-Bereich
+## Backup und Wiederherstellung
 
-1. In der `.env` `ADMIN_EMAILS=deine@adresse.de` und einen eigenen `ADMIN_PATH` (z. B. `/team-7f3k9`) eintragen, dann `docker compose up -d`.
-2. Unter `https://craftinghosting.free/login` per E-Mail-Link anmelden.
-3. `https://craftinghosting.free/team-7f3k9` (dein `ADMIN_PATH`) aufrufen – am besten als Lesezeichen.
+Die Datenbank ist eine **verschlüsselte SQLite-Datei**. Zum Wiederherstellen brauchst du **beides**:
 
-Alternativ für ein bestehendes Konto: `docker compose run --rm api node dist/cli.js make-admin deine@adresse.de`. Der Pfad ist nirgends verlinkt und nicht indexierbar; ohne Admin-Rechte zeigt er eine normale 404-Seite.
+- `/var/lib/chfree/chfree.db` (plus ggf. `chfree.db-wal`)
+- `DATABASE_ENCRYPTION_KEY` aus `/opt/craftinghosting-free/.env`
 
-Im Admin-Bereich stellst du ohne Neustart ein:
+`chfree backup` hält die Dienste kurz an und legt beides als `tar.gz` unter `/var/backups/chfree/` ab – kopiere die
+Datei regelmäßig auf einen anderen Rechner. Wiederherstellen: Dienste stoppen (`systemctl stop 'chfree-*'`), Dateien
+zurückspielen, Dienste starten.
 
-- **Wartungsmodus** (Übersicht → „Wartungsmodus starten“ oder Einstellungen) – Besucher sehen die Wartungsseite, du selbst die normale Website. Anmelden und „Meine Server“ funktionieren weiterhin, nur Registrieren ist gesperrt
-- **Registrierung:** Offen · Vorregistrierung (Early Access mit Warteliste EPYC → Xeon) · Geschlossen, dazu Server pro Person
-- **Warteliste:** Plätze freischalten (die nächsten N oder ausgewählte), Personen per E-Mail-Liste übernehmen, Vormerkungen als Anzahl mit „+ / −“ hinten anhängen (z. B. 23 Anmeldungen + 890 → nächster Platz #914); alle Listen zeigen 50 Einträge pro Seite mit Pfeilen zum Blättern
-- **Nutzer löschen:** einzeln, per Häkchen (Umschalt + Klick für Bereiche), alle Treffer eines Filters (z. B. „E-Mail unbestätigt“) oder per E-Mail-Liste – inkl. ihrer kostenlosen Server
-- **Statusseite:** Status je Dienst und Meldungen (Störung, Wartung, Hinweis)
-- **Zahlen auf der Startseite:** registrierte Nutzer, aktive Server, Uptime – automatisch (+ Zusatz für Nutzer aus dem alten System) oder fester Wert
-- **Kapazität je Paket:** maximale Plätze und außerhalb belegte Plätze („Noch X von Y frei“ / „Ausgebucht“), ebenso EPYC-Plätze gesamt und davon belegt
-
-**Anmeldung:** Sitzungen enden beim Schließen des Browsers, nach 30 Minuten ohne Aktivität und spätestens nach 12 Stunden – danach meldet man sich (auch als Admin) neu per E-Mail-Link an. Mit dem Update werden alle bisherigen Anmeldungen einmalig beendet.
-
-## Mock-Modus
-
-`PTERODACTYL_MODE=mock` simuliert das Panel – gut, um den Ablauf auf dem Server zu testen. Es werden **keine echten Server** angelegt. Für den Betrieb `PTERODACTYL_MODE=live` mit echten Keys setzen und `docker compose up -d` ausführen.
+Ohne den Schlüssel lässt sich die Datenbank nicht mehr öffnen. Das `sqlite3`-Kommandozeilenprogramm kann die Datei
+nicht lesen – das ist Absicht.
 
 ## Fehlersuche
 
 | Problem | Ursache / Lösung |
 | --- | --- |
-| Kein HTTPS-Zertifikat | DNS zeigt noch nicht auf den Server oder Port 80 blockiert → `docker compose logs caddy` |
-| API startet nicht, „Ungültige Umgebungsvariablen“ | fehlender Wert in `.env` (im Live-Modus: URL, beide Keys, Location-ID) |
-| Server-Erstellung schlägt fehl | Keys/Rechte, Egg- oder Location-ID falsch, keine freien Allokationen → `docker compose logs worker` |
-| Keine E-Mails | `docker compose run --rm api node dist/cli.js mail-test du@example.com` – zeigt die Einstellungen, testet andere Ports und nennt die Ursache. Nach Änderungen an der `.env`: `docker compose up -d` |
-| „Ein interner Fehler“ beim Panel-Zugang | `docker compose logs api` – meist Panel nicht erreichbar oder API-Key/Rechte falsch |
-| Port 80/443 belegt | anderer Webserver läuft → `systemctl disable --now apache2 nginx` |
-| Build bricht ohne Meldung ab, `docker compose ps` ist leer | meist zu wenig RAM → `dmesg \| grep -i "killed process"`; Swap anlegen (unten) und nacheinander bauen: `docker compose build migrate && docker compose build web && docker compose up -d` |
+| Installer meldet HTTP 401/403 beim Panel | Key falsch oder ohne Rechte; Application-Key muss mit `ptla_`, Client-Key mit `ptlc_` beginnen |
+| Installer erreicht das Panel nicht | Firewall/Cloudflare blockt den Server – dessen IP im Panel-Server bzw. bei Cloudflare freigeben |
+| Kein HTTPS-Zertifikat | DNS zeigt noch nicht auf den Server oder Port 80/443 zu – `journalctl -u caddy -n 50` |
+| Keine E-Mails | SMTP nicht eingerichtet → Links stehen im Log (`chfree logs api`); testen mit `chfree cli mail-test du@example.com` |
+| „file is not a database“ | `DATABASE_ENCRYPTION_KEY` fehlt oder passt nicht zur Datei |
+| Discord-Bots stehen auf „bald“ | Im Admin unter *Pterodactyl* ist noch keine Node oder kein Egg für Python/Node.js zugewiesen |
+| Server wird nicht erstellt („Keine freie Allokation“) | Auf der Node im Panel weitere Ports (Allokationen) anlegen |
+| Website hängt / lädt endlos | In der Unit `chfree-web` darf `HOSTNAME` nicht auf `127.0.0.1` stehen (siehe Kommentar in der Unit) |
 
-**Swap anlegen (4 GB):**
+## Von Hand (ohne Skript)
 
 ```bash
-fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
-echo '/swapfile none swap sw 0 0' >> /etc/fstab
+cp .env.example .env
 ```
+
+In der `.env` mindestens setzen: `NODE_ENV=production`, `APP_URL`, `NEXT_PUBLIC_SITE_URL`, `DATABASE_PATH`,
+`DATABASE_ENCRYPTION_KEY` (`openssl rand -hex 32`), `PTERODACTYL_MODE=live` + URL + Keys, `ADMIN_EMAILS`, `ADMIN_PATH`,
+`RUN_JOBS_IN_API=false`. Dann:
+
+```bash
+npm ci && npm run build && (cd apps/api && node dist/migrate.js)
+```
+
+Anschließend die Units aus `deploy/systemd/` nach `/etc/systemd/system/` kopieren (Pfade anpassen) und einen Reverse
+Proxy davor setzen: `/api/*` → `127.0.0.1:4000`, alles andere → `127.0.0.1:3000` (Beispiele: `deploy/Caddyfile`,
+`deploy/nginx.example.conf`).
+
+## Docker (Alternative)
+
+```bash
+cp .env.example .env
+```
+
+`DATABASE_ENCRYPTION_KEY`, `SITE_DOMAIN`, `APP_URL`, Pterodactyl-Werte und `ADMIN_*` eintragen, dann:
+
+```bash
+docker compose up -d --build
+```
+
+Die Datenbank liegt im Volume `chfree-data` (API und Worker teilen es sich).
+
+## Umzug von der alten Version (MariaDB)
+
+Die neue Version startet mit einer **leeren** Datenbank; Daten aus MariaDB werden nicht automatisch übernommen.
+Bestehende Vormerkungen lassen sich im Admin unter *Warteliste → Personen hinzufügen* als E-Mail-Liste einspielen.

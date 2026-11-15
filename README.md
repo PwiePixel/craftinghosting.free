@@ -1,18 +1,54 @@
 # CraftingHosting.free
 
-**Free Minecraft Hosting – A CraftingHosting Service.**
+**Free Minecraft & Discord Bot Hosting – A CraftingHosting Service.**
 
-Die Website ist bewusst schlank: Sie erstellt kostenlose Minecraft-Server und kümmert sich im Hintergrund um alles Automatische (Fair-Use-Pausen, 30-Tage-Laufzeit, Suspendierung). **Gespielt und verwaltet wird ausschließlich im Pterodactyl-Panel** von Crafting Hosting – Konsole, Dateien, Plugins, Backups, Start/Stopp. AriX Theme und Addons bleiben unberührt, weil nur die offizielle API genutzt wird.
+Die Website ist bewusst schlank: Sie erstellt kostenlose **Minecraft-Server** und **Discord-Bot-Server** (Python / Node.js) und kümmert sich im Hintergrund um alles Automatische (Fair-Use, 30-Tage-Laufzeit, Suspendierung). **Gespielt und verwaltet wird ausschließlich im Pterodactyl-Panel** von Crafting Hosting – Konsole, Dateien, Plugins, Backups, Start/Stopp. AriX Theme und Addons bleiben unberührt, weil nur die offizielle API genutzt wird.
 
-Die Seite ist **zweisprachig**: Englisch ist Standard unter `craftinghosting.free/…` (z. B. `/my-servers`), Deutsch liegt unter `craftinghosting.free/de/…` mit deutschen Pfaden (z. B. `/de/meine-server`) und ist über den Sprachumschalter erreichbar; die Wahl wird gemerkt. Alte Links (`/en/…`, deutsche Pfade ohne `/de`) werden dauerhaft weitergeleitet. E-Mails, Chat-Hinweise und die Serverbeschreibung im Panel kommen in der Sprache, die der Nutzer zuletzt auf der Website verwendet hat. Server stehen in Deutschland und den Niederlanden, das Panel liegt unter `panel.craftinghosting.free`.
+Die Seite ist **zweisprachig**: Englisch ist Standard unter `craftinghosting.free/…` (z. B. `/my-servers`), Deutsch liegt unter `craftinghosting.free/de/…` mit deutschen Pfaden (z. B. `/de/meine-server`) und ist über den Sprachumschalter erreichbar; die Wahl wird gemerkt. Alte Links (`/en/…`, deutsche Pfade ohne `/de`) werden dauerhaft weitergeleitet. E-Mails, Chat-Hinweise und die Serverbeschreibung im Panel kommen in der Sprache, die der Nutzer zuletzt auf der Website verwendet hat. Standorte und Hardware-Angaben (Standard: Deutschland, Dual Intel Xeon Gold 6230) pflegst du im Admin-Bereich, das Panel liegt unter `panel.craftinghosting.free`.
 
 Screenshots (Mock-Modus): [`docs/screenshots/`](docs/screenshots/)
 
 ---
 
+## Installation in einem Befehl
+
+```bash
+git clone https://github.com/PwiePixel/craftinghosting.free.git && cd craftinghosting.free && sudo bash install.sh
+```
+
+Das Skript fragt nur Domain, Panel-Adresse, die zwei Pterodactyl-API-Keys und die Admin-E-Mail ab – Details in [`docs/DEBIAN-13.md`](docs/DEBIAN-13.md). Die Website läuft auf einem eigenen Server und spricht per API mit dem Panel-Server.
+
+## Was neu ist
+
+| Bereich | Kurz erklärt |
+| --- | --- |
+| **Eigene Pakete** | Admin → Einstellungen → *Produkte & Pakete*: Pakete anlegen, ändern, sortieren, deaktivieren (Minecraft bis 12, Discord-Bots bis 4). RAM, CPU, Speicher, Backups, Datenbanken, Ports, Plätze je Paket. „bis X GB RAM“ auf der Startseite richtet sich automatisch nach dem größten aktiven Paket. |
+| **Kapazität** | Je Produkt eine Obergrenze (Standard: 500 Minecraft-Server + 200 Discord-Bots), zusätzlich optional je Paket. Die Website zeigt „Noch 412 von 500 Plätzen frei“. |
+| **Discord-Bot-Hosting** | Zweites Produkt mit eigenen Paketen, Laufzeit **Python** oder **Node.js**, eigene Node, eigene Nutzungsbedingungen unter `/discord-bot/terms-of-use` · `/de/discord-bot/nutzungsbedingungen`. Pro Person gilt das Server-Limit je Produkt (z. B. ein Minecraft-Server und ein Bot). |
+| **Pterodactyl automatisch** | Admin → *Pterodactyl* liest Nodes (mit freien Ports) und alle Eggs aus dem Panel. Dort wählst du die Nodes für Minecraft, die Node für Discord-Bots und die Eggs je Servertyp (Vorschläge per Klick). Discord-Bots werden **nur** auf ihrer Node erstellt, Minecraft-Server nie darauf. |
+| **Fair-Use für Discord-Bots** | Bots laufen durchgehend. Stattdessen: CPU-Dauerlast-Regel (Vorwarnung → Stopp + Pause), Verwarnungen (→ Sperre) und Freigabe inaktiver Plätze. Alle Werte im Admin einstellbar, die Nutzungsbedingungen übernehmen sie automatisch. |
+| **Alle Server auf einmal** | Admin → *Server* → „Alle Server …“: alle sperren, Sperren aufheben oder alle löschen – wahlweise nur ein Produkt. Admin-Konten sind immer ausgenommen, weitere Konten per E-Mail-Liste. Mit Vorschau und Bestätigungswort. |
+| **Standorte & Hardware** | Admin → Einstellungen → *Hardware & Standorte*: erscheint auf der Startseite, in FAQ und Rechtstexten. |
+| **Spenden** | Admin → Einstellungen → *Spenden*: SumUp-Zahlungslink eintragen → Seite `/donate` · `/de/spenden` und Link „Spenden“ im Header. |
+| **Verschlüsselung** | Datenbank ist eine verschlüsselte SQLite-Datei; IP-Adressen und Browser-Kennungen sind darin zusätzlich einzeln verschlüsselt (AES-256-GCM). |
+| **Cookie-Hinweis** | Kurzer Hinweis mit „Verstanden“; die Bestätigung wird mit Zeitpunkt und verschlüsselter IP protokolliert (90 Tage). |
+
+### Fair-Use-System für Discord-Bots
+
+| Regel | Standard | Was passiert |
+| --- | --- | --- |
+| CPU-Dauerlast | über 90 % des Paket-Limits für 30 min am Stück | nach 15 min Vorwarnung per E-Mail, nach 30 min Stopp und 30 min Pause (Starts in der Pause werden rückgängig gemacht) |
+| Verwarnungen | 3 Stopps in 7 Tagen | Bot wird gesperrt (Grund „abuse“), Entsperren im Admin unter *Server* |
+| Inaktivität | 7 Tage am Stück offline | Erinnerung 2 Tage vorher, dann endet die Laufzeit vorzeitig (suspendiert, reaktivierbar wie nach 30 Tagen) |
+| Laufzeit | 30 Tage | wie bei Minecraft: verlängern unter „Meine Server“ |
+
+Geprüft wird jede Minute im Job `sync-power-states` (`apps/api/src/services/bot-fair-use.ts`). Das klassische Fair-Use-System (24 h am Stück, Wochen-Offline-Zeit) gilt für Minecraft und lässt sich für Bots zusätzlich einschalten.
+
+---
+
 ## So funktioniert es für Nutzer
 
-1. **craftinghosting.free/start** – Paket, Servertyp, Version, Servername und E-Mail angeben (im Early-Access-Modus: „Platz sichern“ → Warteliste, siehe unten)
+1. **craftinghosting.free/start** – Minecraft-Server oder Discord-Bot wählen, dann Paket, Servertyp bzw. Laufzeit, Servername und E-Mail angeben (im Early-Access-Modus: „Platz sichern“ → Warteliste, siehe unten)
 2. **E-Mail-Link klicken** – bestätigt die Adresse und meldet an (die Website hat keine eigenen Passwörter)
 3. **Panel-Zugang festlegen** – Benutzername + Passwort werden direkt an Pterodactyl übergeben (nicht gespeichert). Bestehende Crafting-Hosting-Kunden mit gleicher E-Mail werden automatisch mit ihrem vorhandenen Panel-Konto verknüpft.
 4. **Server wird automatisch angelegt** → E-Mail „Server bereit“ mit Link ins Panel
@@ -58,6 +94,8 @@ Im Admin unter *Einstellungen* oder mit dem Schnellschalter in der Übersicht. B
 
 ## Vorregistrierung (Early Access)
 
+> Standard seit dem Umstieg auf nur eine Hardware (Intel Xeon): **0 EPYC-Plätze**. Dann gibt es eine einzige Warteschlange und öffentlich wird nichts zu EPYC angezeigt. Die EPYC/Xeon-Stufen unten gelten nur, wenn du im Admin wieder EPYC-Plätze einträgst.
+
 Für die erste Startphase: Registrierung auf *Vorregistrierung* stellen. Nutzer sichern sich über `/start` einen Platz (ein Platz pro Person); mit der E-Mail-Bestätigung bekommen sie ihre fortlaufende Nummer. Die ersten *N* Plätze (Admin → „Plätze auf AMD EPYC“) laufen auf dem EPYC, alle weiteren auf den Xeons – die Zuordnung zu Pterodactyl-Locations erfolgt über `PTERODACTYL_LOCATION_IDS_EPYC` / `_XEON`. Verlässt jemand die Warteliste, rücken die anderen nach.
 
 Wer sich schon vorher eingetragen hat (altes System, Discord …), wird im Admin unter *Warteliste → Personen hinzufügen* übernommen: eine E-Mail-Adresse pro Zeile (optional `, Servername`), Paket/Servertyp wählen, optional „Vor allen bisherigen Einträgen einreihen“. Fehlende Konten werden angelegt, die Personen bekommen eine E-Mail mit ihrem reservierten Platz und melden sich später einfach per E-Mail-Link an. Wer schon einen Server oder Platz hat, wird übersprungen.
@@ -76,7 +114,7 @@ Nach der Phase: Modus auf *Offen* und z. B. „Kostenlose Server pro Person“ a
  Browser ──► craftinghosting.free (Caddy/nginx, HTTPS)
                ├── /            ──► apps/web   Next.js 16 · Tailwind 4
                │                    Landingpage, /start, /verify, /login, /meine-server
-               └── /api/v1/*    ──► apps/api   Fastify 5 · Drizzle ORM · MariaDB
+               └── /api/v1/*    ──► apps/api   Fastify 5 · Drizzle ORM · SQLite (verschlüsselt, libSQL)
                                         └──► Pterodactyl Application- & Client-API (nur serverseitig)
 
                apps/api worker ──► Jobs: Power-Sync, Fair-Use, 30-Tage-Zyklus, Panel-Status,
@@ -87,7 +125,10 @@ Nach der Phase: Modus auf *Offen* und z. B. „Kostenlose Server pro Person“ a
 
 | Ordner/Datei | Inhalt |
 | --- | --- |
-| `packages/shared/src/config/freehosting.config.ts` | **Die** Konfigurationsdatei: Pakete, Fair-Use, 30 Tage, Limits, Hardware, Servertypen, Branding |
+| `packages/shared/src/config/freehosting.config.ts` | Grundkonfiguration: **Standard**-Pakete, Fair-Use, 30 Tage, Limits, Servertypen, Branding (Pakete, Kapazität, Standorte ändert man im Admin-Bereich) |
+| `packages/shared/src/settings.ts` | Einstellungen aus dem Admin-Bereich: Prüfung und Standardwerte (Pakete, Produkte, Hardware, Spenden, Bot-Fair-Use) |
+| `apps/api/src/services/bot-fair-use.ts` | Fair-Use-System für Discord-Bots |
+| `install.sh` | Installer/Updater für Debian und Ubuntu |
 | `packages/shared/src/rules/` | Fair-Use- & Zyklus-Logik (inkl. Sommerzeit-Tests) |
 | `apps/api/src/config/pterodactyl.config.ts` | Egg-Zuordnung, Backup-Zeitplan |
 | `apps/api/src/services/panel.ts` | Status-Text im Panel + Chat-Hinweise |
@@ -103,16 +144,16 @@ Nach der Phase: Modus auf *Offen* und z. B. „Kostenlose Server pro Person“ a
 
 ## Schnellstart (lokal, ohne Panel)
 
-Voraussetzungen: Node.js ≥ 20.9, MariaDB/MySQL.
+Voraussetzungen: Node.js ≥ 20.9 – keine Datenbank nötig (SQLite-Datei unter `data/chfree.db`).
 
 ```bash
 cp .env.example .env              # PTERODACTYL_MODE=mock, Jobs laufen im API-Prozess
 npm install
-mysql -uroot -e "CREATE DATABASE chfree CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-                 CREATE USER 'chfree'@'%' IDENTIFIED BY 'chfree'; GRANT ALL ON chfree.* TO 'chfree'@'%';"
 npm run db:migrate
 npm run dev                       # Web: http://localhost:3000 · API: http://localhost:4000
 ```
+
+Im Mock-Modus gibt es drei simulierte Nodes und Eggs für Paper, Vanilla, Forge, Purpur, Fabric, Python und Node.js – damit lässt sich Admin → *Pterodactyl* ohne echtes Panel ausprobieren.
 
 Ohne `SMTP_HOST` erscheinen E-Mails (inkl. Bestätigungslink) in der Konsole der API. Im Mock-Modus wird Pterodactyl simuliert; Chat-Hinweise und Panel-Beschreibungen landen in `apps/api/.pterodactyl-mock.json`.
 
@@ -137,8 +178,8 @@ npm run cli -w @chfree/api -- run all      # alle Jobs einmalig ausführen
 
 1. **Application-API-Key** (`ptla_…`): Users R/W, Servers R/W, Nests R, Nodes R, Locations R, Allocations R → `PTERODACTYL_APP_KEY`
 2. **Client-API-Key** eines Admin-Accounts (`ptlc_…`) – für Stopps, Ressourcen, Chat-Hinweise (`/command`), Backup-Zeitplan → `PTERODACTYL_CLIENT_KEY`
-3. **Location-IDs** der Free-Nodes → `PTERODACTYL_LOCATION_IDS` (Nodes brauchen freie Allokationen)
-4. **Eggs** zuordnen (`apps/api/src/config/pterodactyl.config.ts` oder `.env`, z. B. `PTERODACTYL_EGG_PAPER=1:3`). Purpur/Fabric müssen importiert werden; bis dahin zeigt die Website „bald“.
+3. **Nodes** im Admin unter *Pterodactyl* zuweisen: Nodes für Minecraft und die eigene Node für Discord-Bots (Nodes brauchen freie Allokationen). `PTERODACTYL_LOCATION_IDS` ist nur noch ein optionaler Rückfall.
+4. **Eggs** im Admin unter *Pterodactyl* wählen – alle Eggs des Panels werden erkannt, passende vorgeschlagen. Für Discord-Bots ein Python- und ein Node.js-Egg importieren (z. B. „generic python“ / „generic nodejs“ aus github.com/pelican-eggs). Ohne Egg zeigt die Website „bald“. Die `.env`-Variablen `PTERODACTYL_EGG_*` bleiben als Alternative.
 5. `PTERODACTYL_MODE=live`, `PTERODACTYL_URL`, `PTERODACTYL_PUBLIC_URL` setzen
 
 Panel-Konten bekommen `external_id = chf-user-<id>`, Server `chf-server-<id>` – dadurch entstehen bei Wiederholungen keine Duplikate. Die Serverbeschreibung wird über `PATCH /servers/{id}/details` gesetzt (Name und Besitzer bleiben unverändert, auch wenn der Nutzer den Server im Panel umbenennt).
@@ -151,7 +192,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 
 | Job | Intervall | Aufgabe |
 | --- | --- | --- |
-| `sync-power-states` | 60 s | Zustand aus dem Panel lesen, Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation |
+| `sync-power-states` | 60 s | Zustand aus dem Panel lesen, Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation, **Fair-Use für Discord-Bots** (CPU-Dauerlast, Inaktivität) |
 | `enforce-fair-use` | 60 s | Chat-Warnungen, 24-h-Limit, Wochen-Offline-Zeit, Pausen-Verstöße |
 | `cycle-lifecycle` | 60 s | Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag |
 | `status-history` | 5 min | Status aller Dienste speichern (Grundlage für die Uptime der letzten 30 Tage) |
@@ -180,7 +221,10 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 | GET | `/meta` · `/site` · `/status` · `/health` | Pakete & Verfügbarkeit, öffentliche Einstellungen + Zahlen, Netzwerkstatus (inkl. Meldungen und Uptime), Liveness |
 | GET | `/admin/overview` · `/admin/servers` · `/admin/users` · `/admin/audit` · `/admin/mails` | Admin: Übersicht und Listen (nur Admins, sonst 404) |
 | POST | `/admin/servers/:id/{extend,clear-pause,suspend,unsuspend,retry,delete}` · `/admin/users/:id/{lock,unlock,make-admin,remove-admin}` · `/admin/jobs/:name/run` · `/admin/mail-test` | Admin-Aktionen (alle im Audit-Log) |
-| GET/POST | `/admin/settings` | Einstellungen (Wartung, Registrierung, Warteliste, Zahlen, Status je Dienst) |
+| GET/POST | `/admin/settings` | Einstellungen (Wartung, Registrierung, Produkte & Pakete, Hardware, Spenden, Bot-Fair-Use, Warteliste, Zahlen, Status je Dienst) |
+| GET | `/admin/panel` | Pterodactyl: Verbindung, Nodes mit freien Ports, alle Eggs, Vorschläge je Servertyp |
+| POST | `/admin/servers/bulk` | Alle Server sperren / entsperren / löschen (in Runden, mit `dryRun`-Vorschau und Ausnahmen) |
+| POST | `/consent` | Bestätigung des Cookie-Hinweises protokollieren |
 | GET/POST | `/admin/waitlist` · `/admin/waitlist/release` · `/admin/waitlist/:id/remove` | Warteliste |
 | GET/POST | `/admin/incidents` · `/admin/incidents/:id` · `/admin/incidents/:id/{resolve,delete}` | Meldungen der Statusseite |
 
@@ -190,13 +234,15 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 
 Schritt-für-Schritt für Debian 13: [`docs/DEBIAN-13.md`](docs/DEBIAN-13.md)
 
+Empfohlen: `sudo bash install.sh` (siehe oben). Alternativ mit Docker:
+
 ```bash
-cp .env.example .env     # NODE_ENV=production, APP_URL=https://craftinghosting.free, DB-Passwörter,
+cp .env.example .env     # NODE_ENV=production, APP_URL=https://craftinghosting.free, DATABASE_ENCRYPTION_KEY,
                          # PTERODACTYL_MODE=live + Keys, SMTP_*, NEXT_PUBLIC_PANEL_URL
 docker compose up -d --build
 ```
 
-Startet MariaDB, Migration, API, Worker, Website und Caddy (automatisches HTTPS). Ohne Docker: `npm ci && npm run build && npm run db:migrate`, dann die systemd-Units aus `deploy/systemd/` und `deploy/nginx.example.conf`.
+Startet Migration, API, Worker, Website und Caddy (automatisches HTTPS); die verschlüsselte Datenbank liegt im Volume `chfree-data`. **Datenbank-Datei und `DATABASE_ENCRYPTION_KEY` gemeinsam sichern** – ohne Schlüssel ist die Datei wertlos. Daten aus der früheren MariaDB-Version werden nicht automatisch übernommen.
 
 ---
 
@@ -209,7 +255,9 @@ Startet MariaDB, Migration, API, Worker, Website und Caddy (automatisches HTTPS)
 - Session-Cookie HttpOnly/Secure/SameSite=Lax, CSRF-Header + Origin-Prüfung, Rate-Limits, zod-Validierung, Server-Limit per Zeilensperre
 - Antworten verraten nicht, ob eine E-Mail-Adresse existiert
 - Admin-Bereich unter geheimem Pfad, 404 für alle anderen, `noindex`
-- Keine Zugriffsprotokolle (API ohne Request-Logging, Caddy ohne Access-Log, Docker-Logs rotiert)
+- Datenbank im Ruhezustand verschlüsselt (SQLite über libSQL, Schlüssel `DATABASE_ENCRYPTION_KEY`)
+- IP-Adressen werden gespeichert (Registrierung, Anmeldung, Sitzungen, Audit-Log, Cookie-Hinweis) – ausschließlich verschlüsselt (AES-256-GCM) und nur im Admin-Bereich lesbar; Audit- und Einwilligungs-Protokoll werden nach 90 Tagen gelöscht
+- Keine allgemeinen Zugriffsprotokolle (API ohne Request-Logging, Caddy ohne Access-Log, Docker-Logs rotiert)
 
 ---
 
@@ -220,7 +268,10 @@ Startet MariaDB, Migration, API, Worker, Website und Caddy (automatisches HTTPS)
 - [ ] Englische Rechtstexte gegenlesen lassen (die deutsche Fassung ist maßgeblich)
 - [ ] DNS für `panel.craftinghosting.free` + im Panel `APP_URL` und bei Wings die Panel-Adresse anpassen
 - [ ] Offizielles Logo einbinden (`apps/web/src/components/brand/logo.tsx`)
-- [ ] API-Keys, Location- und Egg-IDs eintragen; Versionsliste an die Eggs anpassen
+- [ ] API-Keys eintragen; im Admin unter *Pterodactyl* Nodes und Eggs zuweisen (Discord-Bot-Node, Python-/Node.js-Egg); Versionsliste an die Eggs anpassen
+- [ ] Pakete, Kapazität und Fair-Use-Werte für Discord-Bots im Admin prüfen
+- [ ] SumUp-Zahlungslink eintragen, falls Spenden gewünscht sind
+- [ ] Backup von Datenbank **und** `DATABASE_ENCRYPTION_KEY` einrichten (`chfree backup`)
 - [ ] SMTP mit SPF/DKIM für die Absenderdomain
 - [ ] Fair-Use-Werte final festlegen
 - [ ] Optional: Captcha (z. B. Cloudflare Turnstile) für `/start`
