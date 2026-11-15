@@ -139,10 +139,45 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
       </section>
 
       <section>
-        <h2>5. Erlaubte Nutzung</h2>
+        <h2>5. Erlaubte Nutzung, Websites und Dashboards</h2>
         <p>
           Der Server darf ausschließlich für den Betrieb von Discord-Bots genutzt werden – einschließlich direkt dazugehöriger Hilfsprozesse, z. B. einer kleinen Datenbank
           oder eines Webhook-Empfängers für den Bot.
+        </p>
+        <p>
+          <strong>Keine Websites.</strong> Der Server ist ein Discord-Bot-Server, kein Webserver. Das Hosten von Websites ist nicht erlaubt – weder zusätzlich zum Bot noch
+          anstelle eines Bots. Das gilt für jede Art von Website, z. B. Homepage, Landingpage, Blog, Shop, Portfolio, Linkseite oder Dateidownloads.
+        </p>
+        <p>
+          <strong>Einzige Ausnahme: ein Dashboard für den eigenen Bot.</strong> Eine Web-Oberfläche ist zulässig, wenn sie ausschließlich der Einrichtung und Verwaltung des
+          auf diesem Server betriebenen Bots dient und alle folgenden Voraussetzungen erfüllt:
+        </p>
+        <ul>
+          <li>
+            <strong>Anmeldung:</strong> Die Funktionen des Dashboards sind erst nach einer Anmeldung nutzbar (z. B. Login mit Discord). Öffentlich sichtbar sein dürfen nur
+            die Anmeldeseite und die gesetzlich vorgeschriebenen Angaben.
+          </li>
+          <li>
+            <strong>Anbieterkennzeichnung:</strong> Das Dashboard enthält ein Impressum, das den Anforderungen des § 5 DDG (Digitale-Dienste-Gesetz) entspricht, soweit eine
+            solche Pflicht besteht.
+          </li>
+          <li>
+            <strong>Geltendes Recht:</strong> Der Betreiber hält die rechtlichen Vorgaben des Landes ein, in dem er ansässig ist, und der Länder, an die sich das Dashboard
+            richtet – insbesondere zum Datenschutz (z. B. Datenschutzerklärung nach DSGVO) und zum Schutz von Minderjährigen.
+          </li>
+          <li>
+            <strong>Verantwortung:</strong> Anbieter des Dashboards ist allein der Nutzer, nicht CraftingHosting. Er trifft die nötigen Vorkehrungen selbst und stellt uns von
+            Ansprüchen Dritter frei, die aus dem Betrieb des Dashboards entstehen.
+          </li>
+          <li>
+            <strong>Umfang:</strong> Das Dashboard bleibt eine Nebenfunktion des Bots und belastet die geteilten Ressourcen nicht übermäßig.
+          </li>
+        </ul>
+        <p>
+          <strong>Erkennung und Freigabe.</strong> Wir dürfen automatisiert und durch unser Team prüfen, ob auf einem Server Websites oder andere Webdienste betrieben werden.
+          Dabei kann auch ein zulässiges Dashboard auffallen. In diesem Fall können wir den Server vorsorglich sperren, bis über ein Support-Ticket geklärt ist, dass es sich
+          um ein Dashboard für den eigenen Bot handelt und die Voraussetzungen oben erfüllt sind. Erst danach geben wir den Server wieder frei. Ein Anspruch darauf, ein
+          Dashboard zu betreiben, besteht nicht.
         </p>
       </section>
 
@@ -156,7 +191,8 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           <li>Scraping und Datensammlung entgegen den Bedingungen von Discord</li>
           <li>Kryptomining, Proxy-/VPN-Dienste und Tunnel</li>
           <li>Angriffe auf andere Systeme, Portscans und DDoS-Werkzeuge</li>
-          <li>Betrieb von Websites, Game-Servern oder Dateispeichern ohne Bezug zum Bot</li>
+          <li>Betrieb von Websites jeder Art – ausgenommen ein Dashboard für den eigenen Bot unter den Voraussetzungen aus Ziffer 5</li>
+          <li>Betrieb von Game-Servern, Dateispeichern oder anderer Software ohne Bezug zum Bot</li>
           <li>Speichern oder Verbreiten von Schadsoftware sowie rechtswidrige Inhalte</li>
           <li>Weitergabe, Verkauf oder Vermietung des kostenlosen Platzes an Dritte</li>
           <li>Mehrere Konten pro Person (Multi-Accounting)</li>
@@ -185,6 +221,13 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
         <p>
           Bei Verstößen kann der Bot ohne Vorankündigung gesperrt oder gelöscht werden. Gesperrte Server lassen sich nicht selbst reaktivieren. Zur Aufklärung von Missbrauch
           dürfen wir die Dateien des betroffenen Servers einsehen.
+        </p>
+        <p>
+          <strong>Abuse-Verfahren.</strong> Erkennt unser System einen möglichen Verstoß oder fällt er einem Teammitglied auf – etwa eine Website auf einem Bot-Server –,
+          dürfen wir jederzeit ein Abuse-Verfahren einleiten. Der Fall wird dann von einer weiteren, übergeordneten Stelle in unserem Team geprüft. Bestätigt sie den
+          Verstoß, wird der Server gesperrt und unter „Meine Server“ als „Abuse“ markiert; der Nutzer wird per E-Mail informiert. Eine Freigabe ist nur über ein
+          Support-Ticket auf unserem Discord-Server möglich. Wird der Verstoß nicht bestätigt, bleibt der Server in Betrieb bzw. wird wieder freigegeben. Zum Schutz unserer
+          Systeme und Dritter dürfen wir einen Server schon während der Prüfung vorsorglich sperren.
         </p>
       </section>
 
@@ -332,9 +375,43 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
       </section>
 
       <section>
-        <h2>5. Allowed use</h2>
+        <h2>5. Allowed use, websites and dashboards</h2>
         <p>
           The server may only be used to run Discord bots – including directly related helper processes, e.g. a small database or a webhook listener for the bot.
+        </p>
+        <p>
+          <strong>No websites.</strong> The server is a Discord bot server, not a web server. Hosting websites is not allowed – neither in addition to the bot nor instead of
+          a bot. This applies to every kind of website, e.g. homepage, landing page, blog, shop, portfolio, link page or file downloads.
+        </p>
+        <p>
+          <strong>The only exception: a dashboard for your own bot.</strong> A web interface is permitted if it serves exclusively to set up and manage the bot running on
+          this server and meets all of the following requirements:
+        </p>
+        <ul>
+          <li>
+            <strong>Login:</strong> The functions of the dashboard can only be used after signing in (e.g. login with Discord). Only the login page and the legally required
+            information may be publicly visible.
+          </li>
+          <li>
+            <strong>Provider identification:</strong> The dashboard contains a legal notice that meets the requirements of section 5 of the German Digital Services Act
+            (§ 5 DDG), where such an obligation exists.
+          </li>
+          <li>
+            <strong>Applicable law:</strong> The operator complies with the legal requirements of the country in which they are based and of the countries the dashboard is
+            aimed at – in particular regarding data protection (e.g. a privacy policy under the GDPR) and the protection of minors.
+          </li>
+          <li>
+            <strong>Responsibility:</strong> The provider of the dashboard is solely the user, not CraftingHosting. Users take the necessary precautions themselves and
+            indemnify us against third-party claims arising from the operation of the dashboard.
+          </li>
+          <li>
+            <strong>Scope:</strong> The dashboard remains a secondary function of the bot and does not put excessive load on the shared resources.
+          </li>
+        </ul>
+        <p>
+          <strong>Detection and approval.</strong> We may check, automatically and through our team, whether websites or other web services are being run on a server. A
+          permitted dashboard may be picked up in the process. In that case we may suspend the server as a precaution until it has been clarified via a support ticket that
+          it is a dashboard for your own bot and that the requirements above are met. Only then do we release the server again. There is no entitlement to run a dashboard.
         </p>
       </section>
 
@@ -348,7 +425,8 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           <li>Scraping and data collection in violation of Discord’s terms</li>
           <li>Crypto mining, proxy/VPN services and tunnels</li>
           <li>Attacks on other systems, port scans and DDoS tools</li>
-          <li>Hosting websites, game servers or file storage unrelated to the bot</li>
+          <li>Hosting websites of any kind – except a dashboard for your own bot under the requirements of section 5</li>
+          <li>Running game servers, file storage or other software unrelated to the bot</li>
           <li>Storing or distributing malware, and illegal content</li>
           <li>Passing on, selling or renting the free slot to third parties</li>
           <li>Multiple accounts per person (multi-accounting)</li>
@@ -376,6 +454,13 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
         <p>
           In case of violations, the bot may be suspended or deleted without prior notice. Servers suspended by the team cannot be reactivated by the user. To investigate
           abuse, we may inspect the files of the server concerned.
+        </p>
+        <p>
+          <strong>Abuse procedure.</strong> If our system detects a possible violation or a team member notices one – for example a website on a bot server – we may open an
+          abuse procedure at any time. The case is then reviewed by a further, senior instance within our team. If it confirms the violation, the server is suspended and
+          marked as “Abuse” under “My servers”; the user is informed by email. The server can only be released via a support ticket on our Discord server. If the violation
+          is not confirmed, the server stays in operation or is released again. To protect our systems and third parties, we may suspend a server as a precaution while the
+          review is still in progress.
         </p>
       </section>
 

@@ -82,6 +82,11 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
           <li>Übermäßige Belastung der geteilten Ressourcen (z. B. absichtliche Lag-Maschinen)</li>
           <li>Speichern oder Verbreiten von Schadsoftware, Phishing-Inhalten oder Inhalten, die Minderjährige gefährden</li>
           <li>Nutzung als reiner Datei-, Backup- oder Webspeicher sowie der Betrieb anderer Software als eines Minecraft-Servers</li>
+          <li>
+            Betrieb von Websites oder Webdiensten jeder Art (z. B. Homepage, Shop, Forum, Dateidownloads). Ausgenommen sind Web-Oberflächen, die unmittelbar zum
+            Minecraft-Server gehören, etwa eine Live-Karte der Welt. Dafür ist allein der Nutzer verantwortlich – einschließlich Anbieterkennzeichnung nach § 5 DDG,
+            Datenschutz und der rechtlichen Vorgaben seines Landes
+          </li>
           <li>Weitergabe, Verkauf oder Vermietung kostenloser Server bzw. Wartelisten-Plätze an Dritte</li>
           <li>Verstöße gegen die Minecraft-EULA von Mojang/Microsoft, z. B. unzulässige Bezahl-Vorteile</li>
         </ul>
@@ -90,6 +95,14 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
           <Link href={localePath('de', 'discordTerms')}>Nutzungsbedingungen für Discord-Bot-Hosting</Link>.
         </p>
         <p>Bei Verstößen kann der Server ohne Vorankündigung gesperrt werden. Gesperrte Server lassen sich nicht selbst reaktivieren.</p>
+        <p>
+          <strong>Abuse-Verfahren.</strong> Wir dürfen automatisiert und durch unser Team prüfen, ob ein Server regelwidrig genutzt wird – zum Beispiel, ob darauf eine
+          Website betrieben wird. Erkennt unser System einen möglichen Verstoß oder fällt er einem Teammitglied auf, dürfen wir jederzeit ein Abuse-Verfahren einleiten. Der
+          Fall wird dann von einer weiteren, übergeordneten Stelle in unserem Team geprüft. Bestätigt sie den Verstoß, wird der Server gesperrt und unter „Meine Server“ als
+          „Abuse“ markiert; der Nutzer wird per E-Mail informiert. Eine Freigabe ist nur über ein Support-Ticket auf unserem Discord-Server möglich. Wird der Verstoß nicht
+          bestätigt, bleibt der Server in Betrieb bzw. wird wieder freigegeben. Zum Schutz unserer Systeme und Dritter dürfen wir einen Server schon während der Prüfung
+          vorsorglich sperren und zur Aufklärung seine Dateien einsehen.
+        </p>
       </section>
 
       <section>
@@ -175,6 +188,11 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
           <li>Excessive load on the shared resources (e.g. deliberate lag machines)</li>
           <li>Storing or distributing malware, phishing content or content that endangers minors</li>
           <li>Use as pure file, backup or web storage, or running software other than a Minecraft server</li>
+          <li>
+            Hosting websites or web services of any kind (e.g. homepage, shop, forum, file downloads). The only exception is web interfaces that belong directly to the
+            Minecraft server, such as a live map of the world. The user alone is responsible for these – including provider identification under § 5 DDG (German Digital
+            Services Act), data protection and the legal requirements of their country
+          </li>
           <li>Passing on, selling or renting free servers or waitlist spots to third parties</li>
           <li>Violations of the Minecraft EULA of Mojang/Microsoft, e.g. prohibited pay-to-win advantages</li>
         </ul>
@@ -183,6 +201,14 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
           them.
         </p>
         <p>In case of violations, the server may be suspended without prior notice. Servers suspended by the team cannot be reactivated by the user.</p>
+        <p>
+          <strong>Abuse procedure.</strong> We may check, automatically and through our team, whether a server is being used in breach of the rules – for example whether a
+          website is hosted on it. If our system detects a possible violation or a team member notices one, we may open an abuse procedure at any time. The case is then
+          reviewed by a further, senior instance within our team. If it confirms the violation, the server is suspended and marked as “Abuse” under “My servers”; the user is
+          informed by email. The server can only be released via a support ticket on our Discord server. If the violation is not confirmed, the server stays in operation or
+          is released again. To protect our systems and third parties, we may suspend a server as a precaution while the review is still in progress and inspect its files
+          to investigate.
+        </p>
       </section>
 
       <section>

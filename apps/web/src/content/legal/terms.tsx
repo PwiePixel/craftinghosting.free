@@ -68,6 +68,10 @@ export function TermsDe({ site }: { site: PublicSiteDTO }) {
             den jeweiligen Nutzungsbedingungen aufgeführt.
           </li>
           <li>
+            Das Hosten von Websites ist nicht gestattet. Welche eng begrenzten Ausnahmen gelten (z. B. ein Dashboard für den eigenen Discord-Bot) und welche Pflichten der
+            Nutzer dabei selbst trägt – etwa die Anbieterkennzeichnung nach § 5 DDG –, regeln die jeweiligen Nutzungsbedingungen.
+          </li>
+          <li>
             Nutzer beachten die Minecraft-Nutzungsbedingungen (EULA) von Mojang/Microsoft bzw. bei Discord-Bots die Nutzungsbedingungen und die Developer Policy von Discord
             sowie geltendes Recht.
           </li>
@@ -98,6 +102,12 @@ export function TermsDe({ site }: { site: PublicSiteDTO }) {
           Vertrag mit einer Frist von 14 Tagen per E-Mail kündigen oder das kostenlose Angebot mit dieser Frist einstellen. Das Recht zur fristlosen Kündigung aus wichtigem
           Grund bleibt unberührt; ein wichtiger Grund liegt insbesondere bei schweren oder wiederholten Verstößen gegen diese AGB oder die Nutzungsbedingungen vor. Bei
           Verstößen kann der Anbieter Server auch vorübergehend sperren.
+        </p>
+        <p>
+          Besteht der Verdacht eines Verstoßes – weil ihn die Systeme des Anbieters automatisiert erkennen oder er einem Teammitglied auffällt –, kann der Anbieter ein
+          Abuse-Verfahren einleiten. Der Fall wird von einer weiteren, übergeordneten Stelle im Team des Anbieters geprüft. Bestätigt sie den Verstoß, wird der Server
+          gesperrt; die Freigabe ist nur über ein Support-Ticket möglich. Wird der Verstoß nicht bestätigt, wird der Server nicht gesperrt bzw. wieder freigegeben. Zum
+          Schutz der Systeme und Dritter darf der Anbieter den Server bereits während der Prüfung vorsorglich sperren.
         </p>
       </section>
 
@@ -185,6 +195,10 @@ export function TermsEn({ site }: { site: PublicSiteDTO }) {
             terms of use.
           </li>
           <li>
+            Hosting websites is not permitted. The narrow exceptions that apply (e.g. a dashboard for your own Discord bot) and the obligations users bear themselves in that
+            case – such as provider identification under § 5 DDG (German Digital Services Act) – are set out in the respective terms of use.
+          </li>
+          <li>
             Users comply with the Minecraft end user license agreement (EULA) of Mojang/Microsoft or, for Discord bots, Discord’s Terms of Service and Developer Policy, as
             well as applicable law.
           </li>
@@ -215,6 +229,12 @@ export function TermsEn({ site }: { site: PublicSiteDTO }) {
           contract by email with 14 days’ notice or discontinue the free offer with this notice period. The right to terminate without notice for good cause remains unaffected;
           good cause exists in particular in the case of serious or repeated violations of these terms or the terms of use. In case of violations, the provider may also
           suspend servers temporarily.
+        </p>
+        <p>
+          If a violation is suspected – because the provider’s systems detect it automatically or a team member notices it – the provider may open an abuse procedure. The
+          case is reviewed by a further, senior instance within the provider’s team. If it confirms the violation, the server is suspended; it can only be released via a
+          support ticket. If the violation is not confirmed, the server is not suspended or is released again. To protect its systems and third parties, the provider may
+          suspend the server as a precaution while the review is still in progress.
         </p>
       </section>
 

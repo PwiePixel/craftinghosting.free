@@ -37,6 +37,15 @@ export const ABUSE_REASONS: { id: string; label: string; title: Localized; text:
     text: { de: 'Auf deinem Server liegen Inhalte, die nach unseren Regeln nicht erlaubt sind.', en: 'Your server hosts content that is not allowed under our rules.' },
   },
   {
+    id: 'website',
+    label: 'Website auf dem Server',
+    title: { de: 'Verstoß gegen die Regeln: Website auf dem Server', en: 'Rule violation: website on the server' },
+    text: {
+      de: 'Auf deinem Server wird eine Website betrieben. Das ist nicht erlaubt: Unsere Server sind für Minecraft bzw. Discord-Bots da, nicht als Webserver. Einzige Ausnahme bei Discord-Bots ist ein Dashboard für den eigenen Bot mit Anmeldung und den gesetzlich vorgeschriebenen Angaben (z. B. Impressum nach § 5 DDG).',
+      en: 'A website is being hosted on your server. This is not allowed: our servers are for Minecraft or Discord bots, not web servers. The only exception for Discord bots is a dashboard for your own bot with a login and the legally required information (e.g. a legal notice under § 5 DDG).',
+    },
+  },
+  {
     id: 'multi',
     label: 'Mehrfach-Accounts',
     title: { de: 'Verstoß gegen die Regeln: mehrere Accounts', en: 'Rule violation: multiple accounts' },

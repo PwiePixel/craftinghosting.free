@@ -79,6 +79,21 @@ steht unter „Meine Server“.
   vorerst erhalten, und er lässt sich unter „Meine Server“ sofort wieder reaktivieren. Ohne Reaktivierung wird er nach
   einigen Tagen gelöscht.
 - Selfbots, Spam und Bots, die gegen die Regeln von Discord verstoßen, sind nicht erlaubt.
+- Websites sind auf Bot-Servern nicht erlaubt: Es sind Discord-Bot-Server, keine Webserver. Einzige Ausnahme ist ein
+  Dashboard für den eigenen Bot – mit Anmeldung (z. B. Login mit Discord), Impressum nach § 5 DDG, soweit nötig, und
+  unter Beachtung des Rechts im eigenen Land. Auch ein erlaubtes Dashboard kann vom System auffallen; dann kann der
+  Server vorsorglich gesperrt werden, bis im Support-Ticket geklärt ist, dass es zum Bot gehört.
+
+## Abuse (Regelverstöße)
+
+- Erkennt das System oder das Team einen möglichen Verstoß (z. B. eine Website auf dem Server, Krypto-Mining, Angriffe),
+  wird ein Abuse-Verfahren eingeleitet und von einer weiteren Stelle im Team geprüft.
+- Wird der Verstoß bestätigt, wird der Server gesperrt und unter „Meine Server“ rot als „Abuse“ markiert; dazu kommt
+  eine E-Mail mit dem Grund.
+- Klären lässt sich das nur über ein Ticket auf unserem Discord-Server. Der Chat kann eine Sperre oder Markierung
+  nicht aufheben.
+- Auch auf Minecraft-Servern sind Websites nicht erlaubt. Ausgenommen sind Web-Oberflächen, die direkt zum
+  Minecraft-Server gehören, z. B. eine Live-Karte.
 
 ## Discord
 
