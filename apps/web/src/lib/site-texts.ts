@@ -2,7 +2,7 @@
  * Texte, die von den Einstellungen im Admin-Bereich abhängen (Pakete, Standorte, Hardware):
  * „bis zu X GB RAM“ richtet sich nach dem größten Paket, „DE“ nach den eingestellten Standorten.
  */
-import { formatMb, locationCodes, locationNames, maxPlanMemoryMb, type Locale, type PublicSiteDTO, describeServerLimits } from '@chfree/shared';
+import { formatMb, intlLocale, locationCodes, locationNames, maxPlanMemoryMb, type Locale, type PublicPlanDTO, type PublicSiteDTO, describeServerLimits } from '@chfree/shared';
 import type { FaqContext } from '@/i18n/dictionaries/de';
 
 /** RAM-Angaben einer Paketliste: „4 GB oder 6 GB“ bzw. „256 MB bis 2 GB“ */
@@ -11,6 +11,29 @@ export function ramRange(plans: readonly { memoryMb: number }[], lang: Locale): 
   if (values.length === 0) return '–';
   if (values.length <= 2) return values.map((v) => formatMb(v, lang)).join(lang === 'de' ? ' oder ' : ' or ');
   return `${formatMb(values[0]!, lang)} ${lang === 'de' ? 'bis' : 'to'} ${formatMb(values[values.length - 1]!, lang)}`;
+}
+
+/** CPU-Limit als Threads: 200 → „2“, 350 → „3,5“ (de) bzw. „3.5“ (en) */
+export function cpuThreads(cpuPercent: number, lang: Locale): string {
+  return (cpuPercent / 100).toLocaleString(intlLocale(lang), { maximumFractionDigits: 2 });
+}
+
+/**
+ * Alle Eckdaten eines Pakets in einer Zeile – EINE Quelle für die strukturierten Daten (schema.org) und /llms.txt.
+ * Die Werte kommen aus den Paketen im Admin-Bereich, nie aus den Standardwerten im Code.
+ */
+export function planFacts(p: PublicPlanDTO, lang: Locale): string {
+  const de = lang === 'de';
+  const one = p.cpuPercent === 100;
+  const parts = [
+    `${formatMb(p.memoryMb, lang)} RAM`,
+    de ? `bis ${cpuThreads(p.cpuPercent, lang)} ${one ? 'Thread' : 'Threads'} (geteilt)` : `up to ${cpuThreads(p.cpuPercent, lang)} CPU ${one ? 'thread' : 'threads'} (shared)`,
+    de ? `${formatMb(p.diskMb, lang)} NVMe-Speicher` : `${formatMb(p.diskMb, lang)} NVMe storage`,
+  ];
+  if (p.backups > 0) parts.push(de ? `${p.backups} ${p.backups === 1 ? 'Backup' : 'Backups'} (täglich automatisch)` : `${p.backups} ${p.backups === 1 ? 'backup' : 'backups'} (daily, automatic)`);
+  if (p.databases > 0) parts.push(de ? `${p.databases} ${p.databases === 1 ? 'Datenbank' : 'Datenbanken'}` : `${p.databases} ${p.databases === 1 ? 'database' : 'databases'}`);
+  if (p.allocations > 1) parts.push(`${p.allocations} ${de ? 'Ports' : 'ports'}`);
+  return parts.join(' · ');
 }
 
 export interface SiteTexts {

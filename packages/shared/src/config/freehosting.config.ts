@@ -3,11 +3,19 @@
  *  CraftingHosting.free – zentrale Produktkonfiguration
  * ============================================================================
  *
- *  Diese Datei ist die EINZIGE Stelle, an der Pakete, Fair-Use-Regeln,
- *  der 30-Tage-Zyklus, Limits, Hardware-Angaben und Servertypen gepflegt
- *  werden. Website, Dashboard, API und Worker lesen alle von hier.
+ *  ACHTUNG: Diese Datei enthält nur die STANDARDWERTE für eine frische
+ *  Installation (und den Notbehelf, falls die API kurz nicht erreichbar ist).
+ *  Pakete, Plätze, Fair-Use-Regeln, Laufzeit, Limits, Standorte und Hardware
+ *  werden im Admin-Bereich gepflegt und in der Datenbank gespeichert – die
+ *  LIVE-WERTE WEICHEN DAHER VON DIESER DATEI AB.
  *
- *  Nach Änderungen: API/Worker neu starten und die Website neu bauen.
+ *  Aktueller Stand der Live-Seite (immer hier nachsehen, nie hier ableiten):
+ *    – https://craftinghosting.free/llms.txt   (lesbar, bei jedem Abruf neu erzeugt)
+ *    – GET /api/v1/site                         (dieselben Daten als JSON)
+ *
+ *  Direkt aus dieser Datei kommen nur die Servertypen/Versionen sowie die
+ *  Netzwerk- und Speicherangabe der Hardware. Nach Änderungen: API/Worker neu
+ *  starten und die Website neu bauen.
  *
  *  Deployment-spezifische Pterodactyl-Werte (Egg-IDs, Locations …) liegen
  *  bewusst NICHT hier, sondern in apps/api/src/config/pterodactyl.config.ts

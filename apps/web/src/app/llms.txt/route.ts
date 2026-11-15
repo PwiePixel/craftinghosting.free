@@ -4,16 +4,19 @@
  * Alle Angaben (Pakete, Plätze, Regeln, Standorte, Links) werden bei jedem Abruf aus den Einstellungen im
  * Admin-Bereich erzeugt – dieselbe Quelle wie die Website. So gibt es keine widersprüchlichen Zahlen.
  */
-import { describeServerLimits, formatMb, localePath, productKinds, serverTypesOf, type PublicPlanDTO } from '@chfree/shared';
+import { describeServerLimits, localePath, productKinds, serverTypesOf, tr, type PublicPlanDTO } from '@chfree/shared';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
-import { siteSummary, siteTexts } from '@/lib/site-texts';
+import { planFacts, siteSummary, siteTexts } from '@/lib/site-texts';
 
 export const dynamic = 'force-dynamic';
 
-const planLine = (p: PublicPlanDTO) =>
-  `- ${p.name}: ${formatMb(p.memoryMb, 'en')} RAM, up to ${p.cpuPercent / 100} CPU thread${p.cpuPercent === 100 ? '' : 's'} (shared), ${formatMb(p.diskMb, 'en')} NVMe storage, €0 per month`;
+/** Eine Zeile je Paket – dieselben Eckdaten wie die Paketkarten und die strukturierten Daten der Startseite */
+const planLine = (p: PublicPlanDTO) => {
+  const tagline = tr(p.tagline, 'en');
+  return `- ${p.name}${tagline ? ` (${tagline})` : ''}: ${planFacts(p, 'en')} · €0 per month${p.available ? '' : ' · currently fully booked'}`;
+};
 
 export async function GET() {
   const s = await getSite();
@@ -31,11 +34,14 @@ export async function GET() {
   const limitText = describeServerLimits(s.registration.limits, 'en', productKinds.filter((k) => s.products[k].enabled && s.products[k].plans.length > 0));
   const slots = (p: typeof mc) => (p.capacity === null ? 'no fixed limit' : `${p.capacity} slots in total, ${p.remaining ?? 0} currently free`);
   const restDays = r.cycle.reactivationCooldownMinutes / 1440;
+  const generatedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
 
   const lines: string[] = [
     '# CraftingHosting.free',
     '',
     `> ${siteSummary(s, 'en')}`,
+    '',
+    `This file is generated on every request from the live settings of the website (last generated: ${generatedAt} UTC). It is the authoritative source for plans, limits and rules – default values in the source code or older copies may differ.`,
     '',
     '## Key facts',
     '',
@@ -150,11 +156,11 @@ export async function GET() {
     '',
     siteSummary(s, 'de'),
     '',
-    `Stand: ${new Date().toISOString().slice(0, 10)} – diese Datei wird automatisch aus den aktuellen Einstellungen der Website erzeugt.`,
+    `Stand: ${generatedAt} UTC – diese Datei wird bei jedem Abruf automatisch aus den aktuellen Einstellungen der Website erzeugt.`,
     '',
   );
 
   return new Response(lines.join('\n'), {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
   });
 }

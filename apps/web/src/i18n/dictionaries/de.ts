@@ -298,7 +298,7 @@ return {
     stepName: 'Servername',
     stepAccount: 'Konto',
     stepEmail: 'Deine E-Mail-Adresse',
-    planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · bis ${cpu} % CPU`,
+    planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · bis ${(cpu / 100).toLocaleString('de-DE')} ${cpu === 100 ? 'Thread' : 'Threads'}`,
     soldOut: 'Aktuell ausgebucht',
     planTaken: 'Dieses Paket hast du bereits',
     planLocked: 'Mit deinen freien Slots nicht wählbar',

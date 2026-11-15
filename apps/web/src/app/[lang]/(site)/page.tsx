@@ -11,7 +11,7 @@ import { formatters, getDict, resolveLang } from '@/i18n';
 import { alternates } from '@/lib/seo';
 import { panelHost, site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
-import { siteSummary, siteTexts } from '@/lib/site-texts';
+import { planFacts, siteSummary, siteTexts } from '@/lib/site-texts';
 import { cn } from '@/lib/utils';
 
 type Props = { params: Promise<{ lang: string }> };
@@ -35,13 +35,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  * Anbieter, Website, je Produkt ein Dienst mit allen Paketen (0 €), Standort und Kontakt.
  */
 function JsonLd({ lang, plans, settings }: { lang: Locale; plans: PublicPlanDTO[]; settings: PublicSiteDTO }) {
-  const f = formatters(lang);
   const summary = siteSummary(settings, lang);
   const areaServed = settings.hardware.locations.map((l) => ({ '@type': 'Country', name: l.name[lang] }));
   const offer = (p: PublicPlanDTO) => ({
     '@type': 'Offer',
     name: p.name,
-    description: `${f.mb(p.memoryMb)} RAM · ${f.mb(p.diskMb)} NVMe · ${p.cpuPercent} % CPU`,
+    description: planFacts(p, lang),
     price: '0',
     priceCurrency: 'EUR',
     availability: p.available ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
