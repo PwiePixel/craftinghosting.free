@@ -44,6 +44,8 @@ export function StartForm({
   initialKind,
   blockedKinds = [],
   takenPlans = [],
+  lockedPlans = [],
+  bonusSlots = 0,
   userEmail,
   early = false,
   newsletterOption = false,
@@ -56,6 +58,10 @@ export function StartForm({
   blockedKinds?: ProductKind[];
   /** Pakete, die der Nutzer schon hat und nicht noch einmal wählen kann (Einstellung „jedes Paket nur einmal“) */
   takenPlans?: string[];
+  /** Pakete, für die gerade kein Slot frei ist (Grenze erreicht, aber ein anderes Paket ist über einen Bonus-Slot möglich) */
+  lockedPlans?: string[];
+  /** Anzahl zusätzlicher Slots aus Belohnungen (nur für den Hinweis) */
+  bonusSlots?: number;
   userEmail?: string;
   /** Häkchen „Newsletter abonnieren“ anbieten (Admin-Einstellung; nur ohne Anmeldung) */
   newsletterOption?: boolean;
@@ -80,7 +86,7 @@ export function StartForm({
   const bot = kind === 'discord';
   const plans = products[kind].plans;
   const serverTypes = serverTypesOf(kind);
-  const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false);
+  const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && !lockedPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false);
   const typeOk = (id: string, k: ProductKind = kind) => products[k].serverTypes.find((a) => a.id === id)?.available ?? true;
 
   const defaultPlan = (k: ProductKind) => {
@@ -204,6 +210,7 @@ export function StartForm({
 
       <Step n={1 + offset} title={s.stepPlan}>
         {plans.length === 0 && <p className="text-sm text-muted">{s.noPlans}</p>}
+        {bonusSlots > 0 && <p className="mb-3 text-sm text-emerald-300">🎁 {s.bonusSlots(bonusSlots)}</p>}
         <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={s.stepPlan}>
           {plans.map((p) => {
             const ok = planOk(p.id);
@@ -227,7 +234,7 @@ export function StartForm({
                 <span className="mt-1 block text-[13px] text-muted">
                   {s.planSpecs(formatMb(p.memoryMb, lang), formatMb(p.diskMb, lang), p.cpuPercent)}
                 </span>
-                {!ok && <span className="mt-1 block text-[13px] text-amber-300">{takenPlans.includes(p.id) ? s.planTaken : s.soldOut}</span>}
+                {!ok && <span className="mt-1 block text-[13px] text-amber-300">{takenPlans.includes(p.id) ? s.planTaken : lockedPlans.includes(p.id) ? s.planLocked : s.soldOut}</span>}
                 {ok && p.capacity != null && p.remaining != null && (
                   <span className="mt-1 block text-[13px] text-emerald-300">
                     {t.home.planLeft(p.remaining.toLocaleString(intlLocale(lang)), p.capacity.toLocaleString(intlLocale(lang)))}

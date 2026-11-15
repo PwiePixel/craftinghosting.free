@@ -22,6 +22,7 @@ import { checkSecondFactor, type SecondFactorInput } from './two-factor.service'
 import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.service';
 import { rememberUserLocale } from './locale.service';
 import { linkExistingPanelAccount } from './provisioning.service';
+import { bonusSlotsFor } from '../discord/rewards';
 import { activatePendingServers, assertConfigAvailable, countOwnedServers, ownedServerRefs, registrationClosed, savePendingServer } from './server.service';
 
 type TokenType = 'verify_email' | 'login';
@@ -195,7 +196,7 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   // Hat der Nutzer schon einen Server (bzw. in der Early-Access-Phase einen Wartelisten-Platz), schicken wir nur einen Anmeldecode.
   // Die Grenzen gelten je Angebot, zusammen und je Paket (Admin → Einstellungen); auf der Warteliste ist ein Platz pro Person möglich
   const owned = await countOwnedServers(user.id);
-  const limitBlock = serverLimitBlock(settings.registration.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId);
+  const limitBlock = serverLimitBlock(settings.registration.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId, await bonusSlotsFor(user));
   if (limitBlock !== null || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
     await sendCodeMail(user, 'login', (code) => loginMail(code, meta.locale)).catch(() => {
       throw mailFailed();

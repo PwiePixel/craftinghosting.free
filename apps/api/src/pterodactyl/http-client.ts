@@ -193,6 +193,22 @@ export class PterodactylHttpClient implements PterodactylGateway {
     }
   }
 
+  async updateServerBuild(id: number, limits: { memory: number; disk: number; cpu: number; swap: number; io: number }, featureLimits: { databases: number; allocations: number; backups: number }) {
+    const res = await this.request('application', 'GET', `/servers/${id}`);
+    const a = res.attributes as Json;
+    await this.request('application', 'PATCH', `/servers/${id}/build`, {
+      allocation: a.allocation,
+      memory: limits.memory,
+      swap: limits.swap,
+      disk: limits.disk,
+      io: limits.io,
+      cpu: limits.cpu,
+      threads: a.limits.threads ?? null,
+      ...(typeof a.limits.oom_disabled === 'boolean' ? { oom_disabled: a.limits.oom_disabled } : {}),
+      feature_limits: { databases: featureLimits.databases, allocations: featureLimits.allocations, backups: featureLimits.backups },
+    });
+  }
+
   async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {
     // Das Panel verlangt beim Ändern immer den vollständigen Satz – deshalb zuerst den aktuellen Stand lesen
     const res = await this.request('application', 'GET', `/servers/${id}`);

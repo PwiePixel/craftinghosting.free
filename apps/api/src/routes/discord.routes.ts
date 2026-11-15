@@ -1,3 +1,7 @@
+import { boostOverview, setManualBoosts } from '../discord/boost-rewards';
+import { setupHoneypot } from '../discord/honeypot';
+import { inviteLeaderboard } from '../discord/invite-rewards';
+import { sendRewardAnnouncement } from '../discord/rewards';
 import { sendStatusFeedTest } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { and, count, eq, inArray } from 'drizzle-orm';
@@ -206,6 +210,52 @@ export async function discordAdminRoutes(app: FastifyInstance) {
     } catch (err) {
       throw new ApiError(502, 'discord_error', L(discordErrorText(err), discordErrorText(err)));
     }
+    return { ok: true };
+  });
+
+  /* ---------------------------------------------------------- Belohnungen und Honeypot */
+
+  const notReady = () => new ApiError(409, 'discord_not_ready', L('Die Discord-Anbindung ist noch nicht eingerichtet.', 'The Discord integration is not set up yet.'));
+  const discordFailed = (err: unknown) => new ApiError(502, 'discord_error', L(discordErrorText(err), discordErrorText(err)));
+  const snowflakeField = (message: string) => z.string().refine(isSnowflake, message);
+
+  /** Rangliste der Einladenden und alle Booster */
+  app.get('/admin/discord/rewards', async () => ({ inviters: await inviteLeaderboard(), boosters: await boostOverview() }));
+
+  /** Ankündigung des Belohnungssystems in einen Kanal posten (mit Rollen-Erwähnung) */
+  app.post('/admin/discord/rewards/announce', strict(10, '10 minutes'), async (request) => {
+    const body = z
+      .object({ channelId: snowflakeField('Bitte eine gültige Kanal-ID angeben.'), roleId: z.string().refine((v) => v === '' || isSnowflake(v), 'Bitte eine gültige Rollen-ID angeben.').default('') })
+      .parse(request.body);
+    if (!(await discordConfig()).botReady) throw notReady();
+    try {
+      await sendRewardAnnouncement(body.channelId, body.roleId);
+    } catch (err) {
+      throw discordFailed(err);
+    }
+    await audit({ userId: currentUser(request).id, actor: 'admin', action: 'discord.rewards_announced', message: `Discord: Belohnungssystem in Kanal ${body.channelId} angekündigt`, ip: request.ip });
+    return { ok: true };
+  });
+
+  /** Anzahl der Boosts eines Kontos von Hand setzen (null = wieder automatisch zählen) */
+  app.post('/admin/discord/rewards/boosts', strict(60, '10 minutes'), async (request) => {
+    const body = z.object({ discordId: snowflakeField('Bitte eine gültige Discord-ID angeben.'), boosts: z.number().int().min(0).max(50).nullable() }).parse(request.body);
+    const boosts = await setManualBoosts(body.discordId, body.boosts);
+    await audit({ userId: currentUser(request).id, actor: 'admin', action: 'discord.boosts_set', message: `Discord: Boosts von ${body.discordId} ${body.boosts === null ? 'wieder automatisch' : `auf ${body.boosts} gesetzt`}`, ip: request.ip });
+    return { boosts, boosters: await boostOverview() };
+  });
+
+  /** Honeypot-Kanal einrichten: für alle sichtbar machen und den Warnhinweis posten */
+  app.post('/admin/discord/honeypot/setup', strict(10, '10 minutes'), async (request) => {
+    const body = z.object({ channelId: snowflakeField('Bitte eine gültige Kanal-ID angeben.') }).parse(request.body);
+    const cfg = await discordConfig();
+    if (!cfg.botReady) throw notReady();
+    try {
+      await setupHoneypot(cfg.settings.guildId, body.channelId);
+    } catch (err) {
+      throw discordFailed(err);
+    }
+    await audit({ userId: currentUser(request).id, actor: 'admin', action: 'discord.honeypot_setup', message: `Discord: Honeypot-Kanal ${body.channelId} eingerichtet`, ip: request.ip });
     return { ok: true };
   });
 

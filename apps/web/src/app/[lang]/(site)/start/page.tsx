@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
-import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, takenPlanIds, type ServerDTO } from '@chfree/shared';
+import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, serverLimitBlock, takenPlanIds, type BonusSlot, type ServerDTO } from '@chfree/shared';
 import { StartForm } from '@/components/start/start-form';
 import { ButtonLink } from '@/components/ui/button';
 import { getDict, resolveLang } from '@/i18n';
@@ -45,17 +45,26 @@ export default async function StartPage({ params, searchParams }: Props) {
   const early = mode === 'preregistration';
 
   let servers: ServerDTO[] = [];
+  // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
+  let bonusSlots: BonusSlot[] = [];
   if (me) {
-    const res = await apiServer<{ servers: ServerDTO[] }>('/servers', lang);
-    if (res.ok) servers = res.data.servers;
+    const res = await apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[] }>('/servers', lang);
+    if (res.ok) {
+      servers = res.data.servers;
+      bonusSlots = res.data.bonusSlots ?? [];
+    }
   }
   const ownedServers = servers.filter((srv) => srv.status !== 'pending' && srv.status !== 'waitlist');
   const owned = ownedServers.length;
   const offered = productKinds.filter((k) => settings.products[k].enabled && settings.products[k].plans.length > 0);
   // Grenzen aus dem Admin-Bereich: je Angebot, zusammen und – falls eingestellt – jedes Paket nur einmal
   const ownedRefs = ownedServers.map((srv) => ({ kind: srv.kind, planId: srv.planId }));
-  const blockedKinds = productKinds.filter((k) => kindExhausted(limits, ownedRefs, k, settings.products[k].plans.map((p) => p.id)));
-  const takenPlans = productKinds.flatMap((k) => takenPlanIds(limits, ownedRefs, k));
+  const blockedKinds = productKinds.filter((k) => kindExhausted(limits, ownedRefs, k, settings.products[k].plans.map((p) => p.id), bonusSlots));
+  const takenPlans = productKinds.flatMap((k) => takenPlanIds(limits, ownedRefs, k, bonusSlots));
+  // Pakete, für die gerade kein Slot frei ist (z. B. wenn nur noch ein paketgebundener Bonus-Slot übrig ist)
+  const lockedPlans = productKinds.flatMap((k) =>
+    settings.products[k].plans.map((p) => p.id).filter((id) => !takenPlans.includes(id) && serverLimitBlock(limits, ownedRefs, k, id, bonusSlots) !== null),
+  );
   const allBlocked = offered.length > 0 && offered.every((k) => blockedKinds.includes(k));
   const waitlistEntry = servers.find((srv) => srv.status === 'waitlist' && srv.waitlist);
 
@@ -108,6 +117,8 @@ export default async function StartPage({ params, searchParams }: Props) {
         initialKind={initialKind}
         blockedKinds={early ? [] : blockedKinds}
         takenPlans={early ? [] : takenPlans}
+        lockedPlans={early || !me ? [] : lockedPlans}
+        bonusSlots={bonusSlots.length}
         userEmail={me?.user.email}
         early={early}
         newsletterOption={settings.newsletter.signupCheckbox}

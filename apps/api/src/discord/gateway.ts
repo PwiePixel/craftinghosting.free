@@ -15,7 +15,8 @@ import { discordConfig } from './service';
 import { patchDiscordState } from './store';
 
 /** GUILDS | GUILD_MEMBERS (privilegiert: „Server Members Intent“) | GUILD_INVITES | DIRECT_MESSAGES (für „!start“ per Direktnachricht) */
-const INTENTS = (1 << 0) | (1 << 1) | (1 << 6) | (1 << 12);
+// GUILDS · GUILD_MEMBERS · GUILD_INVITES · GUILD_MESSAGES (Boost-Meldungen, Honeypot – ohne Nachrichteninhalt) · DIRECT_MESSAGES
+const INTENTS = (1 << 0) | (1 << 1) | (1 << 6) | (1 << 9) | (1 << 12);
 const LEASE = 'discord-gateway';
 const LEASE_MS = 90_000;
 const OWNER = randomUUID();

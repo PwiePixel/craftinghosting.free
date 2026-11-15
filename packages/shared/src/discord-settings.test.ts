@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultDiscordSettings, fillDiscordTemplate, normalizeDiscordSettings, ordinalEn, snowflakeDate } from './discord-settings';
+import { boostTierFor, defaultDiscordSettings, fillDiscordTemplate, normalizeDiscordSettings, ordinalEn, snowflakeDate } from './discord-settings';
 import { normalizeSiteSettings } from './settings';
 
 describe('Discord-Einstellungen', () => {
@@ -42,6 +42,44 @@ describe('Discord-Einstellungen', () => {
       pingRoleId: '',
       announceAuto: false,
     });
+  });
+
+  it('prüft die Stufen der Einladungs-Belohnungen', () => {
+    const d = normalizeDiscordSettings(undefined).inviteRewards;
+    expect(d.enabled).toBe(false);
+    expect(d.tiers.map((t) => [t.invites, t.reward, t.planId])).toEqual([[10, 'choice', ''], [15, 'discord', 'smallest']]);
+    const s = normalizeDiscordSettings({
+      inviteRewards: {
+        enabled: true,
+        activeDays: 500,
+        tiers: [
+          { invites: 20, reward: 'minecraft', planId: 'free-6gb' },
+          { invites: 5, reward: 'choice', planId: 'free-4gb' },
+          { invites: 0, reward: 'discord' },
+          { id: 'stufe-20', invites: 30, reward: 'quatsch', planId: 'smallest' },
+        ],
+      },
+    }).inviteRewards;
+    expect(s.activeDays).toBe(90);
+    // sortiert, ungültige Stufe entfernt, bei freier Wahl kein festes Paket, IDs eindeutig
+    expect(s.tiers).toEqual([
+      { id: 'stufe-5', invites: 5, reward: 'choice', planId: '' },
+      { id: 'stufe-20', invites: 20, reward: 'minecraft', planId: 'free-6gb' },
+      { id: 'stufe-20-x2', invites: 30, reward: 'choice', planId: 'smallest' },
+    ]);
+  });
+
+  it('wählt bei Boosts die höchste erreichte Stufe', () => {
+    const off = normalizeDiscordSettings(undefined).boostRewards;
+    expect(boostTierFor(off, 3)).toBeNull();
+    const b = { ...off, enabled: true };
+    expect(boostTierFor(b, 0)).toBeNull();
+    expect(boostTierFor(b, 1)?.slots).toEqual([{ kind: 'minecraft', planId: 'smallest' }]);
+    expect(boostTierFor(b, 2)?.slots).toEqual([{ kind: 'minecraft', planId: 'largest' }]);
+    expect(boostTierFor(b, 3)?.slots).toHaveLength(2);
+    expect(boostTierFor(b, 9)?.slots).toEqual([{ kind: 'minecraft', planId: 'largest' }, { kind: 'minecraft', planId: 'largest' }]);
+    const custom = normalizeDiscordSettings({ boostRewards: { enabled: true, tiers: [{ boosts: 2, slots: [{ kind: 'discord', planId: 'bot-1gb' }, { planId: 'Kaputt!' }] }, { boosts: 2, slots: [{ planId: 'smallest' }] }, { boosts: 1, slots: [] }] } }).boostRewards;
+    expect(custom.tiers).toEqual([{ boosts: 2, slots: [{ kind: 'discord', planId: 'bot-1gb' }] }]);
   });
 
   it('füllt die Platzhalter der Willkommensnachricht', () => {

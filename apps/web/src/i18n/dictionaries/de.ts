@@ -301,6 +301,8 @@ return {
     planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · bis ${cpu} % CPU`,
     soldOut: 'Aktuell ausgebucht',
     planTaken: 'Dieses Paket hast du bereits',
+    planLocked: 'Mit deinen freien Slots nicht wählbar',
+    bonusSlots: (n: number) => (n === 1 ? 'Du hast 1 zusätzlichen Slot aus Belohnungen.' : `Du hast ${n} zusätzliche Slots aus Belohnungen.`),
     soon: 'bald',
     soonTitle: 'Bald verfügbar',
     typeGroup: 'Servertyp',

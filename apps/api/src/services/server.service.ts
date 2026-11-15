@@ -23,6 +23,8 @@ import {
 } from '@chfree/shared';
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
+import { hadBoostRewards } from '../discord/boost-rewards';
+import { bonusSlotsFor } from '../discord/rewards';
 import { discordGate, syncCustomerRoleSoon } from '../discord/service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
@@ -216,6 +218,8 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
   if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
   const limits = (await getSettings()).registration.limits;
+  // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
+  const bonus = await bonusSlotsFor(user);
   await writeTx(async (tx) => {
     const pending = await tx
       .select()
@@ -229,7 +233,7 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
       .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])));
     const now = new Date();
     for (const p of pending) {
-      if (serverLimitBlock(limits, owned, p.kind, p.planId) === null) {
+      if (serverLimitBlock(limits, owned, p.kind, p.planId, bonus) === null) {
         await tx
           .update(servers)
           .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFor(p.kind, now, cycleRules) })
@@ -336,7 +340,7 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
   if (settings.registration.mode === 'closed') throw registrationClosed();
   const limits = settings.registration.limits;
   const kind = findPlan(settings, input.planId)?.kind ?? 'minecraft';
-  const block = serverLimitBlock(limits, await ownedServerRefs(user.id), kind, input.planId);
+  const block = serverLimitBlock(limits, await ownedServerRefs(user.id), kind, input.planId, await bonusSlotsFor(user));
   if (block) throw serverLimitReached(block, limits, kind);
   if (settings.registration.mode === 'preregistration') {
     // Early Access: angemeldete Nutzer kommen direkt (bestätigt) auf die Warteliste – ein Platz pro Person
@@ -367,6 +371,20 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
         ? L('Die Discord-Mitgliedschaft lässt sich gerade nicht prüfen. Bitte versuche es gleich noch einmal.', 'Your Discord membership cannot be checked right now. Please try again shortly.')
         : L('Zum Reaktivieren musst du dein Discord-Konto verknüpfen und Mitglied auf unserem Discord-Server sein.', 'To reactivate, you need to link your Discord account and be a member of our Discord server.'),
     );
+  }
+  // Server aus einer Boost-Belohnung lassen sich nur verlängern, solange sie in die geltenden Grenzen passen
+  // (also solange der Boost läuft). Accounts ohne Boost-Belohnungen sind davon nicht betroffen.
+  if (await hadBoostRewards(user.discordId)) {
+    const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
+    if (serverLimitBlock((await getSettings()).registration.limits, others, server.kind, server.planId, await bonusSlotsFor(user)) !== null) {
+      throw Errors.conflict(
+        'boost_reward_ended',
+        L(
+          'Dieser Server gehörte zu einer Boost-Belohnung, die nicht mehr aktiv ist. Verlängern kannst du ihn, sobald du unseren Discord-Server wieder boostest.',
+          'This server was part of a boost reward that is no longer active. You can renew it as soon as you boost our Discord server again.',
+        ),
+      );
+    }
   }
   const state = computeRuntimeState(server, user, [], now);
   if (!state.reactivation.allowed) {

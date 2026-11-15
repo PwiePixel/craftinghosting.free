@@ -70,6 +70,8 @@ export interface DiscordState {
   roleError: { at: string; message: string } | null;
   /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
   statusFeedError: { at: string; message: string } | null;
+  /** Letzter Fehler beim automatischen Bann im Honeypot-Kanal (null = zuletzt hat es geklappt) */
+  honeypotError: { at: string; message: string } | null;
   /** Dauerverbindung des Bots (für Willkommensnachricht, Auto-Rollen, Befehle, Buttons) */
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
 }
@@ -85,6 +87,7 @@ const defaultState = (): DiscordState => ({
   setupAt: null,
   roleError: null,
   statusFeedError: null,
+  honeypotError: null,
   gateway: { status: 'off', at: new Date(0).toISOString(), error: null },
 });
 

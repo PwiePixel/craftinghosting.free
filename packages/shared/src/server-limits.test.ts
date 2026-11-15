@@ -44,6 +44,32 @@ describe('Server-Grenzen je Person', () => {
     expect(kindExhausted(limits, [mc('free-4gb')], 'minecraft', ['free-4gb', 'free-6gb'])).toBe(false);
   });
 
+  it('rechnet Bonus-Slots an (Belohnungen)', () => {
+    const limits = defaultServerLimits(); // 1 Minecraft-Server, 1 Bot
+    // Ohne Bonus ist beim zweiten Bot Schluss
+    expect(serverLimitBlock(limits, [bot('bot-512mb')], 'discord', 'bot-512mb')).toBe('kind');
+    // Freier Bonus-Slot für Bots: ein weiterer Bot mit beliebigem Paket
+    expect(serverLimitBlock(limits, [bot('bot-512mb')], 'discord', 'bot-1gb', [{ kind: 'discord', planId: null }])).toBeNull();
+    expect(serverLimitBlock(limits, [bot('bot-512mb'), bot('bot-1gb')], 'discord', 'bot-1gb', [{ kind: 'discord', planId: null }])).toBe('kind');
+    // Der Bot-Slot hilft nicht bei Minecraft
+    expect(serverLimitBlock(limits, [mc('free-4gb')], 'minecraft', 'free-6gb', [{ kind: 'discord', planId: null }])).toBe('kind');
+    // Paketgebundener Slot: nur das kleinste Bot-Paket ist zusätzlich möglich
+    const bound = [{ kind: 'discord' as const, planId: 'bot-256mb' }];
+    expect(serverLimitBlock(limits, [bot('bot-512mb')], 'discord', 'bot-256mb', bound)).toBeNull();
+    expect(serverLimitBlock(limits, [bot('bot-512mb')], 'discord', 'bot-1gb', bound)).toBe('kind');
+    // … und nur einmal
+    expect(serverLimitBlock(limits, [bot('bot-512mb'), bot('bot-256mb')], 'discord', 'bot-256mb', bound)).toBe('kind');
+    // Der gedeckte Server belegt keinen normalen Platz
+    expect(serverLimitBlock(limits, [bot('bot-256mb')], 'discord', 'bot-512mb', bound)).toBeNull();
+    // Das Angebot ist nicht ausgeschöpft, solange der gebundene Slot frei ist
+    expect(kindExhausted(limits, [bot('bot-512mb')], 'discord', ['bot-256mb', 'bot-512mb'], bound)).toBe(false);
+    expect(kindExhausted(limits, [bot('bot-512mb'), bot('bot-256mb')], 'discord', ['bot-256mb', 'bot-512mb'], bound)).toBe(true);
+    // Gesamtgrenze wächst mit freien Bonus-Slots
+    const total = { ...limits, discord: 2, total: 2 };
+    expect(serverLimitBlock(total, [mc('free-4gb'), bot('bot-512mb')], 'discord', 'bot-1gb')).toBe('total');
+    expect(serverLimitBlock(total, [mc('free-4gb'), bot('bot-512mb')], 'discord', 'bot-1gb', [{ kind: 'discord', planId: null }])).toBeNull();
+  });
+
   it('beschreibt die Grenzen in beiden Sprachen', () => {
     expect(describeServerLimits(defaultServerLimits(), 'de')).toBe('Pro Person sind derzeit bis zu 1 Minecraft-Server und 1 Discord-Bot möglich.');
     expect(describeServerLimits(defaultServerLimits(), 'en', ['minecraft'])).toBe('Per person, 1 Minecraft server is currently possible.');

@@ -2,6 +2,7 @@
  * Einstellungen der Discord-Anbindung (Admin → Discord). Geheimnisse (Bot-Token, Client-Secret)
  * stehen NICHT hier – sie liegen getrennt und zusätzlich verschlüsselt in der Datenbank.
  */
+import type { ProductKind } from './config/freehosting.config';
 import type { Localized } from './i18n';
 
 /** Ein Button eines Rollen-Panels: Klick gibt bzw. nimmt die Rolle */
@@ -76,13 +77,157 @@ export interface DiscordSettings {
     /** Auch Zustandswechsel melden, die die automatischen Prüfungen erkennen (z. B. Panel nicht erreichbar) */
     announceAuto: boolean;
   };
+  /** Belohnungen für Einladungen: Wer aktive Nutzer auf den Discord-Server bringt, bekommt zusätzliche Slots */
+  inviteRewards: InviteRewardSettings;
+  /** Belohnungen für Server-Boosts: zusätzliche Server, solange jemand den Discord-Server boostet */
+  boostRewards: BoostRewardSettings;
+  /** Honeypot-Kanal zur Bot-Erkennung: Wer dort schreibt, wird automatisch gebannt */
+  honeypot: { enabled: boolean; channelId: string };
   /** Hinweis auf der Website, warum Discord nötig ist (leer = Standardtext) */
   requiredNote: Localized;
   welcome: DiscordWelcomeSettings;
   rolePanels: DiscordRolePanel[];
 }
 
-export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5 } as const;
+export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5, rewardTiers: 10, boostTiers: 8, boostSlots: 4 } as const;
+
+/** choice = der Nutzer wählt beim Einlösen zwischen Minecraft-Server und Discord-Bot */
+export type InviteRewardKind = 'choice' | 'minecraft' | 'discord';
+
+export interface InviteRewardTier {
+  /** Bleibt gleich, auch wenn die Stufe geändert wird – so wird jede Stufe nur einmal vergeben */
+  id: string;
+  /** So viele aktive Eingeladene braucht es */
+  invites: number;
+  reward: InviteRewardKind;
+  /** '' = Slot für jedes Paket · 'smallest' = nur das kleinste Paket des Angebots · sonst die ID eines Pakets */
+  planId: string;
+}
+
+export interface InviteRewardSettings {
+  enabled: boolean;
+  /** Kanal, in dem der Bot die Person erwähnt, wenn er ihr keine Direktnachricht schicken kann (leer = keine Meldung) */
+  fallbackChannelId: string;
+  /** Eine Einladung zählt, wenn der Server der eingeladenen Person in den letzten N Tagen online war */
+  activeDays: number;
+  /** … und die Person mindestens so viele Tage Mitglied ist (0 = sofort) */
+  minMemberDays: number;
+  tiers: InviteRewardTier[];
+  /** Ankündigung des Belohnungssystems: Kanal und Rolle, die dabei erwähnt wird (beides für den Knopf „Ankündigung senden“) */
+  announceChannelId: string;
+  announceRoleId: string;
+}
+
+/** Zusätzlicher Server als Boost-Belohnung. planId: 'smallest' | 'largest' (kleinstes/größtes Paket des Angebots) oder eine Paket-ID */
+export interface BoostRewardSlot {
+  kind: ProductKind;
+  planId: string;
+}
+
+export interface BoostRewardTier {
+  /** Ab so vielen Boosts gilt diese Stufe (die höchste erreichte Stufe zählt – Stufen addieren sich nicht) */
+  boosts: number;
+  slots: BoostRewardSlot[];
+}
+
+export interface BoostRewardSettings {
+  enabled: boolean;
+  tiers: BoostRewardTier[];
+}
+
+export function defaultBoostRewards(): BoostRewardSettings {
+  const mc = (planId: string): BoostRewardSlot => ({ kind: 'minecraft', planId });
+  return {
+    enabled: false,
+    tiers: [
+      { boosts: 1, slots: [mc('smallest')] },
+      { boosts: 2, slots: [mc('largest')] },
+      { boosts: 3, slots: [mc('largest'), mc('smallest')] },
+      { boosts: 4, slots: [mc('largest'), mc('largest')] },
+    ],
+  };
+}
+
+function normalizeBoostRewards(input: unknown): BoostRewardSettings {
+  const i = obj(input);
+  const d = defaultBoostRewards();
+  const seen = new Set<number>();
+  const tiers = (Array.isArray(i.tiers) ? i.tiers : d.tiers)
+    .slice(0, discordLimits.boostTiers)
+    .map((raw): BoostRewardTier | null => {
+      const t = obj(raw);
+      const boosts = int(t.boosts, 0, 0, 50);
+      if (boosts < 1 || seen.has(boosts)) return null;
+      const slots = (Array.isArray(t.slots) ? t.slots : [])
+        .slice(0, discordLimits.boostSlots)
+        .map((s): BoostRewardSlot | null => {
+          const o = obj(s);
+          const plan = typeof o.planId === 'string' ? o.planId.trim() : '';
+          if (plan !== 'smallest' && plan !== 'largest' && !/^[a-z0-9][a-z0-9-]{0,39}$/.test(plan)) return null;
+          return { kind: o.kind === 'discord' ? 'discord' : 'minecraft', planId: plan };
+        })
+        .filter((s): s is BoostRewardSlot => s !== null);
+      if (slots.length === 0) return null;
+      seen.add(boosts);
+      return { boosts, slots };
+    })
+    .filter((t): t is BoostRewardTier => t !== null)
+    .sort((a, b) => a.boosts - b.boosts);
+  return { enabled: bool(i.enabled, d.enabled), tiers };
+}
+
+/** Die Stufe, die für eine Anzahl Boosts gilt (die höchste erreichte) – null = keine */
+export function boostTierFor(cfg: BoostRewardSettings, boosts: number): BoostRewardTier | null {
+  if (!cfg.enabled) return null;
+  return [...cfg.tiers].reverse().find((t) => boosts >= t.boosts) ?? null;
+}
+
+export function defaultInviteRewards(): InviteRewardSettings {
+  return {
+    enabled: false,
+    fallbackChannelId: '',
+    activeDays: 7,
+    minMemberDays: 0,
+    tiers: [
+      { id: 'stufe-10', invites: 10, reward: 'choice', planId: '' },
+      { id: 'stufe-15', invites: 15, reward: 'discord', planId: 'smallest' },
+    ],
+    announceChannelId: '',
+    announceRoleId: '',
+  };
+}
+
+function normalizeInviteRewards(input: unknown): InviteRewardSettings {
+  const i = obj(input);
+  const d = defaultInviteRewards();
+  const used = new Set<string>();
+  const tiers = (Array.isArray(i.tiers) ? i.tiers : d.tiers)
+    .slice(0, discordLimits.rewardTiers)
+    .map((raw): InviteRewardTier | null => {
+      const t = obj(raw);
+      const invites = int(t.invites, 0, 0, 10_000);
+      if (invites < 1) return null;
+      const reward: InviteRewardKind = t.reward === 'minecraft' || t.reward === 'discord' ? t.reward : 'choice';
+      const plan = typeof t.planId === 'string' ? t.planId.trim() : '';
+      // Ein bestimmtes Paket passt nur zu einem festen Angebot
+      const planId = plan === 'smallest' ? plan : reward !== 'choice' && /^[a-z0-9][a-z0-9-]{0,39}$/.test(plan) ? plan : '';
+      let id = /^[a-z0-9][a-z0-9-]{0,23}$/.test(String(t.id ?? '')) ? String(t.id) : `stufe-${invites}`;
+      for (let n = 2; used.has(id); n++) id = `${id.replace(/-x\d+$/, '').slice(0, 19)}-x${n}`;
+      used.add(id);
+      return { id, invites, reward, planId };
+    })
+    .filter((t): t is InviteRewardTier => t !== null)
+    .sort((a, b) => a.invites - b.invites);
+  return {
+    enabled: bool(i.enabled, d.enabled),
+    fallbackChannelId: snowflake(i.fallbackChannelId),
+    activeDays: int(i.activeDays, d.activeDays, 1, 90),
+    minMemberDays: int(i.minMemberDays, d.minMemberDays, 0, 90),
+    tiers,
+    announceChannelId: snowflake(i.announceChannelId),
+    announceRoleId: snowflake(i.announceRoleId),
+  };
+}
 
 /** Platzhalter für die Willkommensnachricht */
 export const discordWelcomePlaceholders: [string, string][] = [
@@ -153,6 +298,9 @@ export function defaultDiscordSettings(): DiscordSettings {
     maxOpenTickets: 2,
     dmStart: true,
     statusFeed: { channelId: '', pingRoleId: '', announceAuto: true },
+    inviteRewards: defaultInviteRewards(),
+    boostRewards: defaultBoostRewards(),
+    honeypot: { enabled: false, channelId: '' },
     requiredNote: { de: '', en: '' },
     welcome: defaultDiscordWelcome(),
     rolePanels: defaultDiscordRolePanels(),
@@ -226,6 +374,9 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
     maxOpenTickets: int(i.maxOpenTickets, d.maxOpenTickets, 1, discordLimits.maxOpenTickets),
     dmStart: bool(i.dmStart, d.dmStart),
     statusFeed: { channelId: snowflake(feed.channelId), pingRoleId: snowflake(feed.pingRoleId), announceAuto: bool(feed.announceAuto, d.statusFeed.announceAuto) },
+    inviteRewards: normalizeInviteRewards(i.inviteRewards),
+    boostRewards: normalizeBoostRewards(i.boostRewards),
+    honeypot: { enabled: bool(obj(i.honeypot).enabled, false), channelId: snowflake(obj(i.honeypot).channelId) },
     requiredNote: { de: text(note.de, '', 400).trim(), en: text(note.en, '', 400).trim() },
     welcome: {
       enabled: bool(w.enabled, d.welcome.enabled),

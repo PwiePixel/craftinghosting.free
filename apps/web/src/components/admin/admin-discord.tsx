@@ -18,6 +18,7 @@ import {
   type DiscordSetupStep,
   type SiteSettings,
 } from '@chfree/shared';
+import { RewardsSections } from '@/components/admin/admin-rewards';
 import { Labeled, NumberInput, Section, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -615,6 +616,8 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           Beim ersten Einschalten merkt sich der Bot nur den aktuellen Stand – gepostet wird ab der nächsten Änderung.
         </p>
       </Section>
+
+      <RewardsSections d={d} set={set} settings={settings} status={status} dirty={dirty} />
 
       <Section
         title="Server per Direktnachricht steuern"

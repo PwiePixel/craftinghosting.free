@@ -456,6 +456,67 @@ export const chatMessages = sqliteTable(
   (t) => [index('chat_messages_conversation_idx').on(t.conversationId, t.id)],
 );
 
+/* ------------------------------------------------------------ Einladungen auf Discord */
+
+/** Wer wen auf den Discord-Server eingeladen hat. Jedes eingeladene Konto zählt nur einmal – für die erste Person, die es eingeladen hat. */
+export const discordInvites = sqliteTable(
+  'discord_invites',
+  {
+    /** Discord-ID des eingeladenen Mitglieds */
+    inviteeId: text('invitee_id').primaryKey(),
+    /** Discord-ID der Person, deren Einladungslink benutzt wurde */
+    inviterId: text('inviter_id').notNull(),
+    code: text('code'),
+    joinedAt: ts('joined_at').notNull(),
+    /** Gesetzt, solange das Mitglied den Server verlassen hat – dann zählt die Einladung nicht */
+    leftAt: ts('left_at'),
+  },
+  (t) => [index('discord_invites_inviter_idx').on(t.inviterId)],
+);
+
+/** Freigeschaltete Belohnungen für Einladungen. Eingelöst ergeben sie einen zusätzlichen Slot für den Website-Account. */
+export const inviteRewards = sqliteTable(
+  'invite_rewards',
+  {
+    id: text('id').primaryKey(),
+    /** Discord-ID der Person, die eingeladen hat */
+    discordId: text('discord_id').notNull(),
+    /** Stufe aus den Einstellungen – jede Stufe gibt es je Person nur einmal */
+    tierId: text('tier_id').notNull(),
+    invites: integer('invites').notNull(),
+    reward: text('reward', { enum: ['choice', 'minecraft', 'discord'] }).notNull(),
+    /** Paket-Regel der Stufe zum Zeitpunkt der Vergabe: '' = jedes Paket · 'smallest' · Paket-ID */
+    planRule: text('plan_rule').notNull().default(''),
+    status: text('status', { enum: ['available', 'redeemed'] }).notNull().default('available'),
+    /** Nach dem Einlösen: Account, Angebot und (bei gebundenen Slots) das Paket */
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['minecraft', 'discord'] }),
+    planId: text('plan_id'),
+    /** dm = per Direktnachricht benachrichtigt · channel = im Ersatz-Kanal erwähnt · none = nicht zustellbar */
+    notifiedVia: text('notified_via', { enum: ['dm', 'channel', 'none'] }),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    redeemedAt: ts('redeemed_at'),
+  },
+  (t) => [uniqueIndex('invite_rewards_tier_uq').on(t.discordId, t.tierId), index('invite_rewards_user_idx').on(t.userId)],
+);
+
+/**
+ * Server-Boosts je Discord-Konto. Discord nennt Bots keine Anzahl – gezählt werden die Boost-Meldungen im
+ * Systemkanal, solange das Mitglied boostet. `manual` überschreibt die Zählung (Korrektur im Admin-Bereich).
+ */
+export const discordBoosts = sqliteTable('discord_boosts', {
+  discordId: text('discord_id').primaryKey(),
+  /** Mitglied boostet gerade (premium_since ist gesetzt) */
+  premium: integer('premium', { mode: 'boolean' }).notNull().default(false),
+  /** Gezählte Boost-Meldungen seit Beginn des aktuellen Boosts */
+  messages: integer('messages').notNull().default(0),
+  /** Von Hand gesetzte Anzahl (null = automatisch zählen) */
+  manual: integer('manual'),
+  /** Anzahl, für die zuletzt Belohnungen angewendet und gemeldet wurden */
+  applied: integer('applied').notNull().default(0),
+  updatedAt: ts('updated_at').notNull().$defaultFn(now),
+});
+
 /* ------------------------------------------------------------ status page */
 
 export const statusIncidents = sqliteTable(
@@ -494,3 +555,5 @@ export type User = typeof users.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ServerSession = typeof serverSessions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type InviteReward = typeof inviteRewards.$inferSelect;
+export type DiscordBoost = typeof discordBoosts.$inferSelect;

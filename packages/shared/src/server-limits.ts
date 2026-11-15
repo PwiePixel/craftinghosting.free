@@ -51,26 +51,57 @@ export interface OwnedServerRef {
   planId: string;
 }
 
+/**
+ * Zusätzlicher Slot einer Person (z. B. Belohnung für Einladungen auf Discord).
+ * `planId` = nur für dieses Paket gültig (null = jedes Paket des Angebots).
+ */
+export interface BonusSlot {
+  kind: ProductKind;
+  planId: string | null;
+}
+
 /** kind = Grenze des Angebots erreicht · total = Gesamtgrenze erreicht · plan = dieses Paket hat die Person schon */
 export type ServerLimitBlock = 'kind' | 'total' | 'plan';
 
-/** Darf die Person noch einen Server dieses Angebots (und, falls angegeben, dieses Pakets) anlegen? null = ja */
-export function serverLimitBlock(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planId?: string): ServerLimitBlock | null {
-  if (owned.filter((o) => o.kind === kind).length >= limits[kind]) return 'kind';
-  if (limits.total > 0 && owned.length >= limits.total) return 'total';
-  if (planId && limits.uniquePlan[kind] && owned.some((o) => o.kind === kind && o.planId === planId)) return 'plan';
+/**
+ * Server, die NICHT von einem paketgebundenen Bonus-Slot gedeckt sind. Ein solcher Slot deckt genau einen Server
+ * dieses Pakets – gedeckte Server zählen nicht gegen die Grenzen.
+ */
+function uncovered(owned: OwnedServerRef[], bonus: BonusSlot[]): OwnedServerRef[] {
+  const bound = bonus.filter((b) => b.planId !== null);
+  return owned.filter((o) => {
+    const i = bound.findIndex((b) => b.kind === o.kind && b.planId === o.planId);
+    if (i === -1) return true;
+    bound.splice(i, 1);
+    return false;
+  });
+}
+
+/**
+ * Darf die Person noch einen Server dieses Angebots (und, falls angegeben, dieses Pakets) anlegen? null = ja.
+ * Bonus-Slots ohne Paketbindung erhöhen die Grenze des Angebots (und die Gesamtgrenze) um eins.
+ */
+export function serverLimitBlock(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planId?: string, bonus: BonusSlot[] = []): ServerLimitBlock | null {
+  const counted = uncovered(owned, bonus);
+  // Deckt ein paketgebundener Bonus-Slot den neuen Server, ist er immer möglich
+  if (planId && uncovered([...owned, { kind, planId }], bonus).length === counted.length) return null;
+  const free = bonus.filter((b) => b.planId === null);
+  if (counted.filter((o) => o.kind === kind).length >= limits[kind] + free.filter((b) => b.kind === kind).length) return 'kind';
+  if (limits.total > 0 && counted.length >= limits.total + free.length) return 'total';
+  if (planId && limits.uniquePlan[kind] && counted.some((o) => o.kind === kind && o.planId === planId)) return 'plan';
   return null;
 }
 
 /** Pakete eines Angebots, die die Person nicht (mehr) wählen kann, weil sie sie schon hat */
-export function takenPlanIds(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind): string[] {
-  return limits.uniquePlan[kind] ? [...new Set(owned.filter((o) => o.kind === kind).map((o) => o.planId))] : [];
+export function takenPlanIds(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, bonus: BonusSlot[] = []): string[] {
+  if (!limits.uniquePlan[kind]) return [];
+  return [...new Set(owned.filter((o) => o.kind === kind).map((o) => o.planId))].filter((id) => serverLimitBlock(limits, owned, kind, id, bonus) === 'plan');
 }
 
 /** Ist das Angebot für die Person ganz ausgeschöpft? `planIds` = die buchbaren Pakete dieses Angebots */
-export function kindExhausted(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planIds: string[]): boolean {
-  if (serverLimitBlock(limits, owned, kind) !== null) return true;
-  return planIds.length > 0 && planIds.every((id) => serverLimitBlock(limits, owned, kind, id) !== null);
+export function kindExhausted(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planIds: string[], bonus: BonusSlot[] = []): boolean {
+  if (planIds.length === 0) return serverLimitBlock(limits, owned, kind, undefined, bonus) !== null;
+  return planIds.every((id) => serverLimitBlock(limits, owned, kind, id, bonus) !== null);
 }
 
 /** Die Grenzen als Satz für Website, Regeln und FAQ. `offered` = die Angebote, die es gerade gibt */

@@ -1,3 +1,4 @@
+import { bonusSlotsFor } from '../discord/rewards';
 import type { FastifyInstance } from 'fastify';
 import { assertNotMaintenance } from '../lib/maintenance';
 import { z } from 'zod';
@@ -15,7 +16,9 @@ export async function serverRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);
 
   app.get('/servers', async (request) => {
-    return { servers: await listServers(currentUser(request)) };
+    const user = currentUser(request);
+    // bonusSlots: zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts) – für die Anzeige der Grenzen
+    return { servers: await listServers(user), bonusSlots: await bonusSlotsFor(user).catch(() => []) };
   });
 
   app.post('/servers', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (request, reply) => {

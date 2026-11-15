@@ -130,6 +130,8 @@ export interface PterodactylGateway {
   deleteServer(id: number): Promise<void>;
   /** Beschreibung im Panel setzen (Name/Besitzer bleiben unverändert). */
   updateServerDescription(id: number, description: string): Promise<void>;
+  /** Ressourcen und Slots eines bestehenden Servers ändern (z. B. Upgrade auf ein größeres Paket) – der Port bleibt */
+  updateServerBuild(id: number, limits: { memory: number; disk: number; cpu: number; swap: number; io: number }, featureLimits: { databases: number; allocations: number; backups: number }): Promise<void>;
   /** Slots eines bestehenden Servers ändern (Datenbanken, Ports, Backups) – Ressourcen und Port bleiben unverändert */
   updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }): Promise<void>;
 

@@ -83,10 +83,11 @@ export async function onDirectMessage(d: { channel_id: string; author: DiscordUs
   const command = parsePowerCommand(d.content ?? '');
   if (!command) {
     if (throttled(`hint:${d.author.id}`, 10 * 60_000)) return;
+    const rewards = settings.inviteRewards.enabled || settings.boostRewards.enabled;
     return void (await send({
       content: both({
-        de: 'Schreibe `!start`, `!stop` oder `!restart`, um einen deiner Server zu starten, zu stoppen oder neu zu starten. Alles andere (Konsole, Dateien, Backups) machst du im Panel.',
-        en: 'Write `!start`, `!stop` or `!restart` to start, stop or restart one of your servers. Everything else (console, files, backups) is done in the panel.',
+        de: `Schreibe \`!start\`, \`!stop\` oder \`!restart\`, um einen deiner Server zu starten, zu stoppen oder neu zu starten.${rewards ? ' Mit `!rewards` siehst du deine Belohnungen für Einladungen und Boosts.' : ''} Alles andere (Konsole, Dateien, Backups) machst du im Panel.`,
+        en: `Write \`!start\`, \`!stop\` or \`!restart\` to start, stop or restart one of your servers.${rewards ? ' Use `!rewards` to see your rewards for invites and boosts.' : ''} Everything else (console, files, backups) is done in the panel.`,
       }),
     }));
   }

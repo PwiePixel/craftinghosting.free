@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
-import { kindExhausted, localePath, productKinds, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
+import { kindExhausted, localePath, productKinds, type BonusSlot, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
 import { SecurityCard } from '@/components/my/security-card';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
@@ -228,7 +228,9 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const t = d.my;
   const query = await searchParams;
   const { user, panelUrl } = await requireUser(lang, 'myServers');
-  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[] }>('/servers', lang), getSite()]);
+  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[] }>('/servers', lang), getSite()]);
+  // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
+  const bonusSlots: BonusSlot[] = res.ok ? (res.data.bonusSlots ?? []) : [];
   // Discord-Verknüpfung nur abfragen, wenn die Anbindung eingerichtet ist
   const discordRes = settings.discord.available ? await apiServer<{ discord: DiscordMeDTO }>('/discord/me', lang) : null;
   const discordMe = discordRes?.ok ? discordRes.data.discord : null;
@@ -253,6 +255,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
         ownedServers.map((s) => ({ kind: s.kind, planId: s.planId })),
         k,
         settings.products[k].plans.map((p) => p.id),
+        bonusSlots,
       ),
   );
   const maintenance = settings.maintenance.enabled;

@@ -11,7 +11,11 @@ import { discordTickets, servers, users } from '../db/schema';
 import { env } from '../env';
 import { audit } from '../services/audit.service';
 import { buildCommands } from './commands';
+import { onBoostMessage, setPremium } from './boost-rewards';
 import { isPowerButton, onDirectMessage, onPowerButton } from './dm-power';
+import { onGuildMessage } from './honeypot';
+import { isRewardButton, onRewardButton, recordInvite, recordLeave, recordReturn } from './invite-rewards';
+import { isRewardsCommand, onRewardsMessage } from './rewards';
 import { TICKET, closeButton, deleteButton, rolePanelMessage, ticketPanelMessage, welcomeMessage } from './messages';
 import {
   CHANNEL,
@@ -132,7 +136,7 @@ function rememberInvites(list: DiscordInvite[]) {
 }
 
 /** Findet heraus, wer das neue Mitglied eingeladen hat (Vergleich der Nutzungen vorher/nachher). */
-async function findInviter(guildId: string, userId: string, botId: string | null): Promise<{ inviter: string | null; invites: number }> {
+async function findInviter(guildId: string, userId: string, botId: string | null): Promise<{ inviter: string | null; invites: number; inviterId?: string; code?: string }> {
   const before = memory.invites;
   const known = memory.invitesLoaded;
   const now = await loadInvites(guildId);
@@ -142,7 +146,7 @@ async function findInviter(guildId: string, userId: string, botId: string | null
     const hit = used.length === 1 ? used[0]! : null;
     if (hit?.inviter && hit.inviter.id !== botId) {
       const total = now.filter((x) => x.inviter?.id === hit.inviter!.id).reduce((sum, x) => sum + (x.uses ?? 0), 0);
-      return { inviter: userDisplayName(hit.inviter), invites: total };
+      return { inviter: userDisplayName(hit.inviter), invites: total, inviterId: hit.inviter.id, code: hit.code };
     }
     // Einladung des Bots = der Link von der Website
     if (hit) return { inviter: 'Website', invites: hit.uses ?? 0 };
@@ -191,6 +195,12 @@ async function onMemberAdd(member: DiscordMember & { guild_id: string }, log: Bo
   if (user.bot) return;
   const guildId = cfg.settings.guildId;
 
+  // Herkunft immer ermitteln (genau einmal je Beitritt) und merken – Grundlage für die Einladungs-Belohnungen
+  const botId = (await getDiscordState()).bot?.id ?? null;
+  const origin = await findInviter(guildId, user.id, botId).catch(() => ({ inviter: null, invites: 0 }) as Awaited<ReturnType<typeof findInviter>>);
+  if (origin.inviterId) await recordInvite(user.id, origin.inviterId, origin.code ?? null).catch((err) => log.warn({ err }, 'Discord: Einladung konnte nicht gespeichert werden'));
+  else await recordReturn(user.id).catch(() => {});
+
   // Auto-Rollen – und während einer Wartung auch die Rolle „Wartung“
   const maintenance = await getDiscordMaintenance();
   const roles = [...cfg.settings.autoRoleIds, ...(maintenance?.roleId ? [maintenance.roleId] : [])];
@@ -201,11 +211,8 @@ async function onMemberAdd(member: DiscordMember & { guild_id: string }, log: Bo
   if (!w.enabled || !w.channelId) return void (await rolesGiven);
   try {
     const state = await getDiscordState();
-    const [origin, full] = await Promise.all([
-      findInviter(guildId, user.id, state.bot?.id ?? null),
-      // Das Banner steht nur im vollständigen Profil
-      botRequest<DiscordUser>('GET', `/users/${user.id}`).catch(() => user),
-    ]);
+    // Das Banner steht nur im vollständigen Profil
+    const full = await botRequest<DiscordUser>('GET', `/users/${user.id}`).catch(() => user);
     const message = welcomeMessage(cfg.settings, state, {
       user: { ...user, ...full },
       inviter: origin.inviter,
@@ -608,6 +615,10 @@ async function onInteraction(i: Interaction, log: BotLogger): Promise<void> {
   const cfg = await discordConfig();
   if (!cfg.botReady) return;
   // Server per Direktnachricht steuern (!start, !stop, !restart, EULA): die einzigen Buttons, die außerhalb des Servers funktionieren
+  // Belohnung einlösen (Button aus einer Direktnachricht)
+  if (i.type === 3 && isRewardButton(i.data?.custom_id)) {
+    return onRewardButton(i).catch((err) => log.warn({ err: discordErrorText(err) }, 'Discord: Belohnung konnte nicht eingelöst werden'));
+  }
   if (i.type === 3 && isPowerButton(i.data?.custom_id)) {
     if (!cfg.settings.dmStart) return;
     return onPowerButton(i).catch((err) => log.warn({ err: discordErrorText(err) }, 'Discord: Server-Steuerung per Nachricht fehlgeschlagen'));
@@ -682,17 +693,44 @@ export async function handleDiscordEvent(type: string, d: any, log: BotLogger): 
     }
     case 'GUILD_MEMBER_ADD':
       return onMemberAdd(d, log);
-    case 'GUILD_MEMBER_REMOVE':
+    case 'GUILD_MEMBER_REMOVE': {
       if (memory.memberCount !== null && memory.memberCount > 0) memory.memberCount--;
+      const { settings } = await discordConfig();
+      // Wer geht, zählt nicht mehr als Einladung – und boostet auch nicht mehr
+      if (d.guild_id === settings.guildId && d.user?.id) {
+        await recordLeave(d.user.id).catch(() => {});
+        await setPremium(d.user.id, false).catch(() => {});
+      }
       return;
+    }
+    case 'GUILD_MEMBER_UPDATE': {
+      const { settings, botReady } = await discordConfig();
+      // premium_since: gesetzt, solange das Mitglied den Server boostet
+      if (botReady && d.guild_id === settings.guildId && d.user?.id && !d.user.bot && 'premium_since' in d) {
+        await setPremium(d.user.id, !!d.premium_since).catch((err) => log.warn({ err }, 'Discord: Boost-Status konnte nicht gespeichert werden'));
+      }
+      return;
+    }
     case 'INVITE_CREATE':
       memory.invites.set(d.code, { uses: 0, inviterId: d.inviter?.id ?? null, inviterName: d.inviter ? userDisplayName(d.inviter) : null });
       return;
     case 'INVITE_DELETE':
       memory.invites.delete(d.code);
       return;
-    case 'MESSAGE_CREATE':
+    case 'MESSAGE_CREATE': {
+      if (d.guild_id) {
+        const { settings, botReady } = await discordConfig();
+        if (!botReady || d.guild_id !== settings.guildId) return;
+        // Systemnachricht „… hat den Server geboostet“ (Typen 8–11): ein Boost dieses Mitglieds
+        if (typeof d.type === 'number' && d.type >= 8 && d.type <= 11 && d.author?.id && !d.author.bot) {
+          return onBoostMessage(d.author.id).catch((err) => log.warn({ err }, 'Discord: Boost konnte nicht verarbeitet werden'));
+        }
+        return void (await onGuildMessage(d, settings, log));
+      }
+      // Direktnachrichten: „!rewards“ zeigt die Belohnungen, sonst Server-Steuerung
+      if (isRewardsCommand(d.content)) return onRewardsMessage(d);
       return onDirectMessage(d);
+    }
     case 'INTERACTION_CREATE':
       return onInteraction(d, log);
   }

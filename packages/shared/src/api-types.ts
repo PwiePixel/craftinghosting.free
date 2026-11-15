@@ -918,6 +918,12 @@ export interface DiscordSetupStep {
   detail: string;
 }
 
+/** Belohnungssystem im Admin-Bereich: wer am meisten eingeladen hat und wer boostet */
+export interface AdminRewardsDTO {
+  inviters: { discordId: string; username: string | null; email: string | null; total: number; qualified: number; rewards: number; redeemed: number }[];
+  boosters: { discordId: string; username: string | null; email: string | null; boosts: number; manual: boolean }[];
+}
+
 /** Übersicht der Discord-Anbindung im Admin-Bereich – Token und Secret werden nie übertragen */
 export interface AdminDiscordDTO {
   hasBotToken: boolean;
@@ -939,6 +945,8 @@ export interface AdminDiscordDTO {
   roleError: { at: string; message: string } | null;
   /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
   statusFeedError: { at: string; message: string } | null;
+  /** Letzter Fehler beim automatischen Bann im Honeypot-Kanal */
+  honeypotError: { at: string; message: string } | null;
   linkedUsers: number;
 }
 

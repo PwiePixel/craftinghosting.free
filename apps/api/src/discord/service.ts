@@ -463,6 +463,7 @@ export async function discordAdminStatus(): Promise<AdminDiscordDTO> {
     gateway: state.gateway,
     roleError: state.roleError,
     statusFeedError: state.statusFeedError,
+    honeypotError: state.honeypotError,
     linkedUsers: Number(linked?.n ?? 0),
   };
 }

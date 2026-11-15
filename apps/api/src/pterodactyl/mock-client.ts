@@ -207,6 +207,15 @@ export class PterodactylMockClient implements PterodactylGateway {
     this.save(state);
   }
 
+  async updateServerBuild(id: number, limits: { memory: number; disk: number; cpu: number; swap: number; io: number }, featureLimits: { databases: number; allocations: number; backups: number }) {
+    this.mutate(id, (s) => {
+      s.memoryMb = limits.memory;
+      s.diskMb = limits.disk;
+      s.cpu = limits.cpu;
+      s.featureLimits = { ...featureLimits };
+    });
+  }
+
   async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {
     this.mutate(id, (s) => {
       s.featureLimits = { ...limits };
