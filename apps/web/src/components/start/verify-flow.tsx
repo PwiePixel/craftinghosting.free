@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUpRight, Check, CircleX, KeyRound, LoaderCircle, MailCheck, ShieldCheck } from 'lucide-react';
 import { localePath, type TwoFactorMethod, type VerifyResponse, type VerifyResult, type WaitlistInfo } from '@chfree/shared';
-import { Button, ButtonLink } from '@/components/ui/button';
+import { Button, ButtonLink, buttonClasses } from '@/components/ui/button';
 import { Alert, Field } from '@/components/ui/primitives';
 import { useDict, useLang } from '@/i18n/client';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -58,9 +57,10 @@ export function DoneCard({ email, panelUrl, existing }: { email: string; panelUr
         <ButtonLink href={panelUrl} external size="lg" className="sm:flex-1">
           {t.common.toPanel} <ArrowUpRight aria-hidden />
         </ButtonLink>
-        <ButtonLink href={localePath(lang, 'myServers')} variant="secondary" size="lg">
+        {/* Vollständiger Seitenwechsel – die Anmeldung ist neu, vorgeladene Seiten kennen sie noch nicht */}
+        <a href={localePath(lang, 'myServers')} className={buttonClasses('secondary', 'lg')}>
           {t.common.myServers}
-        </ButtonLink>
+        </a>
       </div>
     </div>
   );
@@ -262,12 +262,19 @@ function TwoFactorStep({ method, ticket, onResult }: { method: TwoFactorMethod; 
 }
 
 /**
+ * Wohin nach der Anmeldung: die Seite aus `?next=…` (nur Pfade dieser Website), sonst „Meine Server“.
+ */
+function afterLoginTarget(fallback: string): string {
+  const next = new URLSearchParams(window.location.search).get('next');
+  return next && /^\/(?![/\\])[^\s\\]*$/.test(next) ? next : fallback;
+}
+
+/**
  * Bestätigung und Anmeldung: Code aus der E-Mail → (falls eingerichtet) zweite Stufe → nächster Schritt.
  * `embedded` = ohne eigenen Rahmen (z. B. innerhalb des Anmelde- oder Bestellformulars).
  * Links aus älteren E-Mails (`token`) funktionieren bis zu ihrem Ablauf weiter.
  */
 export function VerifyFlow({ token, email, embedded = false, onBack }: { token?: string; email?: string; embedded?: boolean; onBack?: () => void }) {
-  const router = useRouter();
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
@@ -278,8 +285,9 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
     (res: VerifyResponse) => {
       if ('twoFactor' in res) return setState({ kind: 'twoFactor', method: res.twoFactor.method, ticket: res.twoFactor.ticket });
       if (res.next === 'overview') {
-        router.replace(localePath(lang, 'myServers'));
-        router.refresh();
+        // Vollständiger Seitenwechsel statt Navigation im Browser-Router: Der hat „Meine Server“ oft noch als
+        // „nicht angemeldet → zum Login“ vorgeladen und würde sonst auf der Anmeldeseite hängen bleiben.
+        window.location.assign(afterLoginTarget(localePath(lang, 'myServers')));
       } else if (res.next === 'waitlist' && res.waitlist) {
         setState({ kind: 'waitlist', waitlist: res.waitlist });
       } else if (res.next === 'panel_setup') {
@@ -288,7 +296,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
         setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount });
       }
     },
-    [router, lang],
+    [lang],
   );
 
   useEffect(() => {
@@ -370,9 +378,9 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
           </dl>
           <p className="mt-4 text-[13px] leading-relaxed text-subtle">{t.early.tierNote[state.waitlist.tier]}</p>
           <div className="mt-7">
-            <ButtonLink href={localePath(lang, 'myServers')} size="lg">
+            <a href={localePath(lang, 'myServers')} className={buttonClasses('primary', 'lg')}>
               {t.common.myServers}
-            </ButtonLink>
+            </a>
           </div>
         </div>
       )}

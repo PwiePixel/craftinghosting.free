@@ -62,18 +62,25 @@ const STATE_TTL_MS = 15 * 60_000;
 
 export const discordRedirectUri = () => `${env.APP_URL}/api/v1/discord/callback`;
 
-/** Adresse, auf der Discord nach der Zustimmung fragt. Der Zustand ist an den angemeldeten Account gebunden. */
-export async function discordAuthorizeUrl(user: User, lang: Locale): Promise<string | null> {
+/**
+ * Wer die Verbindung gestartet hat: ein angemeldeter Account (`chat` = aus dem Support-Chat heraus)
+ * oder – ohne Anmeldung – eine Unterhaltung im Support-Chat.
+ */
+export type OAuthSubject = { kind: 'user'; id: string; chat: boolean } | { kind: 'chat'; id: string };
+
+/** Adresse, auf der Discord nach der Zustimmung fragt. Der Zustand ist an den Account bzw. die Unterhaltung gebunden. */
+export async function discordAuthorizeUrl(subject: OAuthSubject, lang: Locale): Promise<string | null> {
   const cfg = await discordConfig();
   if (!cfg.linkReady) return null;
-  const state = signToken(`${user.id}:${Date.now() + STATE_TTL_MS}:${lang}`, STATE_PURPOSE);
+  const value = [subject.kind === 'user' ? 'u' : 'c', subject.id, Date.now() + STATE_TTL_MS, lang, subject.kind === 'user' && subject.chat ? 1 : 0].join(':');
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: cfg.settings.clientId,
-    // guilds.join: Der Bot darf das Konto dem Discord-Server hinzufügen – so ist Verknüpfen = Beitreten
-    scope: cfg.settings.autoJoin ? 'identify guilds.join' : 'identify',
+    // guilds.join: Der Bot darf das Konto dem Discord-Server hinzufügen – so ist Verknüpfen = Beitreten.
+    // Aus dem Chat heraus immer, weil die Übergabe an das Team die Mitgliedschaft voraussetzt.
+    scope: cfg.settings.autoJoin || subject.kind === 'chat' || subject.chat ? 'identify guilds.join' : 'identify',
     redirect_uri: discordRedirectUri(),
-    state,
+    state: signToken(value, STATE_PURPOSE),
     prompt: 'consent',
   });
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
@@ -83,18 +90,28 @@ export type LinkResult = 'linked' | 'linked_not_member' | 'state' | 'taken' | 't
 
 /** Sprache aus dem Zustand – auch wenn die Prüfung fehlschlägt, soll die Meldung in der richtigen Sprache kommen */
 export function langFromState(state: string | undefined): Locale {
-  return state?.split('.')[0]?.split(':')[2] === 'en' ? 'en' : 'de';
+  return state?.split('.')[0]?.split(':')[3] === 'en' ? 'en' : 'de';
 }
 
-/** Zweiter Schritt der Verknüpfung: Code einlösen, Konto prüfen, speichern, dem Server beitreten lassen */
-export async function linkDiscordAccount(user: User, code: string, state: string, ip?: string): Promise<LinkResult> {
-  const value = verifySignedToken(state, STATE_PURPOSE);
-  const [userId, expires] = value?.split(':') ?? [];
-  // Der Zustand gilt nur für den Account, der die Verknüpfung gestartet hat (Schutz vor untergeschobenen Links)
-  if (!value || userId !== user.id || Number(expires) < Date.now()) return 'state';
-  const cfg = await discordConfig();
-  if (!cfg.linkReady) return 'unavailable';
+/** Prüft Signatur und Ablauf des Zustands. null = ungültig oder abgelaufen. */
+export function parseDiscordState(state: string): (OAuthSubject & { lang: Locale }) | null {
+  const [kind, id, expires, lang, chat] = verifySignedToken(state, STATE_PURPOSE)?.split(':') ?? [];
+  if (!id || Number(expires) < Date.now()) return null;
+  const locale: Locale = lang === 'en' ? 'en' : 'de';
+  if (kind === 'u') return { kind: 'user', id, chat: chat === '1', lang: locale };
+  if (kind === 'c') return { kind: 'chat', id, lang: locale };
+  return null;
+}
 
+type Exchange = { ok: true; discordUser: DiscordUser; member: boolean } | { ok: false; reason: 'too_new' | 'bot_account' | 'unavailable' | 'failed' };
+
+/**
+ * Löst den Code von Discord ein, prüft das Konto und lässt es – wenn erlaubt – dem Server beitreten.
+ * Das Zugriffstoken wird nur dafür benutzt und nicht gespeichert.
+ */
+async function exchangeDiscordCode(code: string, before?: (discordUser: DiscordUser) => Promise<LinkResult | null>): Promise<Exchange | { ok: false; reason: LinkResult }> {
+  const cfg = await discordConfig();
+  if (!cfg.linkReady) return { ok: false, reason: 'unavailable' };
   let discordUser: DiscordUser;
   let accessToken: string;
   let scope: string;
@@ -106,28 +123,18 @@ export async function linkDiscordAccount(user: User, code: string, state: string
     scope = token.scope ?? '';
     discordUser = await discordRequest<DiscordUser>('GET', '/users/@me', { bearer: accessToken });
   } catch {
-    return 'failed';
+    return { ok: false, reason: 'failed' };
   }
-  if (discordUser.bot) return 'bot_account';
+  if (discordUser.bot) return { ok: false, reason: 'bot_account' };
   // Frisch angelegte Konten sind das typische Werkzeug für Mehrfach-Anmeldungen
-  if (cfg.settings.minAccountAgeDays > 0 && Date.now() - snowflakeDate(discordUser.id).getTime() < cfg.settings.minAccountAgeDays * 86_400_000) return 'too_new';
-
-  const [other] = await db.select({ id: users.id }).from(users).where(and(eq(users.discordId, discordUser.id), ne(users.id, user.id))).limit(1);
-  if (other) return 'taken';
-  try {
-    await db
-      .update(users)
-      .set({ discordId: discordUser.id, discordUsername: discordUser.username.slice(0, 64), discordLinkedAt: new Date(), discordCustomerRole: false, discordSyncAt: null })
-      .where(eq(users.id, user.id));
-  } catch (err) {
-    if (isUniqueViolation(err)) return 'taken';
-    throw err;
-  }
-  await audit({ userId: user.id, actor: 'user', action: 'discord.linked', message: `Discord-Konto ${userDisplayName(discordUser)} (${discordUser.id}) verknüpft`, ip });
+  if (cfg.settings.minAccountAgeDays > 0 && Date.now() - snowflakeDate(discordUser.id).getTime() < cfg.settings.minAccountAgeDays * 86_400_000) return { ok: false, reason: 'too_new' };
+  // Schritt des Aufrufers (z. B. im Account speichern) – bricht ab, wenn das Konto schon vergeben ist
+  const stop = await before?.(discordUser);
+  if (stop) return { ok: false, reason: stop };
 
   // Dem Server beitreten lassen (201 = hinzugefügt, 204 = war schon Mitglied)
   let member = false;
-  if (cfg.settings.autoJoin && scope.split(' ').includes('guilds.join')) {
+  if (scope.split(' ').includes('guilds.join')) {
     try {
       await botRequest('PUT', `/guilds/${cfg.settings.guildId}/members/${discordUser.id}`, { json: { access_token: accessToken } });
       member = true;
@@ -136,7 +143,36 @@ export async function linkDiscordAccount(user: User, code: string, state: string
     }
   }
   if (!member) member = (await fetchDiscordMember(discordUser.id).catch(() => null)) !== null;
-  return member ? 'linked' : 'linked_not_member';
+  return { ok: true, discordUser, member };
+}
+
+/** Zweiter Schritt der Verknüpfung mit einem Account: Code einlösen, Konto prüfen, speichern, dem Server beitreten lassen */
+export async function linkDiscordAccount(user: User, code: string, ip?: string): Promise<LinkResult> {
+  const result = await exchangeDiscordCode(code, async (discordUser) => {
+    const [other] = await db.select({ id: users.id }).from(users).where(and(eq(users.discordId, discordUser.id), ne(users.id, user.id))).limit(1);
+    if (other) return 'taken';
+    try {
+      await db
+        .update(users)
+        .set({ discordId: discordUser.id, discordUsername: discordUser.username.slice(0, 64), discordLinkedAt: new Date(), discordCustomerRole: false, discordSyncAt: null })
+        .where(eq(users.id, user.id));
+    } catch (err) {
+      if (isUniqueViolation(err)) return 'taken';
+      throw err;
+    }
+    await audit({ userId: user.id, actor: 'user', action: 'discord.linked', message: `Discord-Konto ${userDisplayName(discordUser)} (${discordUser.id}) verknüpft`, ip });
+    return null;
+  });
+  if (!result.ok) return result.reason;
+  return result.member ? 'linked' : 'linked_not_member';
+}
+
+/**
+ * Verbindung aus dem Support-Chat ohne Website-Account: Das Discord-Konto wird nicht mit einem Account verknüpft,
+ * sondern nur für die Übergabe an das Team festgestellt (und dem Server hinzugefügt).
+ */
+export async function connectDiscordForChat(code: string): Promise<{ ok: true; discordUser: DiscordUser; member: boolean } | { ok: false; reason: LinkResult }> {
+  return exchangeDiscordCode(code);
 }
 
 /** Löst die Verknüpfung (und nimmt die Customer-Rolle). */

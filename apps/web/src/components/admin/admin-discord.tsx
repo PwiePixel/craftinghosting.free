@@ -555,10 +555,10 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
       </Section>
 
       <Section
-        title="Server per Direktnachricht starten"
-        description="Mitglieder schreiben dem Bot privat „!start“. Er antwortet auf Deutsch und Englisch mit einem Button je Server; ein Klick startet den Server über das Panel. Läuft der Server schon, sagt der Bot das. Kommt er nicht hoch, verweist er auf die Konsole im Panel. Fair-Use-Pausen gelten weiter."
+        title="Server per Direktnachricht steuern"
+        description="Mitglieder schreiben dem Bot privat „!start“, „!stop“ oder „!restart“. Er antwortet auf Deutsch und Englisch mit einem Button je Server; ein Klick führt die Aktion über das Panel aus. Läuft der Server schon (oder ist er schon aus), sagt der Bot das. Kommt er nicht hoch, verweist er auf die Konsole im Panel. Ist bei einem Minecraft-Server die EULA noch nicht akzeptiert, fragt der Bot mit einem Button nach, trägt die Zustimmung ein und startet den Server neu. Fair-Use-Pausen gelten weiter."
       >
-        <Toggle checked={d.dmStart} onChange={(dmStart) => set({ dmStart })} label="„!start“ per Direktnachricht erlauben" hint="Funktioniert nur für verknüpfte Discord-Konten und nur für die eigenen Server." />
+        <Toggle checked={d.dmStart} onChange={(dmStart) => set({ dmStart })} label="„!start“, „!stop“ und „!restart“ per Direktnachricht erlauben" hint="Funktioniert nur für verknüpfte Discord-Konten und nur für die eigenen Server." />
       </Section>
 
       <Section title="Befehle des Bots" description="Alle Befehle sind nur für Mitglieder mit dem Recht „Administrator“.">

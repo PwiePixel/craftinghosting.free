@@ -87,6 +87,21 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
             Discord selbst gelten die Datenschutzbestimmungen von Discord.
           </p>
         )}
+        {site.chat && (
+          <p>
+            <strong>Support-Chat „{site.chat.name}“:</strong> Wenn du den Chat auf der Website nutzt, speichern wir deine Nachrichten und die Antworten, den Zeitpunkt, die
+            Sprache und – zum Schutz vor Missbrauch – deine IP-Adresse in verschlüsselter Form. Ein technisch notwendiges Cookie (chf_chat) ordnet die Unterhaltung deinem
+            Browser zu.{' '}
+            {site.chat.ai
+              ? 'Antworten kommen aus vorgefertigten Texten oder von einer KI. Für KI-Antworten übermitteln wir den Text der Unterhaltung an den KI-Dienst Claude der Anthropic, PBC (USA), der ihn in unserem Auftrag verarbeitet; Daten aus deinem Account oder von deinen Servern übermitteln wir dabei nicht. KI-Antworten sind im Chat gekennzeichnet und können Fehler enthalten.'
+              : 'Antworten kommen aus vorgefertigten Texten.'}{' '}
+            Bitte gib im Chat keine Passwörter, Codes oder andere Zugangsdaten ein.
+            {site.chat.handoff &&
+              ' Lässt du dich an einen Mitarbeiter weitergeben, verbindest du dein Discord-Konto (siehe Discord-Verknüpfung); unser Bot fügt dich unserem Discord-Server hinzu und eröffnet dort ein Ticket, das den bisherigen Verlauf des Chats enthält und das nur du und das Support-Team sehen.'}{' '}
+            Unterhaltungen löschen wir automatisch nach {site.chat.retentionDays} Tagen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Beantwortung deiner Anfrage) und lit. f
+            DSGVO (schneller Support, Schutz vor Missbrauch).
+          </p>
+        )}
       </section>
 
       <section>
@@ -256,6 +271,20 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
             you and the support team can see. We do not store access tokens from Discord. The legal basis is Art. 6(1)(b) GDPR (providing the free offer) and Art. 6(1)(f)
             GDPR (protection against abuse and multiple sign-ups). You can remove the link under “My servers” as long as you have no server with us; it is removed when you
             delete your account. Discord’s own privacy policy applies to your use of Discord.
+          </p>
+        )}
+        {site.chat && (
+          <p>
+            <strong>Support chat “{site.chat.name}”:</strong> When you use the chat on the website, we store your messages and the answers, the time, the language and – to
+            protect against abuse – your IP address in encrypted form. A strictly necessary cookie (chf_chat) links the conversation to your browser.{' '}
+            {site.chat.ai
+              ? 'Answers come from prepared texts or from an AI. For AI answers we transmit the text of the conversation to the AI service Claude of Anthropic, PBC (USA), which processes it on our behalf; we do not transmit data from your account or your servers. AI answers are labelled in the chat and may contain errors.'
+              : 'Answers come from prepared texts.'}{' '}
+            Please do not enter passwords, codes or other credentials in the chat.
+            {site.chat.handoff &&
+              ' If you ask to be handed over to a team member, you connect your Discord account (see Discord linking); our bot adds you to our Discord server and opens a ticket there that contains the chat so far and that only you and the support team can see.'}{' '}
+            We delete conversations automatically after {site.chat.retentionDays} days. The legal basis is Art. 6(1)(b) GDPR (answering your request) and Art. 6(1)(f) GDPR
+            (fast support, protection against abuse).
           </p>
         )}
       </section>

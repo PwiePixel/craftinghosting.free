@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Check, Copy, RotateCcw } from 'lucide-react';
+import { Check, Copy, LogOut, RotateCcw, Trash2, UserRound } from 'lucide-react';
 import type { ServerDTO } from '@chfree/shared';
 import { localePath } from '@chfree/shared';
 import { Button } from '@/components/ui/button';
@@ -156,56 +156,92 @@ export function AccountActions({ email }: { email: string }) {
   const t = useDict().my;
   const lang = useLang();
   const home = localePath(lang, 'home');
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
   async function logout() {
+    setLoggingOut(true);
     await api('/auth/logout', { body: {} }).catch(() => {});
-    router.replace(home);
-    router.refresh();
+    // Vollständiger Seitenwechsel: So kennt keine vorgeladene Seite mehr die alte Anmeldung
+    window.location.assign(home);
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-        <button type="button" onClick={logout} className="text-muted hover:text-white">
+    <section className="surface divide-y divide-line" aria-label={t.accountTitle}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 p-5">
+        <span className="grid size-10 shrink-0 place-items-center rounded-full border border-line-strong bg-white/[0.03] text-muted">
+          <UserRound className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-semibold text-white">{t.accountTitle}</p>
+          <p className="mt-0.5 truncate text-sm text-muted">
+            {t.signedInAs} <span className="text-gray-200">{email}</span>
+          </p>
+        </div>
+        <Button variant="secondary" size="sm" icon={<LogOut />} loading={loggingOut} onClick={logout}>
           {t.logout}
-        </button>
-        <button type="button" onClick={() => setOpen((v) => !v)} className="text-subtle hover:text-red-300">
-          {t.deleteAccount}
-        </button>
+        </Button>
       </div>
-      {open && (
-        <form
-          className="max-w-lg space-y-3"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setPending(true);
-            setError(null);
-            try {
-              await api('/account/delete', { body: { confirmEmail: confirm } });
-              router.replace(home);
-              router.refresh();
-            } catch (err) {
-              setError(err instanceof ApiClientError ? (err.fields?.confirmEmail ?? err.message) : t.deleteFailed);
-              setPending(false);
-            }
-          }}
-        >
-          <p className="text-sm text-muted">{t.deleteAccountText}</p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input className="input" type="email" placeholder={email} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label={t.confirmEmail} />
-            <Button type="submit" variant="danger" loading={pending} disabled={!confirm}>
+
+      <div className="p-5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-sm font-medium text-white">{t.deleteAccount}</p>
+            <p className="mt-0.5 text-[13px] leading-relaxed text-subtle">{t.deleteAccountHint}</p>
+          </div>
+          {!open && (
+            <Button variant="danger" size="sm" icon={<Trash2 />} onClick={() => setOpen(true)}>
               {t.deleteAccount}
             </Button>
-          </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-        </form>
-      )}
-    </div>
+          )}
+        </div>
+        {open && (
+          <form
+            className="mt-4 rounded-lg border border-red-400/25 bg-red-400/[0.05] p-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setPending(true);
+              setError(null);
+              try {
+                await api('/account/delete', { body: { confirmEmail: confirm } });
+                window.location.assign(home);
+              } catch (err) {
+                setError(err instanceof ApiClientError ? (err.fields?.confirmEmail ?? err.message) : t.deleteFailed);
+                setPending(false);
+              }
+            }}
+          >
+            <label htmlFor="delete-account-email" className="block text-sm leading-relaxed text-gray-200">
+              {t.deleteAccountText}
+            </label>
+            <input id="delete-account-email" className="input mt-3 max-w-md" type="email" autoComplete="off" placeholder={email} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoFocus />
+            {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button type="submit" variant="danger" size="sm" icon={<Trash2 />} loading={pending} disabled={!confirm}>
+                {t.deleteAccountConfirm}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  setOpen(false);
+                  setConfirm('');
+                  setError(null);
+                }}
+              >
+                {t.deleteAccountCancel}
+              </Button>
+            </div>
+          </form>
+        )}
+      </div>
+    </section>
   );
 }
 

@@ -11,7 +11,7 @@ import { discordTickets, servers, users } from '../db/schema';
 import { env } from '../env';
 import { audit } from '../services/audit.service';
 import { buildCommands } from './commands';
-import { START_PREFIX, onDirectMessage, onStartButton } from './dm-start';
+import { isPowerButton, onDirectMessage, onPowerButton } from './dm-power';
 import { TICKET, closeButton, deleteButton, rolePanelMessage, ticketPanelMessage, welcomeMessage } from './messages';
 import {
   CHANNEL,
@@ -30,6 +30,7 @@ import {
   type DiscordUser,
 } from './rest';
 import { botRequest, discordConfig } from './service';
+import { PRODUCT, openTicket } from './tickets';
 import { getDiscordMaintenance, getDiscordState, patchDiscordState, saveDiscordMaintenance, type DiscordMaintenance } from './store';
 
 export interface BotLogger {
@@ -309,7 +310,6 @@ async function buttonRole(i: Interaction, settings: DiscordSettings): Promise<vo
 
 /* ------------------------------------------------------------ Tickets */
 
-const PRODUCT = { minecraft: { de: 'Minecraft-Server', en: 'Minecraft server' }, discord: { de: 'Discord-Bot', en: 'Discord bot' } } as const;
 const LIVE = ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended', 'pending', 'waitlist'] as const;
 
 async function accountOf(discordId: string) {
@@ -370,93 +370,19 @@ async function ticketForm(i: Interaction): Promise<void> {
   });
 }
 
-async function ticketCategory(settings: DiscordSettings): Promise<string> {
-  const state = await getDiscordState(true);
-  const wanted = settings.ticketCategoryId || state.ticketCategoryId;
-  const channels = await botRequest<DiscordChannel[]>('GET', `/guilds/${settings.guildId}/channels`);
-  if (wanted && channels.some((c) => c.id === wanted && c.type === CHANNEL.category)) return wanted;
-  const existing = channels.find((c) => c.type === CHANNEL.category && c.name?.toLowerCase() === 'tickets');
-  const id =
-    existing?.id ??
-    (
-      await botRequest<DiscordChannel>('POST', `/guilds/${settings.guildId}/channels`, {
-        json: { name: 'Tickets', type: CHANNEL.category, permission_overwrites: [{ id: settings.guildId, type: 0, allow: '0', deny: PERM.viewChannel.toString() }] },
-        reason: 'Kategorie für Support-Tickets',
-      })
-    ).id;
-  await patchDiscordState({ ticketCategoryId: id });
-  return id;
-}
-
 async function ticketCreate(i: Interaction, settings: DiscordSettings): Promise<void> {
   const discordUser = i.member?.user;
   if (!discordUser) return;
   await defer(i);
   const choice = i.data?.custom_id?.split(':')[2] ?? 'general';
   const fields = Object.fromEntries((i.data?.components ?? []).flatMap((r) => r.components ?? []).map((c) => [c.custom_id, c.value]));
-  const subject = String(fields.subject ?? '').slice(0, 100);
   const { user, servers: list } = await accountOf(discordUser.id);
   // Das Produkt muss wirklich zu diesem Discord-Konto gehören
   const server = choice === 'general' ? null : (list.find((s) => s.id === choice) ?? null);
-
-  const [ticket] = await db.insert(discordTickets).values({ discordUserId: discordUser.id, userId: user?.id ?? null, serverId: server?.id ?? null, subject }).returning({ id: discordTickets.id });
-  const number = String(ticket!.id).padStart(4, '0');
   try {
-    const state = await getDiscordState();
-    const access = (PERM.viewChannel | PERM.sendMessages | PERM.readHistory | PERM.attachFiles | PERM.embedLinks).toString();
-    const overwrites: DiscordOverwrite[] = [
-      { id: settings.guildId, type: 0, allow: '0', deny: PERM.viewChannel.toString() },
-      { id: discordUser.id, type: 1, allow: access, deny: '0' },
-      ...(settings.supportRoleId ? [{ id: settings.supportRoleId, type: 0 as const, allow: access, deny: '0' }] : []),
-      ...(state.bot ? [{ id: state.bot.id, type: 1 as const, allow: (BigInt(access) | PERM.manageChannels).toString(), deny: '0' }] : []),
-    ];
-    const channel = await botRequest<DiscordChannel>('POST', `/guilds/${settings.guildId}/channels`, {
-      json: {
-        name: `ticket-${number}-${discordUser.username}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 90),
-        type: CHANNEL.text,
-        parent_id: await ticketCategory(settings),
-        topic: `Ticket #${number} · ${subject}`.slice(0, 1000),
-        permission_overwrites: overwrites,
-      },
-      reason: `Ticket #${number}`,
-    });
-    await db.update(discordTickets).set({ channelId: channel.id }).where(eq(discordTickets.id, ticket!.id));
-
-    const g = de(i);
-    const inline = (name: string, value: string) => ({ name, value, inline: true });
-    await botRequest('POST', `/channels/${channel.id}/messages`, {
-      json: {
-        content: `<@${discordUser.id}>${settings.supportRoleId ? ` <@&${settings.supportRoleId}>` : ''}`,
-        allowed_mentions: { users: [discordUser.id], roles: settings.supportRoleId ? [settings.supportRoleId] : [] },
-        embeds: [
-          {
-            title: `Ticket #${number} · ${subject}`.slice(0, 256),
-            description: String(fields.text ?? '').slice(0, 3500),
-            color: 0x2563eb,
-            fields: [
-              inline(g ? 'Produkt' : 'Product', server ? `${PRODUCT[server.kind][g ? 'de' : 'en']}: ${server.name}` : g ? 'Allgemeine Frage' : 'General question'),
-              inline('Account-ID', user ? `\`${user.id}\`` : g ? 'nicht verknüpft' : 'not linked'),
-              ...(server
-                ? [
-                    inline('Server-ID', `\`${server.id}\``),
-                    inline('Panel', server.pteroIdentifier ? `\`${server.pteroIdentifier}\`${server.pteroServerId ? ` (#${server.pteroServerId})` : ''}` : '–'),
-                    inline(g ? 'Paket' : 'Plan', `${server.planId} · ${getServerType(server.serverType)?.name ?? server.serverType}`),
-                    inline('Status', server.status),
-                  ]
-                : []),
-              inline('Discord', `<@${discordUser.id}> (\`${discordUser.id}\`)`),
-            ],
-            footer: { text: g ? 'Das Support-Team meldet sich hier. Bitte keine Passwörter oder Tokens posten.' : 'The support team will reply here. Please do not post passwords or tokens.' },
-            timestamp: new Date().toISOString(),
-          },
-        ],
-        components: [closeButton(g ? 'Ticket schließen' : 'Close ticket')],
-      },
-    });
-    await audit({ userId: user?.id ?? null, serverId: server?.id ?? null, actor: 'user', action: 'discord.ticket_opened', message: `Ticket #${number} auf Discord eröffnet: ${subject}` });
-    await edit(i, tr(i, `✅ Dein Ticket wurde erstellt: <#${channel.id}>`, `✅ Your ticket has been created: <#${channel.id}>`), { components: [] });
+    const ticket = await openTicket({ settings, discordUser, user, server, subject: String(fields.subject ?? ''), text: String(fields.text ?? ''), german: de(i) });
+    await edit(i, tr(i, `✅ Dein Ticket wurde erstellt: <#${ticket.channelId}>`, `✅ Your ticket has been created: <#${ticket.channelId}>`), { components: [] });
   } catch (err) {
-    await db.update(discordTickets).set({ status: 'closed', closedAt: new Date() }).where(eq(discordTickets.id, ticket!.id));
     await edit(i, `❌ ${discordErrorText(err)}`, { components: [] });
   }
 }
@@ -681,10 +607,10 @@ async function commandMaintenance(i: Interaction, settings: DiscordSettings, log
 async function onInteraction(i: Interaction, log: BotLogger): Promise<void> {
   const cfg = await discordConfig();
   if (!cfg.botReady) return;
-  // Server-Start per Direktnachricht: der einzige Button, der außerhalb des Servers funktioniert
-  if (i.type === 3 && i.data?.custom_id?.startsWith(START_PREFIX)) {
+  // Server per Direktnachricht steuern (!start, !stop, !restart, EULA): die einzigen Buttons, die außerhalb des Servers funktionieren
+  if (i.type === 3 && isPowerButton(i.data?.custom_id)) {
     if (!cfg.settings.dmStart) return;
-    return onStartButton(i).catch((err) => log.warn({ err: discordErrorText(err) }, 'Discord: Server-Start per Nachricht fehlgeschlagen'));
+    return onPowerButton(i).catch((err) => log.warn({ err: discordErrorText(err) }, 'Discord: Server-Steuerung per Nachricht fehlgeschlagen'));
   }
   if (i.guild_id !== cfg.settings.guildId) return;
   const settings = cfg.settings;

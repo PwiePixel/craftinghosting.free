@@ -8,6 +8,7 @@ import {
   localePath,
   productKinds,
   type AdminAuditDTO,
+  type AdminChatDTO,
   type AdminDiscordDTO,
   type AdminMailDTO,
   type AdminOverviewDTO,
@@ -30,6 +31,7 @@ import { NewsletterManager } from '@/components/admin/admin-newsletter';
 import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
+import { ChatAdmin } from '@/components/admin/admin-chat';
 import { DiscordAdmin } from '@/components/admin/admin-discord';
 import { IncidentForm, IncidentList } from '@/components/admin/admin-status';
 import { StatusPageEditor } from '@/components/admin/admin-status-page';
@@ -66,6 +68,7 @@ const TABS = [
   { id: 'panel', label: 'Pterodactyl' },
   { id: 'domains', label: 'Domains' },
   { id: 'discord', label: 'Discord' },
+  { id: 'chat', label: 'Chat' },
   { id: 'newsletter', label: 'Newsletter' },
   { id: 'waitlist', label: 'Warteliste' },
   { id: 'status', label: 'Statusseite' },
@@ -733,7 +736,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
 
   let content: React.ReactNode = null;
   let failed = overview ? !overview.ok : false;
-  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist' || tab === 'newsletter' || tab === 'discord';
+  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist' || tab === 'newsletter' || tab === 'discord' || tab === 'chat';
   const settingsRes = needsSettings ? await apiServer<{ settings: SiteSettings }>('/admin/settings', lang) : null;
   const settings = settingsRes?.ok ? settingsRes.data.settings : null;
 
@@ -749,6 +752,11 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'discord') {
     const res = await apiServer<{ discord: AdminDiscordDTO }>('/admin/discord', lang);
     if (res.ok && settings) content = <DiscordAdmin settings={settings} status={res.data.discord} />;
+  }
+  if (tab === 'chat') {
+    const res = await apiServer<{ chat: AdminChatDTO }>('/admin/chat', lang);
+    failed = !res.ok || !settings;
+    if (res.ok && settings) content = <ChatAdmin settings={settings} status={res.data.chat} />;
   }
   if (tab === 'newsletter') content = <NewsletterManager enabled={settings?.newsletter.enabled ?? true} />;
   if (tab === 'waitlist') {

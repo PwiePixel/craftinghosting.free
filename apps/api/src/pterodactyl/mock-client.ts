@@ -41,6 +41,8 @@ interface MockServer {
   schedules: number;
   description: string;
   console: string[];
+  /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
+  files?: Record<string, string>;
 }
 
 interface MockState {
@@ -80,6 +82,12 @@ export class PterodactylMockClient implements PterodactylGateway {
       s.since = s.transitionAt;
       s.target = null;
       s.transitionAt = null;
+      // Zum Testen des EULA-Ablaufs: Wie ein echter Minecraft-Server legt der Mock beim ersten Start
+      // eula.txt mit eula=false an und geht wieder aus, bis die EULA akzeptiert ist.
+      if (s.state === 'running' && process.env.PTERODACTYL_MOCK_EULA === '1' && !/^\s*eula\s*=\s*true\s*$/im.test(s.files?.['/eula.txt'] ?? '')) {
+        s.files = { ...s.files, '/eula.txt': '#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\neula=false\n' };
+        s.state = 'offline';
+      }
     }
   }
 
@@ -337,6 +345,24 @@ export class PterodactylMockClient implements PterodactylGateway {
     const s = state.servers.find((x) => x.identifier === identifier);
     if (!s) throw new PterodactylError('server not found', 404);
     s.console = [...(s.console ?? []), `${new Date().toISOString()} ${command}`].slice(-50);
+    this.save(state);
+  }
+
+  async readFile(identifier: string, path: string): Promise<string | null> {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    // Zustand fortschreiben, damit ein gerade gescheiterter Start seine eula.txt schon angelegt hat
+    this.settle(s);
+    this.save(state);
+    return s.files?.[path] ?? null;
+  }
+
+  async writeFile(identifier: string, path: string, content: string): Promise<void> {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    s.files = { ...s.files, [path]: content };
     this.save(state);
   }
 

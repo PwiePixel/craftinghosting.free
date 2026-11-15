@@ -412,6 +412,50 @@ export const discordTickets = sqliteTable(
   (t) => [index('discord_tickets_user_idx').on(t.discordUserId, t.status), index('discord_tickets_channel_idx').on(t.channelId)],
 );
 
+/* ---------------------------------------------------------------- support chat */
+
+/** Unterhaltungen im Support-Chat der Website. Der Besucher hält nur ein Cookie; hier steht dessen Hash. */
+export const chatConversations = sqliteTable(
+  'chat_conversations',
+  {
+    id: text('id').primaryKey(),
+    /** SHA-256 des Cookie-Werts – der Wert selbst wird nie gespeichert */
+    tokenHash: text('token_hash').notNull(),
+    /** Angemeldeter Account bzw. das für die Weitergabe verbundene Discord-Konto */
+    userId: text('user_id'),
+    discordId: text('discord_id'),
+    discordUsername: text('discord_username'),
+    lang: text('lang', { enum: ['de', 'en'] }).notNull().default('de'),
+    status: text('status', { enum: ['open', 'handoff_pending', 'handed_off'] }).notNull().default('open'),
+    /** Discord-Ticket, an das übergeben wurde */
+    ticketId: integer('ticket_id'),
+    /** IP beim Start – verschlüsselt (encryptField), nur zur Missbrauchsabwehr */
+    ip: text('ip'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
+  },
+  (t) => [uniqueIndex('chat_conversations_token_uq').on(t.tokenHash), index('chat_conversations_updated_idx').on(t.updatedAt)],
+);
+
+export const chatMessages = sqliteTable(
+  'chat_messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => chatConversations.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['user', 'assistant'] }).notNull(),
+    source: text('source', { enum: ['user', 'canned', 'ai', 'system'] }).notNull(),
+    text: text('text').notNull(),
+    actions: text('actions', { mode: 'json' }).$type<unknown[]>(),
+    /** Verbrauch der KI für diese Antwort */
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('chat_messages_conversation_idx').on(t.conversationId, t.id)],
+);
+
 /* ------------------------------------------------------------ status page */
 
 export const statusIncidents = sqliteTable(

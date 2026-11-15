@@ -60,10 +60,13 @@ export function CookiesDe({ site }: { site: PublicSiteDTO }) {
             ],
             ['chf_lang', 'Merkt sich deine Sprachwahl (de/en). Wird nur gesetzt, wenn du die Sprache umschaltest.', '12 Monate'],
             ['chf_consent', 'Merkt sich, dass du den Cookie-Hinweis bestätigt hast, damit er nicht erneut erscheint.', '12 Monate'],
+            ...(site.chat
+              ? ([['chf_chat', 'Support-Chat: ordnet deine laufende Unterhaltung diesem Browser zu, damit sie beim Seitenwechsel und nach der Verbindung mit Discord weitergeht. Nicht per JavaScript auslesbar (HttpOnly). Wird erst gesetzt, wenn du im Chat eine Nachricht sendest.', 'bis zum Schließen des Browsers']] as [string, string, string][])
+              : []),
           ]}
         />
         <p>
-          Alle drei Cookies gelten nur für die Adresse, unter der du die Website aufrufst. Auf der Beta-Version der Website (falls du dafür freigeschaltet bist) werden
+          Alle Cookies gelten nur für die Adresse, unter der du die Website aufrufst. Auf der Beta-Version der Website (falls du dafür freigeschaltet bist) werden
           dieselben Cookies getrennt gesetzt.
         </p>
       </section>
@@ -141,10 +144,13 @@ export function CookiesEn({ site }: { site: PublicSiteDTO }) {
             ],
             ['chf_lang', 'Remembers your language choice (de/en). Only set when you switch the language.', '12 months'],
             ['chf_consent', 'Remembers that you confirmed the cookie notice so that it does not appear again.', '12 months'],
+            ...(site.chat
+              ? ([['chf_chat', 'Support chat: links your current conversation to this browser so that it continues when you change pages and after connecting with Discord. Not readable by JavaScript (HttpOnly). Only set when you send a message in the chat.', 'until you close the browser']] as [string, string, string][])
+              : []),
           ]}
         />
         <p>
-          All three cookies only apply to the address under which you open the website. On the beta version of the website (if you have been approved for it), the same
+          All cookies only apply to the address under which you open the website. On the beta version of the website (if you have been approved for it), the same
           cookies are set separately.
         </p>
       </section>

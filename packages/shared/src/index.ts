@@ -8,3 +8,4 @@ export * from './i18n';
 export * from './settings';
 export * from './status-settings';
 export * from './discord-settings';
+export * from './chat-settings';

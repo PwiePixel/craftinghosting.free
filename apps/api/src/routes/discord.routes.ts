@@ -12,14 +12,18 @@ import {
   discordAdminStatus,
   discordAuthorizeUrl,
   discordConfig,
+  connectDiscordForChat,
   discordGate,
   langFromState,
   linkDiscordAccount,
+  parseDiscordState,
   setupDiscord,
   syncCustomerRole,
   syncCustomerRoles,
   unlinkDiscordAccount,
 } from '../discord/service';
+import { CHAT_COOKIE } from './chat.routes';
+import { attachDiscordToConversation, chatNote, findConversation, startHandoff } from '../chat/service';
 import { getDiscordState, saveDiscordSecrets } from '../discord/store';
 import { env } from '../env';
 import { ApiError, L } from '../lib/errors';
@@ -34,31 +38,78 @@ const HELD = ['pending', 'provisioning', 'provisioning_failed', 'active', 'expir
 
 /** Discord-Konto verknüpfen und prüfen (für angemeldete Nutzer) */
 export async function discordRoutes(app: FastifyInstance) {
-  /** Start der Verknüpfung: leitet zu Discord weiter (normaler Link, kein API-Aufruf aus dem Browser-Skript) */
+  /** Zurück auf die Website mit geöffnetem Chat */
+  const backToChat = (lang: Locale) => `${env.APP_URL}${localePath(lang, 'home')}?chat=open`;
+
+  /**
+   * Start der Verknüpfung: leitet zu Discord weiter (normaler Link, kein API-Aufruf aus dem Browser-Skript).
+   * `chat=1`: aus dem Support-Chat heraus – das geht auch ohne Anmeldung, dann ist die Verbindung an die Unterhaltung gebunden.
+   */
   app.get('/discord/connect', strict(20, '10 minutes'), async (request, reply) => {
-    const query = request.query as { lang?: string };
+    const query = request.query as { lang?: string; chat?: string };
     const lang: Locale = isLocale(query.lang) ? query.lang : request.lang;
-    if (!request.user || request.user.status !== 'active') return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
-    const url = await discordAuthorizeUrl(request.user, lang);
-    return reply.redirect(url ?? afterLinkUrl(lang, 'unavailable'));
+    const fromChat = query.chat === '1';
+    const user = request.user && request.user.status === 'active' ? request.user : null;
+    if (user) {
+      const url = await discordAuthorizeUrl({ kind: 'user', id: user.id, chat: fromChat }, lang);
+      return reply.redirect(url ?? (fromChat ? backToChat(lang) : afterLinkUrl(lang, 'unavailable')));
+    }
+    if (!fromChat) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
+    const conversation = await findConversation(request.cookies[CHAT_COOKIE]);
+    if (!conversation) return reply.redirect(backToChat(lang));
+    return reply.redirect((await discordAuthorizeUrl({ kind: 'chat', id: conversation.id }, lang)) ?? backToChat(lang));
   });
 
   /** Rückweg von Discord */
   app.get('/discord/callback', strict(20, '10 minutes'), async (request, reply) => {
     const query = request.query as { code?: string; state?: string; error?: string };
     const lang = langFromState(query.state);
-    if (!request.user || request.user.status !== 'active') return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
-    if (query.error || !query.code || !query.state) return reply.redirect(afterLinkUrl(lang, query.error === 'access_denied' ? 'denied' : 'failed'));
-    const result = await linkDiscordAccount(request.user, query.code, query.state, request.ip);
+    const state = query.state ? parseDiscordState(query.state) : null;
+    const user = request.user && request.user.status === 'active' ? request.user : null;
+
+    // Aus dem Chat ohne Anmeldung: Der Zustand gehört zu genau der Unterhaltung, deren Cookie dieser Browser hält
+    if (state?.kind === 'chat') {
+      const conversation = await findConversation(request.cookies[CHAT_COOKIE]);
+      if (!conversation || conversation.id !== state.id) return reply.redirect(backToChat(lang));
+      if (query.code && !query.error) {
+        const result = await connectDiscordForChat(query.code);
+        if (result.ok) {
+          const updated = await attachDiscordToConversation(conversation, result.discordUser);
+          await startHandoff(updated, null).catch((err) => request.log.warn({ err }, 'Chat: Übergabe nach der Discord-Verbindung fehlgeschlagen'));
+        } else {
+          await chatNote(conversation, result.reason).catch(() => {});
+        }
+      } else {
+        await chatNote(conversation, 'denied').catch(() => {});
+      }
+      return reply.redirect(backToChat(lang));
+    }
+
+    if (!user) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
+    const fromChat = state?.kind === 'user' && state.chat;
+    const done = (result: string) => reply.redirect(fromChat ? backToChat(lang) : afterLinkUrl(lang, result));
+    // Der Zustand gilt nur für den Account, der die Verknüpfung gestartet hat (Schutz vor untergeschobenen Links)
+    if (!state || state.kind !== 'user' || state.id !== user.id) return done('state');
+    if (query.error || !query.code) return done(query.error === 'access_denied' ? 'denied' : 'failed');
+    const result = await linkDiscordAccount(user, query.code, request.ip);
     if (result === 'linked' || result === 'linked_not_member') {
-      const [fresh] = await db.select().from(users).where(eq(users.id, request.user.id)).limit(1);
+      const [fresh] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
       if (fresh) {
         // Wartende Server freischalten und die Customer-Rolle setzen – Fehler hier dürfen die Verknüpfung nicht kippen
         if (result === 'linked') await activatePendingServers(fresh, request.ip).catch((err) => request.log.warn({ err }, 'Discord: Server konnten nach der Verknüpfung nicht aktiviert werden'));
         await syncCustomerRole(fresh.id).catch(() => {});
       }
     }
-    return reply.redirect(afterLinkUrl(lang, result));
+    if (fromChat) {
+      // Die Übergabe an das Team läuft von selbst weiter
+      const conversation = await findConversation(request.cookies[CHAT_COOKIE]);
+      if (conversation) {
+        const [fresh] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+        if (result === 'linked' || result === 'linked_not_member') await startHandoff(conversation, fresh ?? user).catch((err) => request.log.warn({ err }, 'Chat: Übergabe nach der Discord-Verbindung fehlgeschlagen'));
+        else await chatNote(conversation, result).catch(() => {});
+      }
+    }
+    return done(result);
   });
 
   /** Stand der Verknüpfung für „Meine Server“ */

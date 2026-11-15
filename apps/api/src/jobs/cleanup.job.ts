@@ -6,6 +6,7 @@ import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm';
 import { affectedRows, db } from '../db/client';
 import { auditLogs, consentLogs, dedupeMarks, emailTokens, jobRuns, notifications, serverSessions, servers, users } from '../db/schema';
 import { deleteExpiredSessions } from '../services/session.service';
+import { pruneChats } from '../chat/service';
 import { pruneStatusChecks } from '../services/status.service';
 import type { JobDefinition } from './types';
 
@@ -40,6 +41,8 @@ export const cleanupJob: JobDefinition = {
       // nie bestätigte Wartelisten-Anfragen (ohne Platz)
       affectedRows(await db.delete(servers).where(and(eq(servers.status, 'waitlist'), isNull(servers.waitlistPosition), lt(servers.createdAt, ago(14)))));
     await pruneStatusChecks();
+    // Unterhaltungen aus dem Support-Chat nach Ablauf der Aufbewahrungsfrist löschen
+    await pruneChats().catch(() => 0);
     const runs = affectedRows(await db.delete(jobRuns).where(lt(jobRuns.startedAt, ago(3))));
     const sessions = affectedRows(await db.delete(serverSessions).where(and(isNotNull(serverSessions.endedAt), lt(serverSessions.endedAt, ago(90)))));
     const notes = affectedRows(await db.delete(notifications).where(lt(notifications.createdAt, ago(180))));

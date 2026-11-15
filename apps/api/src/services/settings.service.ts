@@ -27,6 +27,7 @@ import { getEggMapping } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
 import { db } from '../db/client';
+import { getChatApiKey } from '../chat/store';
 import { getDiscordSecrets, getDiscordState } from '../discord/store';
 import { servers, settings as settingsTable, statusChecks, users } from '../db/schema';
 
@@ -335,6 +336,18 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
+    chat: s.chat.enabled
+      ? {
+          name: s.chat.name,
+          teaser: s.chat.teaser,
+          welcome: s.chat.welcome,
+          quick: s.chat.canned.filter((a) => a.quick).map((a) => ({ id: a.id, question: a.question })),
+          ai: s.chat.aiEnabled && !!(await getChatApiKey()),
+          // Weitergabe an Mitarbeiter gibt es nur mit eingerichteter Discord-Anbindung
+          handoff: s.chat.handoff.enabled && discordAvailable,
+          retentionDays: s.chat.retentionDays,
+        }
+      : null,
     discord: {
       available: discordAvailable,
       required: discordAvailable && s.discord.required,

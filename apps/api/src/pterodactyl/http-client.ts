@@ -318,6 +318,32 @@ export class PterodactylHttpClient implements PterodactylGateway {
     }
   }
 
+  /** Dateien gehen als reiner Text über die Client-API (nicht als JSON) */
+  private async fileRequest(method: 'GET' | 'POST', identifier: string, action: 'contents' | 'write', path: string, content?: string): Promise<Response> {
+    try {
+      return await fetch(`${this.baseUrl}/api/client/servers/${identifier}/files/${action}?file=${encodeURIComponent(path)}`, {
+        method,
+        headers: { Authorization: `Bearer ${this.opts.clientKey}`, Accept: 'Application/vnd.pterodactyl.v1+json', ...(content !== undefined ? { 'Content-Type': 'text/plain' } : {}) },
+        body: content,
+        signal: AbortSignal.timeout(this.opts.timeoutMs),
+      });
+    } catch (err) {
+      throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
+    }
+  }
+
+  async readFile(identifier: string, path: string): Promise<string | null> {
+    const res = await this.fileRequest('GET', identifier, 'contents', path);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new PterodactylError(`Pterodactyl GET files/contents → ${res.status}`, res.status);
+    return res.text();
+  }
+
+  async writeFile(identifier: string, path: string, content: string): Promise<void> {
+    const res = await this.fileRequest('POST', identifier, 'write', path, content);
+    if (!res.ok) throw new PterodactylError(`Pterodactyl POST files/write → ${res.status}`, res.status);
+  }
+
   async createBackupSchedule(identifier: string, spec: BackupScheduleSpec): Promise<number> {
     const schedule = await this.request('client', 'POST', `/servers/${identifier}/schedules`, {
       name: spec.name,

@@ -34,6 +34,8 @@ ENV DATABASE_PATH=/data/chfree.db \
 COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --from=build --chown=app:app /app/apps/api/dist ./dist
 COPY --from=build --chown=app:app /app/apps/api/drizzle ./drizzle
+# Wissensdatei des Support-Chats (Crafting AI)
+COPY --from=build --chown=app:app /app/apps/api/knowledge ./knowledge
 USER app
 VOLUME /data
 EXPOSE 4000

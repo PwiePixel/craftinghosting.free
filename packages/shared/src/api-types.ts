@@ -2,6 +2,7 @@
  * Datenobjekte, die die API an das Frontend ausliefert.
  */
 import type { PlanConfig, ProductKind } from './config/freehosting.config';
+import type { ChatSettings } from './chat-settings';
 import type { DiscordSettings } from './discord-settings';
 import type { Localized } from './i18n';
 import type {
@@ -407,6 +408,8 @@ export interface SiteSettings {
   seo: SeoSettings;
   /** Discord-Anbindung: Verknüpfung, Pflicht-Mitgliedschaft, Rollen, Willkommensnachricht, Tickets */
   discord: DiscordSettings;
+  /** Support-Chat „Crafting AI“ */
+  chat: ChatSettings;
   /** Eigenes Logo (die Bilddatei selbst liegt getrennt in der Datenbank – Upload im Admin-Bereich) */
   branding: {
     /** icon = Bild ersetzt den Würfel, der Schriftzug bleibt · full = Bild ersetzt Würfel und Schriftzug */
@@ -639,6 +642,8 @@ export interface PublicSiteDTO {
   products: Record<ProductKind, PublicProductDTO>;
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
+  /** Support-Chat: Anzeige auf der Website (null = ausgeschaltet) */
+  chat: { name: string; teaser: Localized; welcome: Localized; quick: { id: string; question: Localized }[]; ai: boolean; handoff: boolean; retentionDays: number } | null;
   /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
   discord: { available: boolean; required: boolean; inviteUrl: string | null; note: Localized };
   botFairUse: BotFairUseSettings;
@@ -913,4 +918,47 @@ export interface AdminDiscordDTO {
   /** Letzter Fehler beim Vergeben der Customer-Rolle */
   roleError: { at: string; message: string } | null;
   linkedUsers: number;
+}
+
+/* ---------------------------------------------------------------- Support-Chat */
+
+/** Knopf unter einer Chat-Nachricht */
+export type ChatAction =
+  /** „Mit einem Mitarbeiter sprechen“ */
+  | { type: 'handoff' }
+  /** Discord-Konto verbinden (Verbindungslink, nicht der Einladungslink) */
+  | { type: 'connect_discord'; url: string }
+  /** Das eröffnete Ticket auf Discord */
+  | { type: 'open_ticket'; url: string }
+  | { type: 'link'; url: string; label: Localized };
+
+export interface ChatMessageDTO {
+  id: number;
+  role: 'user' | 'assistant';
+  /** canned = vorgefertigte Antwort · ai = von der KI erzeugt · system = Ablauf (z. B. Weitergabe) */
+  source: 'user' | 'canned' | 'ai' | 'system';
+  text: string;
+  at: string;
+  actions: ChatAction[];
+}
+
+export interface ChatConversationDTO {
+  /** open = läuft · handoff_pending = wartet auf die Discord-Verbindung · handed_off = Ticket eröffnet */
+  status: 'open' | 'handoff_pending' | 'handed_off';
+  messages: ChatMessageDTO[];
+  /** Weitere Nachrichten sind möglich (Obergrenze je Unterhaltung nicht erreicht) */
+  canSend: boolean;
+}
+
+/** Übersicht des Chats im Admin-Bereich – der API-Schlüssel wird nie übertragen */
+export interface AdminChatDTO {
+  hasApiKey: boolean;
+  /** Modell, das „auto“ gerade verwendet */
+  model: string;
+  /** Verbrauch im laufenden Kalendermonat */
+  usage: { month: string; requests: number; inputTokens: number; outputTokens: number; costUsd: number };
+  budgetReached: boolean;
+  /** Letzter Fehler der KI-Anbindung (z. B. ungültiger Schlüssel) */
+  lastError: { at: string; message: string } | null;
+  conversations: { id: string; startedAt: string; updatedAt: string; messages: number; status: ChatConversationDTO['status']; firstMessage: string; ai: number }[];
 }

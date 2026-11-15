@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ChatWidget } from '@/components/chat/chat-widget';
 import { AnnouncementBar } from '@/components/layout/announcement';
 import { CookieBanner } from '@/components/layout/cookie-banner';
 import { SiteFooter } from '@/components/layout/site-footer';
@@ -6,6 +7,7 @@ import { SiteHeader } from '@/components/layout/site-header';
 import { getDict, resolveLang } from '@/i18n';
 import { RuntimeConfig } from '@/i18n/client';
 import { cookies } from 'next/headers';
+import { adminPath } from '@/lib/admin-path';
 import { getSite } from '@/lib/site-settings';
 
 export default async function SiteLayout({ children, params }: { children: ReactNode; params: Promise<{ lang: string }> }) {
@@ -50,6 +52,7 @@ export default async function SiteLayout({ children, params }: { children: React
       />
       <main id="inhalt">{children}</main>
       <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} logo={site.logo} />
+      {site.chat && <ChatWidget chat={site.chat} logo={site.logo} adminPath={adminPath()} />}
       <CookieBanner />
     </RuntimeConfig>
   );

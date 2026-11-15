@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { localePath } from '@chfree/shared';
 import { buttonClasses } from '@/components/ui/button';
 import { useDict, useLang } from '@/i18n/client';
@@ -23,6 +23,22 @@ export function CookieBanner() {
     if (!document.cookie.split('; ').some((c) => c.startsWith(`${CONSENT_COOKIE}=`))) setVisible(true);
   }, []);
 
+  // Höhe des Hinweises als CSS-Variable – der Chat-Knopf unten rechts rückt so lange darüber
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!visible || !ref.current) return;
+    const el = ref.current;
+    const apply = () => root.style.setProperty('--chf-cookie-h', `${el.offsetHeight}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--chf-cookie-h');
+    };
+  }, [visible]);
+
   if (!visible) return null;
 
   function confirm() {
@@ -33,7 +49,7 @@ export function CookieBanner() {
   }
 
   return (
-    <aside aria-label={t.label} className="fixed inset-x-0 bottom-0 z-[55] p-3 sm:p-4">
+    <aside ref={ref} aria-label={t.label} className="fixed inset-x-0 bottom-0 z-[55] p-3 sm:p-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-line-strong bg-surface-2 p-4 shadow-2xl shadow-black/40 sm:flex-row sm:items-center sm:gap-5 sm:px-5">
         <p className="text-sm leading-relaxed text-muted">
           {t.text}{' '}

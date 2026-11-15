@@ -99,13 +99,31 @@ Schutz vor Mehrfach-Anmeldungen und Bindung an den eigenen Discord-Server. Alles
 | **Willkommensnachricht** | Embed mit Profilbild und Profil-Banner, Einlader, Beitrittsdatum und Mitgliederzahl. Texte, Farbe, Kanal und Ersatzbild sind einstellbar. |
 | **Rollen-Panels** | Nachrichten mit Buttons zum Selbst-Zuweisen von Rollen (z. B. News/Giveaway/Status oder Free Hosting/Paid Hosting). Senden aus dem Admin-Bereich oder mit `/rollenpanel`. |
 | **Tickets** | Ticket-Panel (`/ticketpanel` oder aus dem Admin). Der Bot erkennt die Server des Nutzers, lässt das Produkt auswählen und schreibt Account-ID und Server-ID ins Ticket. Schließen durch Ersteller oder Team, Löschen durch das Team. |
-| **`!start` per Direktnachricht** | Mitglieder schreiben dem Bot privat `!start`. Er antwortet auf Deutsch und Englisch mit einem Button je Server und startet ihn über die Pterodactyl-API. Läuft der Server schon, sagt er das; kommt er nicht hoch, verweist er auf die Konsole im Panel. Fair-Use-Pausen gelten weiter. Abschaltbar im Admin. |
+| **`!start`, `!stop`, `!restart` per Direktnachricht** | Mitglieder schreiben dem Bot privat `!start`, `!stop` oder `!restart`. Er antwortet auf Deutsch und Englisch mit einem Button je Server und führt die Aktion über die Pterodactyl-API aus. Läuft der Server schon (bzw. ist er schon aus), sagt er das; kommt er nicht hoch, verweist er auf die Konsole im Panel. **Minecraft-EULA:** Ist sie noch nicht akzeptiert (`eula=false` in `eula.txt`, auch direkt nach dem allerersten Start), sagt der Bot das und zeigt den Button „Ja, ich akzeptiere die Minecraft-EULA. Ich habe sie gelesen.“ (DE/EN). Nach dem Klick trägt er `eula=true` ein, protokolliert die Zustimmung und startet den Server sauber. Fair-Use-Pausen gelten weiter. Abschaltbar im Admin. |
 | **`/rolle`** | `geben`/`nehmen` für ein Mitglied, `alle` für alle Mitglieder (ohne Bots). |
 | **`/wartung`** | `an`: sichert die Berechtigungen aller Kanäle, sperrt sie für alle außer Administratoren, legt Rolle „Wartung“ und einen Hinweis-Kanal an. `aus`: stellt alles wieder her. |
 
 **Einrichten:** Anwendung im [Discord Developer Portal](https://discord.com/developers/applications) anlegen → unter *Bot* Token erzeugen und den **Server Members Intent** einschalten → unter *OAuth2* die Redirect-Adresse `https://DEINE-DOMAIN/api/v1/discord/callback` eintragen → im Admin-Bereich Client-ID, Client-Secret, Bot-Token und Server-ID speichern → Bot über den angezeigten Link einladen (Recht „Administrator“, Bot-Rolle über die zu vergebenden Rollen ziehen) → „Verbindung prüfen & einrichten“.
 
 **Technik:** Der Bot läuft im Worker (`chfree-worker`) und hält eine Gateway-Verbindung zu Discord; Änderungen im Admin-Bereich übernimmt er nach ca. 20 Sekunden ohne Neustart. Bot-Token und Client-Secret liegen zusätzlich feldverschlüsselt in der Datenbank und werden nie an den Browser übertragen. Code: `apps/api/src/discord/`.
+
+### Support-Chat „Crafting AI“ (Admin → *Chat*)
+
+Chat-Symbol unten rechts auf der Website, mit einer Sprechblase, die einmal je Besuch kurz aufpoppt. Der Chat zeigt euer Logo (Einstellungen → Logo), ist klar als KI gekennzeichnet und antwortet auf Deutsch und Englisch.
+
+| Baustein | Was er tut |
+| --- | --- |
+| **Vorgefertigte Antworten** | Kommen sofort und ohne Kosten, wenn ein Besucher einen Vorschlag anklickt oder eine kurze Frage ein Stichwort enthält. Im Admin-Bereich bearbeitbar (Frage, Antwort, Stichwörter – je DE/EN). |
+| **KI-Antworten** | Alles andere beantwortet Claude über die offizielle Anthropic-API. Es wird **immer das günstigste Modell** verwendet (`claude-haiku-5-5`), mit niedrigem Aufwand, begrenzter Antwortlänge und zwischengespeichertem Wissen. Der API-Schlüssel wird im Admin-Bereich hinterlegt, feldverschlüsselt gespeichert und nie wieder angezeigt. |
+| **Kostenbremse** | Monatsbudget in US-Dollar (Standard 50 $). Ist es erreicht, antwortet bis zum Monatswechsel nur noch der vorgefertigte Teil. Dazu: Höchstzahl an Nachrichten je Unterhaltung und Limit je IP-Adresse. Der Verbrauch steht im Admin-Bereich (Schätzung – maßgeblich ist die Abrechnung bei Anthropic). |
+| **Nur Support** | Die KI beantwortet ausschließlich Fragen zu CraftingHosting.free. Sie kennt nur öffentliches Wissen: die Datei `apps/api/knowledge/support.md`, die aktuellen Pakete/Regeln/Links aus den Einstellungen und das „Zusatzwissen“ aus dem Admin-Bereich. Sie hat **keinen** Zugriff auf Konten, Server, Protokolle, Einstellungen oder Schlüssel. |
+| **Weitergabe an Mitarbeiter** | Kann die KI nicht helfen (oder möchte der Besucher einen Menschen), schickt der Chat den **Verbindungslink** zu Discord (nicht den Einladungslink). Nach der Zustimmung tritt der Besucher automatisch eurem Discord-Server bei; der Chat bestätigt das, der Bot eröffnet ein Ticket mit dem Hinweis der KI und dem bisherigen Verlauf und meldet es per Embed im eingestellten Team-Kanal. Wer bereits angemeldet und verknüpft ist, bekommt das Ticket sofort. |
+
+**Einrichten:** Admin → *Chat* → „Chat auf der Website anzeigen“ einschalten → API-Schlüssel von [console.anthropic.com](https://console.anthropic.com/settings/keys) eintragen → „Schlüssel prüfen“ → Monatsbudget festlegen → optional Kanal-ID für die Meldung an das Team. Für die Weitergabe muss die Discord-Anbindung (inkl. Ticketsystem) eingerichtet sein. Ohne Schlüssel arbeitet der Chat nur mit vorgefertigten Antworten.
+
+**Wissen pflegen:** `apps/api/knowledge/support.md` bearbeiten (wird innerhalb einer Minute neu gelesen) oder im Admin-Bereich „Zusatzwissen“ eintragen. Dort gehört nur hinein, was Besucher wissen dürfen.
+
+**Datenschutz:** Unterhaltungen werden gespeichert (IP-Adresse verschlüsselt) und nach der eingestellten Frist (Standard 30 Tage) gelöscht; die Datenschutzerklärung und die Cookie-Hinweise der Website nennen den Chat und den KI-Dienst automatisch, sobald er eingeschaltet ist. Code: `apps/api/src/chat/`, `apps/web/src/components/chat/`.
 
 ### Fair-Use-System für Discord-Bots
 
@@ -163,6 +181,7 @@ Anmeldung wie gewohnt mit Code per E-Mail (`/login`), danach `/admin` aufrufen. 
   - *Komponenten:* Name, Unterzeile, Gruppe, Reihenfolge, Sichtbarkeit, eigener Text für „Betriebsbereit“ (z. B. „Aktiv“) und die **Prüfung**: FreeHosting gesamt, Website, API & Datenbank, Pterodactyl Panel, alle Nodes, ein bestimmter Node (Wartungsmodus aus dem Panel + direkter Ping auf Wings), eigene Adresse (HTTP-Check) oder manuell. Ein fester Status (Automatisch / Betriebsbereit / Eingeschränkt / Teilausfall / Ausfall / Wartung) hat immer Vorrang
   - *Verlauf nachtragen:* einen ganzen Zeitraum (von – bis) für eine oder alle Komponenten eintragen, z. B. die Zeit vor Beginn der Messung als „Betriebsbereit“ – wahlweise nur für Tage ohne Messdaten, damit gemessene Ausfälle erhalten bleiben
   - *Verlauf korrigieren:* einzelne Tage je Komponente von Hand festlegen (Fehlalarm ausbessern, Ausfall nachtragen)
+- **Chat:** Support-Chat „Crafting AI“ ein/aus, API-Schlüssel für Claude (prüfen, löschen), Monatsbudget und Verbrauch, vorgefertigte Antworten, Zusatzwissen, Weitergabe an Mitarbeiter, die letzten Unterhaltungen mit Verlauf
 - **Server:** 50 pro Seite mit Blättern, Suche/Filter, Link ins Pterodactyl-Admin, Aktionen: +30 Tage, Pause aufheben, Sperren/Entsperren, Einrichtung erneut versuchen, Löschen
 - **Nutzer:** 50 pro Seite, Suche und Filter (E-Mail unbestätigt, ohne Server, auf der Warteliste, gesperrt, Admins), Panel-Konto, Sperren/Entsperren, Admin-Rechte und **Konten löschen**: einzeln, per Häkchen (Umschalt + Klick für ganze Bereiche, „alle auf dieser Seite“), **alle Treffer** von Suche/Filter über alle Seiten (Bestätigung mit „LÖSCHEN“, Fortschrittsanzeige) oder per eingefügter E-Mail-Liste. Gelöscht werden das Website-Konto und die kostenlosen Server; das Pterodactyl-Konto bleibt (dort können bezahlte Server liegen). Admins und das eigene Konto werden nie gelöscht.
 - **Protokoll:** komplettes Audit-Log (Nutzer, System, Admin), 50 pro Seite
@@ -257,7 +276,7 @@ npm run cli -w @chfree/api -- run all      # alle Jobs einmalig ausführen
 ## Pterodactyl anbinden
 
 1. **Application-API-Key** (`ptla_…`): Users R/W, Servers R/W, Nests R, Nodes R, Locations R, Allocations R → `PTERODACTYL_APP_KEY`
-2. **Client-API-Key** eines Admin-Accounts (`ptlc_…`) – für Stopps, Ressourcen, Chat-Hinweise (`/command`), Backup-Zeitplan → `PTERODACTYL_CLIENT_KEY`
+2. **Client-API-Key** eines Admin-Accounts (`ptlc_…`) – für Starts/Stopps, Ressourcen, Chat-Hinweise (`/command`), Backup-Zeitplan und das Lesen/Schreiben von `eula.txt` (EULA-Bestätigung über den Discord-Bot) → `PTERODACTYL_CLIENT_KEY`
 3. **Nodes** im Admin unter *Pterodactyl* zuweisen: Nodes für Minecraft und die eigene Node für Discord-Bots (Nodes brauchen freie Allokationen). `PTERODACTYL_LOCATION_IDS` ist nur noch ein optionaler Rückfall.
 4. **Eggs** im Admin unter *Pterodactyl* wählen – alle Eggs des Panels werden erkannt, passende vorgeschlagen. Für Discord-Bots ein Python- und ein Node.js-Egg importieren (z. B. „generic python“ / „generic nodejs“ aus github.com/pelican-eggs). Ohne Egg zeigt die Website „bald“. Die `.env`-Variablen `PTERODACTYL_EGG_*` bleiben als Alternative.
 5. `PTERODACTYL_MODE=live`, `PTERODACTYL_URL`, `PTERODACTYL_PUBLIC_URL` setzen

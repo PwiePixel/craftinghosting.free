@@ -355,7 +355,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           </a>
         </div>
 
-        <div className="mt-10">
+        <div className="mt-10 space-y-4">
           {security && <SecurityCard security={security} />}
           <AccountActions email={user.email} />
         </div>

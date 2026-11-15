@@ -140,6 +140,10 @@ export interface PterodactylGateway {
   /** Konsolenbefehl senden (z. B. `say …` für In-Game-Hinweise). */
   sendCommand(identifier: string, command: string): Promise<void>;
   createBackupSchedule(identifier: string, spec: BackupScheduleSpec): Promise<number>;
+  /** Textdatei eines Servers lesen, z. B. `/eula.txt` (null = Datei gibt es nicht) */
+  readFile(identifier: string, path: string): Promise<string | null>;
+  /** Textdatei eines Servers schreiben (legt sie bei Bedarf an) */
+  writeFile(identifier: string, path: string, content: string): Promise<void>;
 
   /** Erreichbarkeit in ms */
   ping(): Promise<number>;
