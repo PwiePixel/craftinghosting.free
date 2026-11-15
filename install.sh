@@ -812,12 +812,35 @@ ports_in_use_by_others() { # 0 = Port 80/443 von einem anderen Webserver belegt
   return 0
 }
 
+# Laufende Container der früheren Docker-Version (Compose-Projekt „craftinghosting-free“), eine Zeile je Container
+old_docker_containers() {
+  command -v docker >/dev/null 2>&1 || return 0
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^craftinghosting-free-(caddy|web|api|worker|mariadb)-[0-9]+$' || true
+}
+
+# Schritte, um von der alten Docker-Version auf diese Installation umzuschalten
+print_old_docker_steps() {
+  local names
+  names="$(old_docker_containers | tr '\n' ' ')"
+  [ -n "$names" ] || return 0
+  cat >&2 <<EOF
+      Die frühere Docker-Version läuft noch und beantwortet alle Anfragen an die Domain:
+        $names
+      Umschalten (die alten Daten bleiben in den Docker-Volumes erhalten, Rückweg: docker start …):
+        1. docker stop $names
+        2. bash install.sh        (richtet dann Caddy mit automatischem HTTPS ein)
+      Achtung: Die neue Version hat eine eigene, leere Datenbank – Konten und Server der alten
+      Version (MariaDB) werden nicht automatisch übernommen.
+EOF
+}
+
 install_caddy() {
   [ "$PROXY" = "caddy" ] || return 0
   step "Caddy (Webserver mit automatischem HTTPS)"
   if ! is_dry && ports_in_use_by_others; then
     warn "Port 80/443 ist bereits von einem anderen Webserver belegt:"
     ss -ltnpH 2>/dev/null | awk '$4 ~ /:(80|443)$/ { print "      " $4 "  " $NF }' >&2 || true
+    print_old_docker_steps
     if [ "$INTERACTIVE" -eq 1 ] && ! confirm "Ohne Caddy fortfahren und den vorhandenen Webserver selbst als Reverse Proxy einrichten?" j; then
       die "Abgebrochen. Anderen Webserver stoppen (z. B. systemctl disable --now apache2 nginx) und erneut ausführen."
     fi
@@ -1495,11 +1518,14 @@ EOF
 EOF
   else
     cat <<EOF
-  ${C_BOLD}Reverse Proxy${C_RESET}
-    Caddy wurde nicht eingerichtet. Eigener Proxy: /api/* → 127.0.0.1:$API_PORT, alles andere → 127.0.0.1:$WEB_PORT
-    Vorlage für nginx: $INSTALL_DIR/deploy/nginx.example.conf
+  ${C_BOLD}${C_YELLOW}⚠ Noch nicht öffentlich erreichbar${C_RESET}
+    Caddy wurde nicht eingerichtet, weil Port 80/443 einem anderen Webserver gehört (oder --no-caddy gesetzt ist).
+    Diese Installation läuft bisher nur intern. Unter https://$CFG_DOMAIN sehen Besucher weiter das, was der
+    andere Webserver ausliefert – bis er umgestellt wird:
+      /api/* → 127.0.0.1:$API_PORT, alles andere → 127.0.0.1:$WEB_PORT   (Vorlage für nginx: $INSTALL_DIR/deploy/nginx.example.conf)
 
 EOF
+    print_old_docker_steps
   fi
   cat <<EOF
   ${C_BOLD}Nützliche Befehle${C_RESET}
