@@ -22,12 +22,12 @@ Verbindung zum Panel und erledigt den Rest:
 
 1. Node.js 22, Caddy und Hilfspakete installieren
 2. Programm nach `/opt/craftinghosting-free` kopieren, bauen
-3. `.env` schreiben (inkl. zufälligem `DATABASE_ENCRYPTION_KEY` und geheimem `ADMIN_PATH`)
+3. `.env` schreiben (inkl. zufälligem `DATABASE_ENCRYPTION_KEY`)
 4. verschlüsselte Datenbank unter `/var/lib/chfree/chfree.db` anlegen
 5. systemd-Dienste `chfree-api`, `chfree-worker`, `chfree-web` einrichten und starten
 6. Caddy mit automatischem HTTPS einrichten
 
-Am Ende zeigt es die Adresse des geheimen Admin-Bereichs. Danach im Admin-Bereich:
+Der Admin-Bereich liegt unter `/admin` – erreichbar nur für angemeldete Admins (die Admin-E-Mail aus der Installation); alle anderen sehen dort eine 404-Seite. Erst über `/login` anmelden, dann `/admin` aufrufen. Dort:
 
 - **Pterodactyl:** Nodes zuweisen (Minecraft-Nodes, eigene Node für Discord-Bots) und Eggs wählen
   (Python, Node.js – werden automatisch erkannt, „Alle Vorschläge übernehmen“)
@@ -60,6 +60,22 @@ sudo bash install.sh tunnel
 
 Nutzt du ein eigenes Caddyfile mit anderen Seiten, richtet der Installer die automatischen Zertifikate für weitere
 Domains nicht ein (er fasst fremde Einstellungen nicht an) – nimm dann den Tunnel oder trage die Domain selbst ein.
+
+## Beta-Instanz
+
+```bash
+sudo bash install.sh --beta
+```
+
+Richtet unter `beta.<domain>` eine zweite Website mit **derselben Datenbank** ein (eigene Dienste `chfree-beta-api` und
+`chfree-beta-web`, kein Worker). Für `beta.<domain>` brauchst du einen DNS-Eintrag auf diesen Server (oder den Tunnel).
+
+- Zugang vergeben: `/admin` → *Nutzer* → „Beta-Zugang geben“. Freigeschaltete Nutzer finden unter „Meine Server“ die
+  Karte „Beta-Programm“ und wechseln von dort – nach einer Bestätigung – auf die Beta.
+- Alle anderen sehen auf der Beta bei jeder Adresse „Du bist nicht im Beta-Programm“ und können sich dort nicht anmelden.
+- Neue Version auf die Beta bringen: im Checkout mit dieser Version `sudo bash install.sh update --beta`.
+  Mit `--migrate` werden auch Datenbank-Änderungen angewendet (Backup vorher) – das betrifft dann auch die Hauptseite.
+- Entfernen: `sudo bash install.sh uninstall --beta`. Logs: `chfree logs beta`.
 
 ## Betrieb
 

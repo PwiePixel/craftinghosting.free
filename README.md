@@ -32,6 +32,30 @@ git push origin origin/claude/adoring-mendel-nrzvan:refs/heads/main
 
 Danach auf GitHub unter *Settings → General → Default branch* `main` auswählen. Der Installer und `chfree update` nutzen dann automatisch `main`. Gibt es `main` schon mit eigenem Inhalt, stattdessen auf GitHub einen Pull Request vom Branch nach `main` öffnen und zusammenführen.
 
+## Beta-Instanz
+
+Eine zweite Website unter `beta.<domain>` zum Testen neuer Versionen – **mit derselben Datenbank** wie die Hauptseite:
+
+```bash
+sudo bash install.sh --beta
+```
+
+| | |
+| --- | --- |
+| **Wer kommt hinein?** | Nur Nutzer mit Beta-Zugang: Admin → *Nutzer* → „Beta-Zugang geben“ (Admins immer). Die Freigabe steht in der Datenbank (`users.beta`). |
+| **Alle anderen** | sehen auf der Beta bei **jeder** Adresse „Du bist nicht im Beta-Programm“ (Status 403). Anmelden oder Registrieren geht dort nicht; die Beta-API beantwortet ihre Anfragen mit 403. |
+| **Der Weg hinein** | Auf der Hauptseite anmelden → „Meine Server“ → Karte „Beta-Programm“ → bestätigen. Die API prüft die Freigabe und stellt ein Einmal-Ticket aus (signiert, 2 Minuten gültig); die Beta-Instanz prüft Ticket **und Freigabe erneut** und legt erst dann eine eigene Sitzung an. |
+| **Entzug** | wirkt sofort – die Beta prüft die Freigabe bei jeder Anfrage. |
+| **Technik** | Eigener Ordner (`/opt/craftinghosting-free-beta`), eigene Dienste `chfree-beta-api` / `chfree-beta-web` (Ports 4100/3100), kein Worker – Jobs laufen nur auf der Hauptseite. Nie in Suchmaschinen. |
+| **Andere Version testen** | Im Checkout mit der neuen Version `sudo bash install.sh update --beta` ausführen. Braucht sie neue Tabellen: `--migrate` anhängen (Backup vorher; die Änderung gilt wegen der gemeinsamen Datenbank auch für die Hauptseite). |
+| **Entfernen** | `sudo bash install.sh uninstall --beta` – Datenbank und Hauptseite bleiben unberührt. |
+
+Weil Beta und Hauptseite dieselben Daten nutzen, sind Änderungen der Tester echt (Server erstellen, löschen …).
+
+## Logo
+
+Admin → *Einstellungen* → **Logo**: PNG, JPG, WebP oder SVG bis 512 KB hochladen. Es ersetzt wahlweise nur den Würfel (Schriftzug bleibt) oder Würfel und Schriftzug, und erscheint in Kopf- und Fußzeile – auch auf der Beta-Instanz. Die Datei liegt in der verschlüsselten Datenbank; SVGs mit Skripten werden abgelehnt.
+
 ## Domains und HTTPS
 
 | Weg | Wann | Was du tust |
@@ -103,9 +127,9 @@ Geprüft wird jede Minute im Job `sync-power-states` (`apps/api/src/services/bot
 
 ## Admin-Bereich
 
-Liegt unter einem **geheimen Pfad** (`ADMIN_PATH` in der `.env`, z. B. `/team-7f3k9`) – nirgends verlinkt, nicht in `robots.txt` oder der Sitemap, per `X-Robots-Tag` und Meta-Tag auf `noindex`. Für alle, die kein Admin sind (auch nicht angemeldete Besucher), liefert der Pfad eine normale 404-Seite. `/admin` ist ohne eigenen `ADMIN_PATH` der Standard – bitte ändern.
+Liegt unter **`/admin`** (deutsch `/de/admin`) – nirgends verlinkt, nicht in `robots.txt` oder der Sitemap, per `X-Robots-Tag` und Meta-Tag auf `noindex`. **Erreichbar ist er nur für angemeldete Admins** (Rolle im Backend bzw. `ADMIN_EMAILS`). Alle anderen – auch nicht angemeldete Besucher und angemeldete Nutzer ohne Admin-Rechte – bekommen dieselbe 404-Seite wie bei jeder unbekannten Adresse; es gibt keinen Login-Hinweis und keine Weiterleitung. Geprüft wird das schon vor dem Rendern (in `apps/web/src/proxy.ts`) und zusätzlich in der API (alle `/admin/*`-Endpunkte antworten für Nicht-Admins mit 404). Optional lässt sich über `ADMIN_PATH` ein zusätzlicher eigener Pfad festlegen.
 
-Anmeldung wie gewohnt per E-Mail-Link (`/login`), danach den geheimen Pfad aufrufen. Zugriff haben Konten mit Adresse in `ADMIN_EMAILS` oder nach `node dist/cli.js make-admin du@example.com`.
+Anmeldung wie gewohnt per E-Mail-Link (`/login`), danach `/admin` aufrufen. Zugriff haben Konten mit Adresse in `ADMIN_EMAILS` oder nach `node dist/cli.js make-admin du@example.com`.
 
 - **Übersicht:** Website-Zustand (Wartung, Registrierungsmodus, Warteliste) mit Wartungs-Schnellschalter, Nutzer, Server nach Status, Pakete, E-Mail-Warteschlange, Pterodactyl-/SMTP-Einstellungen, Zustand aller Jobs (mit „Jetzt ausführen“) – Warnung, wenn der Worker nicht läuft
 - **Einstellungen:** Wartungsmodus (Hinweis DE/EN, voraussichtliches Ende), Registrierung *Offen / Vorregistrierung / Geschlossen*, kostenlose Server pro Person, **Kapazität je Paket** (maximale Plätze + außerhalb belegte Plätze → auf der Website „Noch 12 von 100 Plätzen frei“ bzw. „Ausgebucht“), EPYC-Plätze gesamt und davon außerhalb belegt, Anmeldungen außerhalb der Website, Zahlen auf der Startseite (automatisch + Zusatz oder fester Wert). Wirkt nach wenigen Sekunden – kein Neustart nötig.
@@ -260,6 +284,9 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 | GET/POST | `/admin/tunnel` · `/admin/tunnel/{login,setup,restart,disconnect}` | Cloudflare Tunnel: Freigabe-Link, Einrichten, Neustart, Trennen |
 | GET | `/admin/export/{users,servers,subscribers}` | CSV-Export |
 | GET | `/internal/tls-check?domain=…` | Für Caddy: darf für diese Domain ein Zertifikat geholt werden? |
+| POST | `/beta/enter` (Hauptseite) · `/beta/session` (Beta-Instanz) | Beta-Programm: Einmal-Ticket ausstellen bzw. einlösen (Freigabe wird beide Male geprüft) |
+| POST | `/admin/users/:id/{grant-beta,revoke-beta}` | Beta-Zugang vergeben / entziehen |
+| POST · GET | `/admin/logo` · `/admin/logo/delete` · `/brand/logo` | Logo hochladen, entfernen, ausliefern |
 | GET/POST | `/admin/waitlist` · `/admin/waitlist/release` · `/admin/waitlist/:id/remove` | Warteliste |
 | GET/POST | `/admin/incidents` · `/admin/incidents/:id` · `/admin/incidents/:id/{resolve,delete}` | Meldungen der Statusseite |
 
@@ -299,7 +326,7 @@ Startet Migration, API, Worker, Website und Caddy (automatisches HTTPS); die ver
 ## Vor dem Livegang
 
 - [ ] Rechtstexte sind vollständig ausgefüllt (Impressum, Datenschutz, AGB, Nutzungsbedingungen, Cookies – ohne Platzhalter); vor dem Livegang juristisch gegenlesen lassen
-- [ ] `ADMIN_PATH` auf einen eigenen, schwer zu erratenden Pfad setzen
+- [ ] Admin-Konto prüfen: `ADMIN_EMAILS` in der `.env` bzw. `chfree cli make-admin du@example.com` – `/admin` ist nur für diese Konten erreichbar
 - [ ] Englische Rechtstexte gegenlesen lassen (die deutsche Fassung ist maßgeblich)
 - [ ] DNS für `panel.craftinghosting.free` + im Panel `APP_URL` und bei Wings die Panel-Adresse anpassen
 - [ ] Offizielles Logo einbinden (`apps/web/src/components/brand/logo.tsx`)
