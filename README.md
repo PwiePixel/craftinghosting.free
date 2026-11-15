@@ -85,6 +85,27 @@ Weitere Domains leiten standardmäßig auf die Hauptdomain weiter (gut für Such
 | **Suchmaschinen & KI** | `/llms.txt` beschreibt das Angebot sachlich für KI-Assistenten – erzeugt aus denselben Einstellungen wie die Website (Pakete, Plätze, Regeln, Standorte), dazu strukturierte Daten (schema.org) und eine `robots.txt`, die KI-Crawler ausdrücklich zulässt. So gibt es keine widersprüchlichen Angaben. |
 | **CSV-Export** | Nutzer, Server und Newsletter-Abonnenten als CSV (Admin → *Nutzer* / *Server* / *Newsletter*). |
 
+### Discord-Anbindung (Admin → *Discord*)
+
+Schutz vor Mehrfach-Anmeldungen und Bindung an den eigenen Discord-Server. Alles wird im Admin-Bereich eingerichtet – in der `.env` steht dazu nichts.
+
+| Funktion | Was passiert |
+| --- | --- |
+| **Konto verknüpfen** | Nutzer verbinden unter „Meine Server“ ihr Discord-Konto (OAuth). Mit der Berechtigung `guilds.join` treten sie dabei automatisch dem Server bei. Jedes Discord-Konto gehört zu höchstens einem Account; optional gilt ein Mindestalter des Discord-Kontos. |
+| **Pflicht-Mitgliedschaft** | Eingeschaltet werden Server erst erstellt bzw. reaktiviert, wenn das Konto verknüpft und der Nutzer Mitglied ist. Offene Anfragen warten so lange. Startseite, „Server erstellen“, FAQ, Regeln und `/llms.txt` weisen darauf hin. |
+| **Einladungslink** | Der Bot erstellt eine dauerhafte Einladung und ersetzt sie, falls sie gelöscht wird. Die Website verwendet sie überall als Discord-Link. |
+| **Customer-Rolle** | Wer einen Server oder Bot hat, bekommt die Rolle (Rollen-ID im Admin); wer keinen mehr hat, verliert sie. Abgleich alle 2 Minuten (Job `discord-sync`) und auf Knopfdruck. |
+| **Auto-Rollen** | Rollen, die jedes neue Mitglied beim Betreten bekommt. |
+| **Willkommensnachricht** | Embed mit Profilbild und Profil-Banner, Einlader, Beitrittsdatum und Mitgliederzahl. Texte, Farbe, Kanal und Ersatzbild sind einstellbar. |
+| **Rollen-Panels** | Nachrichten mit Buttons zum Selbst-Zuweisen von Rollen (z. B. News/Giveaway/Status oder Free Hosting/Paid Hosting). Senden aus dem Admin-Bereich oder mit `/rollenpanel`. |
+| **Tickets** | Ticket-Panel (`/ticketpanel` oder aus dem Admin). Der Bot erkennt die Server des Nutzers, lässt das Produkt auswählen und schreibt Account-ID und Server-ID ins Ticket. Schließen durch Ersteller oder Team, Löschen durch das Team. |
+| **`/rolle`** | `geben`/`nehmen` für ein Mitglied, `alle` für alle Mitglieder (ohne Bots). |
+| **`/wartung`** | `an`: sichert die Berechtigungen aller Kanäle, sperrt sie für alle außer Administratoren, legt Rolle „Wartung“ und einen Hinweis-Kanal an. `aus`: stellt alles wieder her. |
+
+**Einrichten:** Anwendung im [Discord Developer Portal](https://discord.com/developers/applications) anlegen → unter *Bot* Token erzeugen und den **Server Members Intent** einschalten → unter *OAuth2* die Redirect-Adresse `https://DEINE-DOMAIN/api/v1/discord/callback` eintragen → im Admin-Bereich Client-ID, Client-Secret, Bot-Token und Server-ID speichern → Bot über den angezeigten Link einladen (Recht „Administrator“, Bot-Rolle über die zu vergebenden Rollen ziehen) → „Verbindung prüfen & einrichten“.
+
+**Technik:** Der Bot läuft im Worker (`chfree-worker`) und hält eine Gateway-Verbindung zu Discord; Änderungen im Admin-Bereich übernimmt er nach ca. 20 Sekunden ohne Neustart. Bot-Token und Client-Secret liegen zusätzlich feldverschlüsselt in der Datenbank und werden nie an den Browser übertragen. Code: `apps/api/src/discord/`.
+
 ### Fair-Use-System für Discord-Bots
 
 | Regel | Standard | Was passiert |
@@ -254,6 +275,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | `enforce-fair-use` | 60 s | Chat-Warnungen, 24-h-Limit, Wochen-Offline-Zeit, Pausen-Verstöße |
 | `cycle-lifecycle` | 60 s | 30-Tage-Zyklus der Minecraft-Server: Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag. Discord-Bots haben keinen Zyklus; der Job suspendiert sie nur nach einer Freigabe wegen Inaktivität |
 | `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |
+| `discord-sync` | 2 min | Customer-Rolle auf dem Discord-Server abgleichen, Einladungslink stündlich prüfen |
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |
 | `notification-emails` | 30 s | E-Mail-Outbox mit Wiederholungen |
@@ -295,6 +317,9 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 | POST · GET | `/admin/logo` · `/admin/logo/delete` · `/brand/logo` | Logo hochladen, entfernen, ausliefern |
 | GET/POST | `/admin/waitlist` · `/admin/waitlist/release` · `/admin/waitlist/:id/remove` | Warteliste |
 | GET/POST | `/admin/incidents` · `/admin/incidents/:id` · `/admin/incidents/:id/{resolve,delete}` | Meldungen der Statusseite |
+| GET | `/discord/connect` · `/discord/callback` | Discord-Konto verknüpfen (Weiterleitung zu Discord und zurück) |
+| GET/POST | `/discord/me` · `/discord/check` · `/discord/unlink` | Stand der Verknüpfung, Mitgliedschaft erneut prüfen, Verknüpfung lösen |
+| GET/POST | `/admin/discord` · `/admin/discord/{secrets,setup,sync-roles,send-panel}` | Discord-Anbindung: Zugangsdaten, Einrichtung, Rollen-Abgleich, Panels posten |
 
 ---
 

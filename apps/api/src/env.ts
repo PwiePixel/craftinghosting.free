@@ -111,6 +111,9 @@ const schema = z
 
     STATUS_PROVIDER: z.enum(['internal', 'static']).default('internal'),
 
+    /** Adresse der Discord-API. Nur für Tests ändern – Token, Secret und IDs stehen im Admin-Bereich (Discord). */
+    DISCORD_API_URL: z.string().url().default('https://discord.com/api/v10'),
+
     /**
      * Beta-Programm.
      *  BETA_MODE=true  → diese Installation ist die Beta-Instanz: gleiche Datenbank wie die Hauptseite, aber nur

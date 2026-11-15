@@ -100,6 +100,12 @@ export function CookiesDe({ site }: { site: PublicSiteDTO }) {
           keine Inhalte von Drittanbietern eingebunden, die eigene Cookies setzen könnten. Erst wenn du einen Link nach außen anklickst (z. B. zum Panel, zu Discord oder
           zur Spendenseite von SumUp), gelten die Cookie-Regeln der jeweiligen Seite.
         </p>
+        {site.discord.available && (
+          <p>
+            Das gilt auch für die Discord-Verknüpfung: Dafür wirst du zu discord.com weitergeleitet und kommst danach zurück. Unsere Website setzt dabei kein zusätzliches
+            Cookie; in deinem Account speichern wir deine Discord-Nutzer-ID und deinen Discord-Benutzernamen (siehe Datenschutzerklärung).
+          </p>
+        )}
       </section>
       <section>
         <h2>Cookies löschen</h2>
@@ -175,6 +181,12 @@ export function CookiesEn({ site }: { site: PublicSiteDTO }) {
           that could set its own cookies is embedded. Only when you click a link to another site (e.g. to the panel, to Discord or to SumUp’s donation page) do that
           site’s cookie rules apply.
         </p>
+        {site.discord.available && (
+          <p>
+            This also applies to Discord linking: you are redirected to discord.com and return afterwards. Our website does not set an additional cookie for this; in your
+            account we store your Discord user ID and Discord username (see the privacy policy).
+          </p>
+        )}
       </section>
       <section>
         <h2>Deleting cookies</h2>

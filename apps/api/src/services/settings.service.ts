@@ -27,6 +27,7 @@ import { getEggMapping } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
 import { db } from '../db/client';
+import { getDiscordSecrets, getDiscordState } from '../discord/store';
 import { servers, settings as settingsTable, statusChecks, users } from '../db/schema';
 
 const KEY = 'site';
@@ -55,6 +56,7 @@ export async function getSettings(): Promise<SiteSettings> {
       await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
     }
     cache = { value, at: Date.now() };
+    await loadBotInvite();
     applyRuntime(value);
     return value;
   } catch {
@@ -79,15 +81,23 @@ export async function saveSettings(next: unknown, opts: { blocks?: WaitlistBlock
 }
 
 /** Links der Marke: Einstellung aus dem Admin-Bereich → .env (NEXT_PUBLIC_*) → Standard aus der Konfiguration */
-export function resolveBrand(s: Pick<SiteSettings, 'brand'>): BrandSettings {
+export function resolveBrand(s: Pick<SiteSettings, 'brand' | 'discord'>): BrandSettings {
   const d = defaultBrand();
   return {
-    discordUrl: s.brand.discordUrl || process.env.NEXT_PUBLIC_DISCORD_URL || d.discordUrl,
+    // Ist die Discord-Anbindung aktiv, gilt überall der Einladungslink, den der Bot erstellt hat
+    discordUrl: (s.discord.enabled && botInviteUrl) || s.brand.discordUrl || process.env.NEXT_PUBLIC_DISCORD_URL || d.discordUrl,
     supportEmail: s.brand.supportEmail || d.supportEmail,
     parentUrl: s.brand.parentUrl || process.env.NEXT_PUBLIC_PARENT_URL || d.parentUrl,
     parentPricingUrl: s.brand.parentPricingUrl || process.env.NEXT_PUBLIC_PARENT_PRICING_URL || d.parentPricingUrl,
     statusUrl: s.brand.statusUrl || process.env.NEXT_PUBLIC_STATUS_URL || d.statusUrl,
   };
+}
+
+/** Vom Discord-Bot erstellter Einladungslink (aus discord-state, wird mit den Einstellungen geladen) */
+let botInviteUrl: string | null = null;
+async function loadBotInvite(): Promise<void> {
+  const code = (await getDiscordState().catch(() => null))?.inviteCode;
+  botInviteUrl = code ? `https://discord.gg/${code}` : null;
 }
 
 /**
@@ -280,6 +290,9 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
   const s = await getSettings();
   const wl = await waitlistCounts(s);
   const capacity = await capacityState(s);
+  // Verknüpfen geht erst, wenn Client-ID, Server-ID, Bot-Token und Client-Secret hinterlegt sind
+  const secrets = await getDiscordSecrets();
+  const discordAvailable = s.discord.enabled && !!s.discord.clientId && !!s.discord.guildId && !!secrets.botToken && !!secrets.clientSecret;
   const [logoAt] = await db.select({ updatedAt: assets.updatedAt }).from(assets).where(eq(assets.key, 'logo')).limit(1);
   let stats: PublicSiteDTO['stats'] = null;
   if (s.stats.show) {
@@ -322,6 +335,12 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
+    discord: {
+      available: discordAvailable,
+      required: discordAvailable && s.discord.required,
+      inviteUrl: s.discord.enabled ? botInviteUrl : null,
+      note: s.discord.requiredNote,
+    },
     botFairUse: s.botFairUse,
     brand: resolveBrand(s),
     rules: s.rules,

@@ -2,6 +2,7 @@
  * Datenobjekte, die die API an das Frontend ausliefert.
  */
 import type { PlanConfig, ProductKind } from './config/freehosting.config';
+import type { DiscordSettings } from './discord-settings';
 import type { Localized } from './i18n';
 import type {
   CycleState,
@@ -27,6 +28,8 @@ export interface UserDTO {
   beta: boolean;
   /** Sprache für E-Mails und Hinweise im Panel */
   locale: 'de' | 'en';
+  /** Verknüpftes Discord-Konto (null = nicht verknüpft) */
+  discord: { id: string; username: string } | null;
   createdAt: string;
 }
 
@@ -380,6 +383,8 @@ export interface SiteSettings {
   /** Gesperrte E-Mail-Adressen und -Domains (Registrierung und Newsletter) */
   blocklist: BlocklistSettings;
   seo: SeoSettings;
+  /** Discord-Anbindung: Verknüpfung, Pflicht-Mitgliedschaft, Rollen, Willkommensnachricht, Tickets */
+  discord: DiscordSettings;
   /** Eigenes Logo (die Bilddatei selbst liegt getrennt in der Datenbank – Upload im Admin-Bereich) */
   branding: {
     /** icon = Bild ersetzt den Würfel, der Schriftzug bleibt · full = Bild ersetzt Würfel und Schriftzug */
@@ -612,6 +617,8 @@ export interface PublicSiteDTO {
   products: Record<ProductKind, PublicProductDTO>;
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
+  /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
+  discord: { available: boolean; required: boolean; inviteUrl: string | null; note: Localized };
   botFairUse: BotFairUseSettings;
   /** Aufgelöste Links (Admin-Einstellung → .env → Standard) */
   brand: BrandSettings;
@@ -843,4 +850,43 @@ export interface AdminDomainsDTO {
   serverAddresses: string[];
   domains: AdminDomainDTO[];
   tunnel: AdminTunnelDTO;
+}
+
+/* ---------------------------------------------------------------- Discord */
+
+/** Stand der Discord-Verknüpfung eines Accounts („Meine Server“) */
+export interface DiscordMeDTO {
+  /** Verknüpfen ist möglich (Anbindung vollständig eingerichtet) */
+  available: boolean;
+  /** Ohne Mitgliedschaft auf dem Discord-Server gibt es keine kostenlosen Server */
+  required: boolean;
+  linked: { id: string; username: string } | null;
+  /** Warum gerade keine Server freigeschaltet werden (null = alles in Ordnung) */
+  blocked: 'not_linked' | 'not_member' | 'unavailable' | null;
+}
+
+export interface DiscordSetupStep {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+/** Übersicht der Discord-Anbindung im Admin-Bereich – Token und Secret werden nie übertragen */
+export interface AdminDiscordDTO {
+  hasBotToken: boolean;
+  hasClientSecret: boolean;
+  botReady: boolean;
+  linkReady: boolean;
+  /** Muss im Discord Developer Portal unter OAuth2 → Redirects eingetragen sein */
+  redirectUri: string;
+  /** Link, mit dem der Bot auf den Server eingeladen wird */
+  botInviteUrl: string | null;
+  /** Vom Bot erstellter Einladungslink (wird auf der Website überall verwendet) */
+  inviteUrl: string | null;
+  bot: { id: string; username: string; avatar: string | null } | null;
+  guild: { name: string; icon: string | null; memberCount: number | null } | null;
+  commandsAt: string | null;
+  setupAt: string | null;
+  gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
+  linkedUsers: number;
 }

@@ -22,6 +22,12 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           das Pterodactyl-Panel von CraftingHosting verwaltet und auf einer eigenen Bot-Node in {location} betrieben. Ergänzend gelten die{' '}
           <Link href={localePath('de', 'terms')}>Allgemeinen Geschäftsbedingungen</Link>.
         </p>
+        {site.discord.required && (
+          <p>
+            Voraussetzung für kostenlose Server ist ein verknüpftes Discord-Konto und die Mitgliedschaft auf unserem Discord-Server. Jedes Discord-Konto kann nur mit einem
+            Account verknüpft werden. Ohne Mitgliedschaft werden keine Server erstellt oder reaktiviert.
+          </p>
+        )}
         <p>
           Für Minecraft-Server gelten die gesonderten <Link href={localePath('de', 'rules')}>Nutzungsbedingungen & Fair-Use</Link>.
         </p>
@@ -212,6 +218,12 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           CraftingHosting Pterodactyl panel and runs on a dedicated bot node in {location}. The <Link href={localePath('en', 'terms')}>terms and conditions</Link> apply in
           addition.
         </p>
+        {site.discord.required && (
+          <p>
+            Free servers require a linked Discord account and membership of our Discord server. Each Discord account can only be linked to one account. Without membership no
+            servers are created or reactivated.
+          </p>
+        )}
         <p>
           For Minecraft servers the separate <Link href={localePath('en', 'rules')}>terms of use & fair use</Link> apply.
         </p>

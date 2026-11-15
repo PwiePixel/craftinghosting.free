@@ -13,6 +13,8 @@ export interface FaqContext {
   discordRam: string | null;
   /** Gilt das Fair-Use-System auch für Discord-Bots? */
   discordFairUse: boolean;
+  /** Ist die Mitgliedschaft auf dem Discord-Server Pflicht? */
+  discordRequired: boolean;
   /** z. B. „Deutschland“ */
   locations: string;
   /** z. B. „Dual Intel Xeon Gold 6230“ */
@@ -506,6 +508,14 @@ return {
         q: 'Wo stehen die Server und auf welcher Hardware laufen sie?',
         a: `Die Nodes stehen in ${ctx.locations} und laufen auf ${ctx.cpus} mit ${hardware.storage} und ${hardware.network}.`,
       },
+      ...(ctx.discordRequired
+        ? [
+            {
+              q: 'Warum muss ich auf eurem Discord-Server sein?',
+              a: 'Unsere kostenlosen Server gibt es nur für Mitglieder unseres Discord-Servers. Du verbindest dafür unter „Meine Server“ dein Discord-Konto und trittst dabei automatisch bei. Das schützt das Angebot vor Mehrfach-Anmeldungen und automatisierten Registrierungen – jedes Discord-Konto lässt sich nur mit einem Account verknüpfen. Außerdem bekommst du dort die Customer-Rolle, Ankündigungen und Support per Ticket.',
+            },
+          ]
+        : []),
       ...(ctx.discordRam
         ? [
             {
@@ -665,6 +675,43 @@ return {
     backHome: 'Zur Startseite',
   },
 
+  discord: {
+    cardTitle: 'Discord',
+    requiredTitle: 'Discord-Mitgliedschaft erforderlich',
+    requiredText:
+      'Unsere kostenlosen Server gibt es nur für Mitglieder unseres Discord-Servers. Verbinde dein Discord-Konto – dabei trittst du dem Server automatisch bei. So schützen wir das Angebot vor Mehrfach-Anmeldungen und automatisierten Registrierungen.',
+    optionalText: 'Verbinde dein Discord-Konto: Auf unserem Discord-Server bekommst du automatisch die Customer-Rolle, und der Support erkennt deine Server im Ticket sofort.',
+    connect: 'Mit Discord verbinden',
+    connectedAs: (name: string) => `Verbunden als ${name}`,
+    connectedText: 'Du bist Mitglied auf unserem Discord-Server.',
+    notMemberTitle: 'Du bist nicht auf unserem Discord-Server',
+    notMemberText: 'Dein Discord-Konto ist verknüpft, aber kein Mitglied unseres Servers. Tritt bei und klicke danach auf „Erneut prüfen“.',
+    unavailableText: 'Die Mitgliedschaft lässt sich gerade nicht prüfen. Bitte versuche es gleich noch einmal.',
+    join: 'Discord-Server beitreten',
+    recheck: 'Erneut prüfen',
+    recheckOk: 'Alles in Ordnung – du bist Mitglied.',
+    recheckFail: 'Wir finden dich noch nicht auf dem Discord-Server.',
+    unlink: 'Verknüpfung lösen',
+    failed: 'Das hat nicht geklappt. Bitte versuche es erneut.',
+    pendingStatus: 'Wartet auf Discord',
+    pendingBlocked: 'Dein Server wird eingerichtet, sobald dein Discord-Konto verbunden und du Mitglied auf unserem Discord-Server bist.',
+    /** Kurzer Hinweis auf Startseite und beim Erstellen */
+    noteTitle: 'Voraussetzung: Mitglied auf unserem Discord-Server',
+    noteText:
+      'Um unsere kostenlosen Dienste zu nutzen, musst du auf unserem Discord-Server sein. Nach der Anmeldung verbindest du dein Discord-Konto und trittst dabei automatisch bei – erst dann wird dein Server eingerichtet.',
+    noteButton: 'Zum Discord-Server',
+    results: {
+      linked: { ok: true, title: 'Discord verbunden', text: 'Dein Discord-Konto ist verknüpft und du bist Mitglied auf unserem Server.' },
+      linked_not_member: { ok: false, title: 'Verknüpft – aber noch kein Mitglied', text: 'Dein Discord-Konto ist verknüpft. Tritt jetzt unserem Discord-Server bei und klicke auf „Erneut prüfen“.' },
+      taken: { ok: false, title: 'Dieses Discord-Konto ist schon vergeben', text: 'Das Discord-Konto ist bereits mit einem anderen Account verknüpft. Jedes Discord-Konto kann nur einmal verwendet werden.' },
+      too_new: { ok: false, title: 'Discord-Konto ist zu neu', text: 'Zum Schutz vor Missbrauch muss dein Discord-Konto schon etwas länger bestehen. Bitte versuche es später erneut oder wende dich an den Support.' },
+      bot_account: { ok: false, title: 'Bot-Konten können nicht verknüpft werden', text: 'Bitte verbinde dein persönliches Discord-Konto.' },
+      denied: { ok: false, title: 'Verknüpfung abgebrochen', text: 'Du hast die Anfrage bei Discord abgelehnt. Ohne Verknüpfung können wir deine Mitgliedschaft nicht prüfen.' },
+      state: { ok: false, title: 'Verknüpfung abgelaufen', text: 'Bitte starte die Verknüpfung noch einmal.' },
+      unavailable: { ok: false, title: 'Discord ist gerade nicht verfügbar', text: 'Die Discord-Verknüpfung ist im Moment nicht eingerichtet. Bitte versuche es später erneut.' },
+      failed: { ok: false, title: 'Verknüpfung fehlgeschlagen', text: 'Discord hat die Anfrage nicht bestätigt. Bitte versuche es erneut.' },
+    } as Record<string, { ok: boolean; title: string; text: string }>,
+  },
   beta: {
     badge: 'Beta',
     /** Hinweis für alle ohne Beta-Zugang (auf der Beta-Instanz, bei jeder Adresse) */

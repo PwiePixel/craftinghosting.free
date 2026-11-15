@@ -3,6 +3,7 @@
  * Gelöscht werden das Website-Konto und alle kostenlosen Server (im Panel inkl. Welt und Backups).
  * Das Pterodactyl-Konto bleibt bestehen: Es kann auch bezahlte Server von Crafting Hosting enthalten.
  */
+import { releaseDiscordFor } from '../discord/service';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { servers, users, type User } from '../db/schema';
@@ -13,6 +14,7 @@ import { invalidatePublicSite } from './settings.service';
 
 export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admin?: Pick<User, 'email'> }, ip?: string): Promise<{ servers: number }> {
   const owned = await db.select().from(servers).where(eq(servers.userId, user.id));
+  await releaseDiscordFor(user.id);
   let deletedServers = 0;
   for (const server of owned) {
     if (server.status === 'deleted') continue;

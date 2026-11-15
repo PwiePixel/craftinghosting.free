@@ -10,6 +10,7 @@ import { betaPlugin } from './plugins/beta';
 import { securityPlugin } from './plugins/security';
 import { adminRoutes } from './routes/admin.routes';
 import { authRoutes } from './routes/auth.routes';
+import { discordAdminRoutes, discordRoutes } from './routes/discord.routes';
 import { domainAdminRoutes } from './routes/domains.routes';
 import { metaRoutes } from './routes/meta.routes';
 import { newsletterAdminRoutes, newsletterRoutes } from './routes/newsletter.routes';
@@ -56,6 +57,8 @@ export async function buildApp() {
       await api.register(newsletterRoutes);
       await api.register(newsletterAdminRoutes);
       await api.register(domainAdminRoutes);
+      await api.register(discordRoutes);
+      await api.register(discordAdminRoutes);
     },
     { prefix: '/api/v1' },
   );

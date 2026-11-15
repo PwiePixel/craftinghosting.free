@@ -33,10 +33,17 @@ export const users = sqliteTable(
     beta: integer('beta', { mode: 'boolean' }).notNull().default(false),
     registrationIp: text('registration_ip'),
     lastLoginIp: text('last_login_ip'),
+    /** Verknüpftes Discord-Konto (ein Discord-Konto gehört zu höchstens einem Account) */
+    discordId: text('discord_id'),
+    discordUsername: text('discord_username'),
+    discordLinkedAt: ts('discord_linked_at'),
+    /** Customer-Rolle auf dem Discord-Server: zuletzt gesetzter Stand und Zeitpunkt des letzten Abgleichs */
+    discordCustomerRole: integer('discord_customer_role', { mode: 'boolean' }).notNull().default(false),
+    discordSyncAt: ts('discord_sync_at'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
     updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
   },
-  (t) => [uniqueIndex('users_email_uq').on(t.email), uniqueIndex('users_ptero_uq').on(t.pteroUserId)],
+  (t) => [uniqueIndex('users_email_uq').on(t.email), uniqueIndex('users_ptero_uq').on(t.pteroUserId), uniqueIndex('users_discord_uq').on(t.discordId)],
 );
 
 /* --------------------------------------------------------------- sessions */
@@ -367,6 +374,27 @@ export const settings = sqliteTable('settings', {
   value: text('value', { mode: 'json' }).notNull(),
   updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
 });
+
+/* ---------------------------------------------------------------- discord */
+
+/** Support-Tickets, die der Discord-Bot angelegt hat */
+export const discordTickets = sqliteTable(
+  'discord_tickets',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** Ticket-Kanal auf dem Discord-Server (null, solange er angelegt wird) */
+    channelId: text('channel_id'),
+    discordUserId: text('discord_user_id').notNull(),
+    /** Account und Produkt auf der Website, falls das Discord-Konto verknüpft ist */
+    userId: text('user_id'),
+    serverId: text('server_id'),
+    subject: text('subject').notNull().default(''),
+    status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    closedAt: ts('closed_at'),
+  },
+  (t) => [index('discord_tickets_user_idx').on(t.discordUserId, t.status), index('discord_tickets_channel_idx').on(t.channelId)],
+);
 
 /* ------------------------------------------------------------ status page */
 

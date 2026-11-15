@@ -208,3 +208,68 @@ export function AccountActions({ email }: { email: string }) {
     </div>
   );
 }
+
+/** „Erneut prüfen“: Wer inzwischen dem Discord-Server beigetreten ist, bekommt seine wartenden Server */
+export function DiscordRecheck() {
+  const t = useDict().discord;
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-3">
+      <Button
+        variant="secondary"
+        size="sm"
+        icon={<RotateCcw />}
+        loading={pending}
+        onClick={async () => {
+          setPending(true);
+          setMessage(null);
+          try {
+            const res = await api<{ ok: boolean }>('/discord/check', { body: {} });
+            setMessage({ ok: res.ok, text: res.ok ? t.recheckOk : t.recheckFail });
+            router.refresh();
+          } catch (err) {
+            setMessage({ ok: false, text: err instanceof ApiClientError ? err.message : t.failed });
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        {t.recheck}
+      </Button>
+      {message && <span className={message.ok ? 'text-sm text-emerald-300' : 'text-sm text-amber-300'}>{message.text}</span>}
+    </span>
+  );
+}
+
+export function DiscordUnlink() {
+  const t = useDict().discord;
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        disabled={pending}
+        className="text-[13px] text-subtle underline decoration-line-strong underline-offset-4 hover:text-white disabled:opacity-50"
+        onClick={async () => {
+          setPending(true);
+          setError(null);
+          try {
+            await api('/discord/unlink', { body: {} });
+            router.refresh();
+          } catch (err) {
+            setError(err instanceof ApiClientError ? err.message : t.failed);
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        {t.unlink}
+      </button>
+      {error && <span className="text-[13px] text-red-300">{error}</span>}
+    </span>
+  );
+}

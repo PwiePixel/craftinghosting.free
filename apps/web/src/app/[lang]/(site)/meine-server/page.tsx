@@ -1,14 +1,65 @@
 import type { Metadata } from 'next';
 import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
-import { localePath, productKinds, type Locale, type ServerDTO } from '@chfree/shared';
-import { AccountActions, AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
-import { ButtonLink } from '@/components/ui/button';
+import { localePath, productKinds, type DiscordMeDTO, type Locale, type ServerDTO } from '@chfree/shared';
+import { DiscordIcon } from '@/components/discord/discord-note';
+import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
+import { ButtonLink, buttonClasses } from '@/components/ui/button';
 import { Alert, StatusDot } from '@/components/ui/primitives';
 import { formatters, getDict, resolveLang, type Dictionary } from '@/i18n';
 import { apiServer, requireUser } from '@/lib/api/server';
 import { pageMetadata } from '@/lib/seo';
 import { getSite } from '@/lib/site-settings';
 import { siteTexts } from '@/lib/site-texts';
+
+/** Discord: verbinden, Mitgliedschaft prüfen, Verknüpfung lösen */
+function DiscordCard({ me, lang, inviteUrl, note, waiting }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; note: string; waiting: boolean }) {
+  const t = getDict(lang).discord;
+  const connectHref = `/api/v1/discord/connect?lang=${lang}`;
+  const attention = me.blocked !== null;
+  const title = !me.linked ? (me.required ? t.requiredTitle : t.cardTitle) : me.blocked === 'not_member' ? t.notMemberTitle : t.connectedAs(me.linked.username);
+  const text = !me.linked
+    ? me.required
+      ? note || t.requiredText
+      : t.optionalText
+    : me.blocked === 'not_member'
+      ? t.notMemberText
+      : me.blocked === 'unavailable'
+        ? t.unavailableText
+        : t.connectedText;
+  return (
+    <div className={`surface p-5 ${attention ? 'border-[#5865f2]/50' : ''}`}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex gap-3.5">
+          <DiscordIcon className="mt-0.5 size-5 shrink-0 text-[#8b93ff]" />
+          <div>
+            <p className="text-[15px] font-semibold text-white">{title}</p>
+            <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">{text}</p>
+            {waiting && attention && <p className="mt-2 text-sm text-amber-300">{t.pendingBlocked}</p>}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {!me.linked ? (
+            // Normaler Link: Die API leitet zu Discord weiter
+            <a href={connectHref} className={buttonClasses('primary', 'sm')}>
+              {t.connect}
+            </a>
+          ) : me.blocked ? (
+            <>
+              {me.blocked === 'not_member' && inviteUrl && (
+                <a href={inviteUrl} target="_blank" rel="noopener" className={buttonClasses('primary', 'sm')}>
+                  {t.join} <ArrowUpRight aria-hidden />
+                </a>
+              )}
+              <DiscordRecheck />
+            </>
+          ) : (
+            <DiscordUnlink />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type Props = { params: Promise<{ lang: string }>; searchParams: Promise<Record<string, string | undefined>> };
 
@@ -40,11 +91,13 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
   }
 }
 
-function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string }) {
+function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean }) {
   const d = getDict(lang);
   const t = d.my;
   const fmt = formatters(lang);
-  const st = statusInfo(s, t.status);
+  // Panel-Zugang ist da, aber die Discord-Mitgliedschaft fehlt noch
+  const discordWait = waitingForDiscord && s.status === 'pending';
+  const st = discordWait ? { tone: 'amber' as const, label: d.discord.pendingStatus } : statusInfo(s, t.status);
   const f = s.fairUse;
   const daysLeft = s.cycle.secondsRemaining < 2 * 86400 ? fmt.duration(s.cycle.secondsRemaining) : t.days(s.cycle.daysRemaining);
   return (
@@ -113,7 +166,7 @@ function ServerCard({ s, lang, twoTiers, cpus }: { s: ServerDTO; lang: Locale; t
         ) : s.status === 'suspended' ? (
           <p className="text-sm text-muted">{t.lockedText}</p>
         ) : s.status === 'pending' ? (
-          <p className="text-sm text-muted">{t.pendingText}</p>
+          <p className="text-sm text-muted">{discordWait ? d.discord.pendingBlocked : t.pendingText}</p>
         ) : s.status === 'provisioning' || s.status === 'provisioning_failed' || s.status === 'expiring' ? (
           <p className="text-sm text-muted">
             {s.status === 'expiring' ? t.expiringText : t.provisioningText}
@@ -175,6 +228,10 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const query = await searchParams;
   const { user, panelUrl } = await requireUser(lang, 'myServers');
   const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[] }>('/servers', lang), getSite()]);
+  // Discord-Verknüpfung nur abfragen, wenn die Anbindung eingerichtet ist
+  const discordRes = settings.discord.available ? await apiServer<{ discord: DiscordMeDTO }>('/discord/me', lang) : null;
+  const discordMe = discordRes?.ok ? discordRes.data.discord : null;
+  const discordResult = query.discord ? d.discord.results[query.discord] : undefined;
   const servers = res.ok ? res.data.servers : [];
   const hasPending = servers.some((s) => s.status === 'pending');
   const onWaitlist = servers.some((s) => s.status === 'waitlist');
@@ -243,6 +300,20 @@ export default async function MyServersPage({ params, searchParams }: Props) {
               </ButtonLink>
             </div>
           )}
+          {discordResult && (
+            <Alert tone={discordResult.ok ? 'success' : 'warning'} title={discordResult.title}>
+              {discordResult.text}
+            </Alert>
+          )}
+          {discordMe?.available && !maintenance && (
+            <DiscordCard
+              me={discordMe}
+              lang={lang}
+              inviteUrl={settings.discord.inviteUrl}
+              note={settings.discord.note[lang] || settings.discord.note[lang === 'de' ? 'en' : 'de']}
+              waiting={hasPending && user.panelLinked}
+            />
+          )}
           {query.neu === '1' && (
             <Alert tone="success" title={t.createdTitle}>
               {t.createdText}
@@ -257,7 +328,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {!user.panelLinked && hasPending && <PanelSetupCard email={user.email} />}
 
           {servers.map((s) => (
-            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} />
+            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} />
           ))}
 
           {res.ok && servers.length === 0 && (

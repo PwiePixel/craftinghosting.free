@@ -47,6 +47,7 @@ export function siteTexts(site: PublicSiteDTO, lang: Locale): SiteTexts {
       minecraftRam: ramRange(minecraftPlans, lang),
       discordRam: discord ? ramRange(discordPlans, lang) : null,
       discordFairUse: bot.fairUse,
+      discordRequired: site.discord.required,
       locations: names,
       cpus,
     },

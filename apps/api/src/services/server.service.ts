@@ -17,6 +17,7 @@ import {
 } from '@chfree/shared';
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
+import { discordGate } from '../discord/service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
@@ -205,6 +206,8 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
  */
 export async function activatePendingServers(user: User, ip?: string): Promise<string[]> {
   if (!user.emailVerifiedAt || !user.pteroUserId) return [];
+  // Discord-Pflicht: Die Anfrage bleibt offen, bis das Konto verknüpft und der Nutzer Mitglied des Discord-Servers ist
+  if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
   const max = await maxServersPerUser();
   await writeTx(async (tx) => {
@@ -309,6 +312,15 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
 export async function reactivateServer(user: User, id: string, ip?: string): Promise<ServerDTO> {
   const server = await getOwnedServer(user, id);
   const now = new Date();
+  const gate = await discordGate(user);
+  if (!gate.ok) {
+    throw Errors.conflict(
+      'discord_required',
+      gate.reason === 'unavailable'
+        ? L('Die Discord-Mitgliedschaft lässt sich gerade nicht prüfen. Bitte versuche es gleich noch einmal.', 'Your Discord membership cannot be checked right now. Please try again shortly.')
+        : L('Zum Reaktivieren musst du dein Discord-Konto verknüpfen und Mitglied auf unserem Discord-Server sein.', 'To reactivate, you need to link your Discord account and be a member of our Discord server.'),
+    );
+  }
   const state = computeRuntimeState(server, user, [], now);
   if (!state.reactivation.allowed) {
     const reason = state.reactivation.reason ?? 'not_suspended';

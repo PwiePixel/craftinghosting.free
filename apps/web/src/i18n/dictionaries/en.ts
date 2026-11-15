@@ -481,6 +481,14 @@ return {
         q: 'Where are the servers located and what hardware do they run on?',
         a: `The nodes are located in ${ctx.locations} and run on ${ctx.cpus} with ${hardware.storage} and ${hardware.network}.`,
       },
+      ...(ctx.discordRequired
+        ? [
+            {
+              q: 'Why do I have to be on your Discord server?',
+              a: 'Our free servers are only available to members of our Discord server. You connect your Discord account under “My servers” and join automatically in the process. This protects the offer against multiple sign-ups and automated registrations – each Discord account can only be linked to one account. You also get the Customer role, announcements and ticket support there.',
+            },
+          ]
+        : []),
       ...(ctx.discordRam
         ? [
             {
@@ -636,6 +644,42 @@ return {
     backHome: 'Back to the home page',
   },
 
+  discord: {
+    cardTitle: 'Discord',
+    requiredTitle: 'Discord membership required',
+    requiredText:
+      'Our free servers are only available to members of our Discord server. Connect your Discord account – you join the server automatically in the process. This protects the offer against multiple sign-ups and automated registrations.',
+    optionalText: 'Connect your Discord account: you automatically get the Customer role on our Discord server, and support sees your servers in a ticket right away.',
+    connect: 'Connect with Discord',
+    connectedAs: (name: string) => `Connected as ${name}`,
+    connectedText: 'You are a member of our Discord server.',
+    notMemberTitle: 'You are not on our Discord server',
+    notMemberText: 'Your Discord account is linked but not a member of our server. Join it and then click “Check again”.',
+    unavailableText: 'Your membership cannot be checked right now. Please try again shortly.',
+    join: 'Join the Discord server',
+    recheck: 'Check again',
+    recheckOk: 'All good – you are a member.',
+    recheckFail: 'We cannot find you on the Discord server yet.',
+    unlink: 'Unlink',
+    failed: 'That did not work. Please try again.',
+    pendingStatus: 'Waiting for Discord',
+    pendingBlocked: 'Your server will be set up as soon as your Discord account is connected and you are a member of our Discord server.',
+    noteTitle: 'Requirement: member of our Discord server',
+    noteText:
+      'To use our free services you need to be on our Discord server. After signing up you connect your Discord account and join automatically – only then is your server set up.',
+    noteButton: 'Open the Discord server',
+    results: {
+      linked: { ok: true, title: 'Discord connected', text: 'Your Discord account is linked and you are a member of our server.' },
+      linked_not_member: { ok: false, title: 'Linked – but not a member yet', text: 'Your Discord account is linked. Now join our Discord server and click “Check again”.' },
+      taken: { ok: false, title: 'This Discord account is already in use', text: 'The Discord account is already linked to another account. Each Discord account can only be used once.' },
+      too_new: { ok: false, title: 'Discord account is too new', text: 'To prevent abuse, your Discord account has to exist for a while. Please try again later or contact support.' },
+      bot_account: { ok: false, title: 'Bot accounts cannot be linked', text: 'Please connect your personal Discord account.' },
+      denied: { ok: false, title: 'Linking cancelled', text: 'You declined the request at Discord. Without linking we cannot check your membership.' },
+      state: { ok: false, title: 'Linking expired', text: 'Please start linking again.' },
+      unavailable: { ok: false, title: 'Discord is not available right now', text: 'Discord linking is not set up at the moment. Please try again later.' },
+      failed: { ok: false, title: 'Linking failed', text: 'Discord did not confirm the request. Please try again.' },
+    } as Record<string, { ok: boolean; title: string; text: string }>,
+  },
   beta: {
     badge: 'Beta',
     gateMetaTitle: 'Beta programme',

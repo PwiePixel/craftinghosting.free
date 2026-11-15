@@ -107,6 +107,16 @@ export async function GET() {
           `- Discord bots are different: they have no ${r.cycle.days}-day cycle and no rest day. A bot runs without an expiry date and never needs to be renewed.${bf.enabled && bf.inactiveDays > 0 ? ` Only a bot that stays offline for ${bf.inactiveDays} days in a row releases its slot; it can be reactivated right away.` : ''}`,
         ]
       : []),
+    ...(s.discord.required
+      ? [
+          '',
+          '## Requirement: Discord membership',
+          '',
+          `- Free servers are only available to members of the CraftingHosting Discord server${s.discord.inviteUrl ? ` (${s.discord.inviteUrl})` : ''}.`,
+          '- After signing up, users connect their Discord account under "My servers"; they join the Discord server automatically in the process. Only then is the server set up.',
+          '- Each Discord account can be linked to one account only. This protects the offer against multiple sign-ups and automated registrations.',
+        ]
+      : []),
     '',
     '## How it works',
     '',

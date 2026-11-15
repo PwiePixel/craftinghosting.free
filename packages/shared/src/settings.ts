@@ -15,6 +15,7 @@ import type {
   WaitlistBlock,
 } from './api-types';
 import { freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind } from './config/freehosting.config';
+import { defaultDiscordSettings, normalizeDiscordSettings } from './discord-settings';
 import type { Locale, Localized } from './i18n';
 import { defaultStatusSettings, normalizeStatusSettings } from './status-settings';
 
@@ -154,6 +155,7 @@ export function defaultSiteSettings(): SiteSettings {
     announcement: { enabled: false, tone: 'info', text: { de: '', en: '' }, linkUrl: '', linkLabel: { de: '', en: '' } },
     blocklist: { disposable: true, emailDomains: [], emails: [] },
     seo: { title: { de: '', en: '' }, description: { de: '', en: '' }, indexing: true, summary: { de: '', en: '' } },
+    discord: defaultDiscordSettings(),
     branding: { logoMode: 'icon' },
     botFairUse: {
       enabled: true,
@@ -516,6 +518,7 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
       emailDomains: list(bl.emailDomains, 500, (x) => normalizeHost(x) !== null),
       emails: list(bl.emails, 2000, (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
     },
+    discord: normalizeDiscordSettings(i.discord),
     branding: { logoMode: obj(i.branding).logoMode === 'full' ? 'full' : 'icon' },
     seo: {
       title: loose(seo.title, 90),

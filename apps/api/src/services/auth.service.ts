@@ -42,6 +42,7 @@ export function toUserDTO(user: User): UserDTO {
     role: isAdmin(user) ? 'admin' : 'user',
     beta: canUseBeta(user),
     locale: user.locale,
+    discord: user.discordId ? { id: user.discordId, username: user.discordUsername ?? '' } : null,
     createdAt: user.createdAt.toISOString(),
   };
 }

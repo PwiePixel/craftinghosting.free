@@ -1,3 +1,4 @@
+import { DiscordRequiredNote } from '@/components/discord/discord-note';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, Bot, Check, Cpu, Users } from 'lucide-react';
@@ -305,6 +306,12 @@ export default async function HomePage({ params }: Props) {
       </section>
 
       {/* ---------------------------------------------------------- Ablauf */}
+      {settings.discord.required && (
+        <div className="container-page pt-10">
+          <DiscordRequiredNote site={settings} lang={lang} />
+        </div>
+      )}
+
       <section id={homeSections.how[lang]} className="scroll-mt-16 py-20 sm:py-28">
         <div className="container-page">
           <SectionHead label={h.howLabel} title={h.howTitle}>

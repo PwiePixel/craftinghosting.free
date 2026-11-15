@@ -22,6 +22,12 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'de')} RAM, ${formatMb(p.diskMb, 'de')} NVMe)`).join(', ')}. Alle Ressourcen werden fair geteilt; die Angaben sind
           Obergrenzen und keine garantierte Dauerleistung.
         </p>
+        {site.discord.required && (
+          <p>
+            Voraussetzung für kostenlose Server ist ein verknüpftes Discord-Konto und die Mitgliedschaft auf unserem Discord-Server. Jedes Discord-Konto kann nur mit einem
+            Account verknüpft werden. Ohne Mitgliedschaft werden keine Server erstellt oder reaktiviert.
+          </p>
+        )}
         <p>
           In der ersten Startphase (Early Access) sichern sich Nutzer zunächst einen Platz auf der Warteliste (ein Platz pro Person). Die Plätze werden der Reihe nach
           freigeschaltet{twoTiers ? `; die ersten Plätze erhalten einen Server auf ${epyc}, alle weiteren auf ${xeon}` : ''}. Verlässt jemand die Warteliste, rücken die
@@ -110,6 +116,12 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'en')} RAM, ${formatMb(p.diskMb, 'en')} NVMe)`).join(', ')}. All resources are shared fairly; the values stated
           are upper limits, not guaranteed sustained performance.
         </p>
+        {site.discord.required && (
+          <p>
+            Free servers require a linked Discord account and membership of our Discord server. Each Discord account can only be linked to one account. Without membership no
+            servers are created or reactivated.
+          </p>
+        )}
         <p>
           During the first launch phase (early access), users first secure a spot on the waitlist (one spot per person). The spots are unlocked one after another
           {twoTiers ? `; the first spots get a server on ${epyc}, all further spots on ${xeon}` : ''}. If someone leaves the waitlist, the following spots move up. The{' '}
