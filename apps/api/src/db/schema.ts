@@ -246,6 +246,72 @@ export const consentLogs = sqliteTable(
   (t) => [index('consent_logs_created_idx').on(t.createdAt)],
 );
 
+/* ------------------------------------------------------------- newsletter */
+
+/** Newsletter-Abonnenten (Double-Opt-in). `ip` ist verschlüsselt (encryptField) und dient als Nachweis der Anmeldung. */
+export const newsletterSubscribers = sqliteTable(
+  'newsletter_subscribers',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    locale: text('locale', { enum: ['de', 'en'] }).notNull().default('en'),
+    /** pending = Bestätigung steht aus · active = bestätigt · unsubscribed = abgemeldet */
+    status: text('status', { enum: ['pending', 'active', 'unsubscribed'] }).notNull().default('pending'),
+    /** website = Formular · signup = Häkchen beim Erstellen eines Servers */
+    source: text('source').notNull().default('website'),
+    ip: text('ip'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    confirmedAt: ts('confirmed_at'),
+    unsubscribedAt: ts('unsubscribed_at'),
+  },
+  (t) => [uniqueIndex('newsletter_subscribers_email_uq').on(t.email), index('newsletter_subscribers_status_idx').on(t.status)],
+);
+
+export const newsletterCampaigns = sqliteTable(
+  'newsletter_campaigns',
+  {
+    id: text('id').primaryKey(),
+    subjectDe: text('subject_de').notNull(),
+    subjectEn: text('subject_en').notNull(),
+    bodyDe: text('body_de').notNull(),
+    bodyEn: text('body_en').notNull(),
+    ctaLabelDe: text('cta_label_de').notNull().default(''),
+    ctaLabelEn: text('cta_label_en').notNull().default(''),
+    ctaUrl: text('cta_url').notNull().default(''),
+    /** subscribers = Newsletter-Abonnenten · all_users = alle bestätigten Konten (betriebliche Hinweise) */
+    audience: text('audience', { enum: ['subscribers', 'all_users'] }).notNull().default('subscribers'),
+    status: text('status', { enum: ['draft', 'sending', 'sent', 'cancelled'] }).notNull().default('draft'),
+    total: integer('total').notNull().default(0),
+    sent: integer('sent').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    createdBy: text('created_by'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    startedAt: ts('started_at'),
+    finishedAt: ts('finished_at'),
+  },
+  (t) => [index('newsletter_campaigns_status_idx').on(t.status)],
+);
+
+/** Eine Zeile pro Empfänger einer Ausgabe – der Worker arbeitet die offenen Zeilen ab (jede Mail genau einmal). */
+export const newsletterDeliveries = sqliteTable(
+  'newsletter_deliveries',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    campaignId: text('campaign_id')
+      .notNull()
+      .references(() => newsletterCampaigns.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    locale: text('locale', { enum: ['de', 'en'] }).notNull().default('en'),
+    /** Abonnent (für den Abmeldelink) – null bei betrieblichen Hinweisen an Konten */
+    subscriberId: text('subscriber_id'),
+    status: text('status', { enum: ['pending', 'sent', 'failed'] }).notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    error: text('error'),
+    sentAt: ts('sent_at'),
+  },
+  (t) => [uniqueIndex('newsletter_deliveries_uq').on(t.campaignId, t.email), index('newsletter_deliveries_status_idx').on(t.campaignId, t.status)],
+);
+
 /* ---------------------------------------------------------- dedupe marks */
 
 /**

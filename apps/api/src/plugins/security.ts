@@ -3,6 +3,19 @@ import fp from 'fastify-plugin';
 import { isLocale, localeFromAcceptLanguage, type Locale } from '@chfree/shared';
 import { allowedOrigins } from '../env';
 import { Errors, L } from '../lib/errors';
+import { getSettings } from '../services/settings.service';
+
+/** Ursprung erlaubt? Feste Liste aus der .env – oder eine der weiteren Domains aus dem Admin-Bereich (nur https) */
+async function originAllowed(origin: string): Promise<boolean> {
+  if (allowedOrigins.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'https:') return false;
+    return (await getSettings()).domains.extra.some((d) => d.host === url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -28,7 +41,7 @@ export const securityPlugin = fp(async function securityPlugin(app: FastifyInsta
 
     if (SAFE_METHODS.has(request.method)) return;
     const origin = request.headers.origin;
-    if (origin && !allowedOrigins.has(origin)) {
+    if (origin && !(await originAllowed(origin))) {
       throw Errors.forbidden(L('Ungültiger Ursprung der Anfrage.', 'Invalid request origin.'));
     }
     if (request.headers['x-chf-client'] !== 'web') {

@@ -5,13 +5,17 @@
  */
 import { and, count, eq, gte, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
 import {
+  applyRuntimeConfig,
   blockSpotsBefore,
+  defaultBrand,
   defaultSiteSettings,
   freeHostingConfig,
   normalizeSiteSettings,
   productKinds,
   serverTypesOf,
+  versionsFor,
   websiteEpycSlots,
+  type BrandSettings,
   type PlanAvailabilityDTO,
   type ProductKind,
   type PublicProductDTO,
@@ -50,6 +54,7 @@ export async function getSettings(): Promise<SiteSettings> {
       await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
     }
     cache = { value, at: Date.now() };
+    applyRuntime(value);
     return value;
   } catch {
     // z. B. Migration noch nicht gelaufen – mit Standardwerten weiterarbeiten
@@ -68,7 +73,36 @@ export async function saveSettings(next: unknown, opts: { blocks?: WaitlistBlock
   else value.maintenance.endedAt = before.maintenance.endedAt;
   await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
   cache = { value, at: Date.now() };
+  applyRuntime(value);
   return value;
+}
+
+/** Links der Marke: Einstellung aus dem Admin-Bereich → .env (NEXT_PUBLIC_*) → Standard aus der Konfiguration */
+export function resolveBrand(s: Pick<SiteSettings, 'brand'>): BrandSettings {
+  const d = defaultBrand();
+  return {
+    discordUrl: s.brand.discordUrl || process.env.NEXT_PUBLIC_DISCORD_URL || d.discordUrl,
+    supportEmail: s.brand.supportEmail || d.supportEmail,
+    parentUrl: s.brand.parentUrl || process.env.NEXT_PUBLIC_PARENT_URL || d.parentUrl,
+    parentPricingUrl: s.brand.parentPricingUrl || process.env.NEXT_PUBLIC_PARENT_PRICING_URL || d.parentPricingUrl,
+    statusUrl: s.brand.statusUrl || process.env.NEXT_PUBLIC_STATUS_URL || d.statusUrl,
+  };
+}
+
+/**
+ * Regeln (Fair-Use, Laufzeit) und Links aus dem Admin-Bereich in die zentrale Konfiguration übernehmen –
+ * Jobs, E-Mail-Vorlagen und Texte lesen danach automatisch die eingestellten Werte.
+ */
+function applyRuntime(s: SiteSettings) {
+  applyRuntimeConfig({ rules: s.rules, brand: resolveBrand(s) });
+}
+
+/** Alle Hostnamen, unter denen die Website erreichbar sein darf (Hauptdomain, www, weitere Domains aus dem Admin-Bereich) */
+export function allowedHosts(s: Pick<SiteSettings, 'domains'>): Set<string> {
+  const primary = new URL(env.APP_URL).hostname;
+  const hosts = new Set([primary, `www.${primary}`]);
+  for (const d of s.domains.extra) hosts.add(d.host);
+  return hosts;
 }
 
 /**
@@ -267,7 +301,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
             plans: p.plans
               .filter((plan) => plan.enabled)
               .map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, ...capacity.plans.find((a) => a.id === plan.id)! })),
-            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s) })),
+            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: versionsFor(s, t.id) })),
           },
         ];
       }),
@@ -275,6 +309,15 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
     botFairUse: s.botFairUse,
+    brand: resolveBrand(s),
+    rules: s.rules,
+    domains: s.domains.extra.map((d) => ({ host: d.host, redirect: d.redirect })),
+    newsletter: { enabled: s.newsletter.enabled, footerForm: s.newsletter.enabled && s.newsletter.footerForm, signupCheckbox: s.newsletter.enabled && s.newsletter.signupCheckbox },
+    announcement:
+      s.announcement.enabled && (s.announcement.text.de || s.announcement.text.en)
+        ? { tone: s.announcement.tone, text: s.announcement.text, linkUrl: s.announcement.linkUrl, linkLabel: s.announcement.linkLabel }
+        : null,
+    seo: s.seo,
     stats,
   };
   publicCache = { value, at: Date.now() };

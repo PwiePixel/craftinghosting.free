@@ -68,14 +68,14 @@ export async function verifySmtpOnStartup(log: { info: (m: string) => void; warn
  * Versendet eine E-Mail. Ohne SMTP_HOST (Entwicklung) wird die Mail
  * stattdessen in die Konsole geschrieben.
  */
-export async function sendMail(to: string, content: MailContent): Promise<void> {
+export async function sendMail(to: string, content: MailContent, headers?: Record<string, string>): Promise<void> {
   const t = getTransporter();
   if (!t) {
     console.info(`\n[mail:dev] An: ${to}\n[mail:dev] Betreff: ${content.subject}\n${content.text}\n`);
     return;
   }
   try {
-    await t.sendMail({ from: mailFrom, to, subject: content.subject, html: content.html, text: content.text });
+    await t.sendMail({ from: mailFrom, to, subject: content.subject, html: content.html, text: content.text, headers });
   } catch (err) {
     console.error(`[mail] Versand an ${to} fehlgeschlagen: ${explainSmtpError(err)}`);
     throw err;

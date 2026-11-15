@@ -6,7 +6,9 @@
  * überall sichtbar sein. Ein kurzer Zwischenspeicher im Prozess hält die Last gering.
  */
 import { connection } from 'next/server';
-import { defaultSiteSettings, freeHostingConfig, serverTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
+import { applyRuntimeConfig, defaultBrand, defaultSiteSettings, freeHostingConfig, serverTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
+
+import { site } from './site';
 
 const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 const TTL_MS = 5_000;
@@ -25,7 +27,7 @@ function fallbackProduct(kind: ProductKind): PublicProductDTO {
     remaining: p.capacity,
     available: true,
     plans: p.plans.map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, kind, used: 0, remaining: plan.capacity, available: true })),
-    serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: true })),
+    serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: true, versions: t.versions })),
   };
 }
 
@@ -38,8 +40,29 @@ export const fallbackSite: PublicSiteDTO = {
   hardware: { ...defaults.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
   donate: { enabled: false, url: null },
   botFairUse: defaults.botFairUse,
+  brand: {
+    ...defaultBrand(),
+    ...(process.env.NEXT_PUBLIC_DISCORD_URL ? { discordUrl: process.env.NEXT_PUBLIC_DISCORD_URL } : {}),
+    ...(process.env.NEXT_PUBLIC_PARENT_URL ? { parentUrl: process.env.NEXT_PUBLIC_PARENT_URL } : {}),
+    ...(process.env.NEXT_PUBLIC_PARENT_PRICING_URL ? { parentPricingUrl: process.env.NEXT_PUBLIC_PARENT_PRICING_URL } : {}),
+    ...(process.env.NEXT_PUBLIC_STATUS_URL ? { statusUrl: process.env.NEXT_PUBLIC_STATUS_URL } : {}),
+  },
+  rules: defaults.rules,
+  domains: [],
+  newsletter: { enabled: false, footerForm: false, signupCheckbox: false },
+  announcement: null,
+  seo: defaults.seo,
   stats: null,
 };
+
+/**
+ * Regeln (Fair-Use, Laufzeit) und Links aus dem Admin-Bereich für diesen Prozess übernehmen:
+ * Texte (getDict) und `site` aus lib/site lesen danach die eingestellten Werte.
+ */
+function applyRuntime(value: PublicSiteDTO) {
+  applyRuntimeConfig({ rules: value.rules, brand: value.brand });
+  Object.assign(site, value.brand);
+}
 
 let cache: { at: number; value: PublicSiteDTO } | null = null;
 let inflight: Promise<PublicSiteDTO> | null = null;
@@ -52,6 +75,7 @@ async function load(): Promise<PublicSiteDTO> {
     // Fehlende Felder (z. B. API noch auf altem Stand während eines Updates) mit Standardwerten auffüllen
     const value: PublicSiteDTO = { ...fallbackSite, ...data.site };
     cache = { at: Date.now(), value };
+    applyRuntime(value);
     return value;
   } catch {
     // API kurz nicht erreichbar → letzter bekannter Stand bzw. Standardwerte

@@ -2,8 +2,9 @@ import { formatMb, freeHostingConfig, localePath, locationNames, restPeriodText,
 import Link from 'next/link';
 
 const { fairUse, cycle, serverTypes } = freeHostingConfig;
-const hasRest = cycle.reactivationCooldownMinutes > 0;
-const delH = cycle.deleteAfterRestHours;
+// Als Funktionen: Die Werte sind im Admin-Bereich einstellbar und können sich zur Laufzeit ändern
+const hasRestFn = () => cycle.reactivationCooldownMinutes > 0;
+const delHFn = () => cycle.deleteAfterRestHours;
 /** Laufzeiten für Bots, z. B. „Python“ und „Node.js“ */
 const runtimes = serverTypes.filter((t) => t.kind === 'discord').map((t) => t.name);
 
@@ -68,7 +69,7 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
         <ul>
           <li>Jeder Bot hat einen Zyklus von {cycle.days} Tagen ab Erstellung bzw. letzter Reaktivierung.</li>
           <li>Nach Ablauf wird der Bot offline genommen, der Nutzer informiert und der Server anschließend suspendiert.</li>
-          {hasRest && (
+          {hasRestFn() && (
             <li>
               Nach der Suspendierung gilt eine Ruhezeit von {restPeriodText(cycle.reactivationCooldownMinutes, 'de')}. Erst danach kann der Bot reaktiviert werden; der Nutzer
               wird per E-Mail informiert.
@@ -77,9 +78,9 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           <li>
             Über „Reaktivieren“ unter <Link href={localePath('de', 'myServers')}>„Meine Server“</Link> beginnt ein neuer Zyklus. Daten bleiben während der Suspendierung erhalten.
           </li>
-          {delH > 0 && (
+          {delHFn() > 0 && (
             <li>
-              Wird der Bot nicht innerhalb von {delH} Stunden nach dem Ende der Ruhezeit reaktiviert, wird er einschließlich aller Dateien und Datenbanken automatisch gelöscht.{' '}
+              Wird der Bot nicht innerhalb von {delHFn()} Stunden nach dem Ende der Ruhezeit reaktiviert, wird er einschließlich aller Dateien und Datenbanken automatisch gelöscht.{' '}
               {cycle.deleteReminderHours} Stunden vorher erhält der Nutzer eine Erinnerung per E-Mail. Während Wartungsarbeiten und 24 Stunden danach finden keine
               automatischen Löschungen statt.
             </li>
@@ -258,7 +259,7 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
         <ul>
           <li>Every bot has a cycle of {cycle.days} days from creation or the last reactivation.</li>
           <li>When it ends, the bot is taken offline, the user is informed and the server is then suspended.</li>
-          {hasRest && (
+          {hasRestFn() && (
             <li>
               After the suspension a rest period of {restPeriodText(cycle.reactivationCooldownMinutes, 'en')} applies. Only then can the bot be reactivated; the user is
               informed by email.
@@ -267,9 +268,9 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           <li>
             Clicking “Reactivate” under <Link href={localePath('en', 'myServers')}>“My servers”</Link> starts a new cycle. Data is kept during the suspension.
           </li>
-          {delH > 0 && (
+          {delHFn() > 0 && (
             <li>
-              If the bot is not reactivated within {delH} hours after the rest period ends, it is deleted automatically including all files and databases. The user receives
+              If the bot is not reactivated within {delHFn()} hours after the rest period ends, it is deleted automatically including all files and databases. The user receives
               an email reminder {cycle.deleteReminderHours} hours beforehand. No automatic deletions take place during maintenance and for 24 hours afterwards.
             </li>
           )}

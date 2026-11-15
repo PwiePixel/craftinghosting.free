@@ -6,7 +6,7 @@
  * Pterodactyl übergeben und nie von uns gespeichert.
  */
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
-import { localePath, type Locale, type StartInput, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
+import { findPlan, isEmailBlocked, localePath, type Locale, type StartInput, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
 import { env } from '../env';
 import { affectedRows, db } from '../db/client';
 import { emailTokens, servers, users, type User } from '../db/schema';
@@ -16,6 +16,7 @@ import { isAdmin } from '../plugins/auth';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { loginMail, verifyServerMail, verifyWaitlistMail, type MailContent } from './mail/templates';
+import { activateSignupSubscription, subscribe } from './newsletter.service';
 import { getSettings } from './settings.service';
 import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.service';
 import { rememberUserLocale } from './locale.service';
@@ -124,6 +125,11 @@ async function sendTokenMail(user: User, type: TokenType, build: (token: string)
 export async function requestServer(input: StartInput, meta: { ip?: string; locale: Locale }): Promise<void> {
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
+  // Sperrliste (Admin → Einstellungen): gesperrte Adressen/Domains und Wegwerf-Anbieter
+  if (isEmailBlocked(input.email, settings.blocklist)) {
+    const msg = L('Diese E-Mail-Adresse kann nicht verwendet werden. Bitte nimm eine andere.', 'This email address cannot be used. Please use a different one.');
+    throw Errors.badRequest('email_blocked', msg, { email: msg });
+  }
   const waitlistMode = settings.registration.mode === 'preregistration';
   await assertConfigAvailable(input);
 
@@ -140,10 +146,17 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   }
   if (user.status !== 'active') return;
   await rememberUserLocale(user, meta.locale);
+  // Newsletter angehakt: bei bestätigten Konten sofort aktiv, sonst mit der E-Mail-Bestätigung (kein zweiter Bestätigungslink nötig)
+  if (input.newsletter && settings.newsletter.enabled) {
+    await subscribe(input.email, meta.locale, { ip: meta.ip, source: 'signup', sendMail: false }).catch(() => {});
+    if (user.emailVerifiedAt) await activateSignupSubscription(input.email).catch(() => {});
+  }
 
   // Hat der Nutzer schon einen Server (bzw. in der Early-Access-Phase einen Wartelisten-Platz), schicken wir nur einen Anmeldelink.
+  // Das Limit gilt je Produkt (Minecraft / Discord-Bot); auf der Warteliste ist ein Platz pro Person möglich
   const owned = await countOwnedServers(user.id);
-  if (owned >= settings.registration.maxServersPerUser || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
+  const ownedOfKind = await countOwnedServers(user.id, findPlan(settings, input.planId)?.kind);
+  if (ownedOfKind >= settings.registration.maxServersPerUser || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
     await sendTokenMail(user, 'login', (token) => loginMail(link(token, meta.locale), meta.locale)).catch(() => {
       throw mailFailed();
     });
@@ -188,6 +201,9 @@ export async function verifyToken(
     .update(users)
     .set({ lastLoginAt: new Date(), ...(meta.ip ? { lastLoginIp: encryptField(meta.ip.slice(0, 64)) } : {}) })
     .where(eq(users.id, userId));
+  // Beim Erstellen angehakter Newsletter: Die bestätigte E-Mail-Adresse ist zugleich die Bestätigung der Anmeldung
+  const [verified] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+  if (verified) await activateSignupSubscription(verified.email).catch(() => {});
   let user = await getUser(userId);
   if (user.status !== 'active') {
     throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));

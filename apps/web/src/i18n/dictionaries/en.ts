@@ -4,6 +4,8 @@
 import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText } from '@chfree/shared';
 import type { Dictionary, FaqContext } from './de';
 
+/** English texts with the CURRENT rules (fair use, runtime) – see buildDe() */
+export function buildEn(): Dictionary {
 const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
 const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
 const botTypes = serverTypes.filter((t) => t.kind === 'discord');
@@ -16,7 +18,7 @@ const epyc = hardware.cpus.find((c) => /epyc/i.test(c)) ?? 'AMD EPYC';
 const xeon = hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
 const perPerson = (max: number) => (max === 1 ? 'One free server is' : `${max} free servers are`);
 
-export const en: Dictionary = {
+return {
   meta: {
     title: 'CraftingHosting.free – Free Minecraft servers & Discord bots by CraftingHosting',
     shortTitle: 'CraftingHosting.free – Free Minecraft servers & Discord bots',
@@ -672,3 +674,4 @@ export const en: Dictionary = {
     retry: 'Try again',
   },
 };
+}

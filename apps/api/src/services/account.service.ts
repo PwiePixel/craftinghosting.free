@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { servers, users, type User } from '../db/schema';
 import { audit } from './audit.service';
+import { removeSubscriberByEmail } from './newsletter.service';
 import { hardDeleteServer } from './server.service';
 import { invalidatePublicSite } from './settings.service';
 
@@ -29,6 +30,7 @@ export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admi
   });
   // Sessions, Tokens, Benachrichtigungen und Server-Einträge hängen per ON DELETE CASCADE am Konto
   await db.delete(users).where(eq(users.id, user.id));
+  await removeSubscriberByEmail(user.email);
   invalidatePublicSite();
   return { servers: deletedServers };
 }

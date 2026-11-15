@@ -5,10 +5,6 @@
  */
 import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText } from '@chfree/shared';
 
-const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
-const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
-const botTypes = serverTypes.filter((t) => t.kind === 'discord');
-
 /** Werte aus dem Admin-Bereich (Pakete, Standorte, Hardware), die in Texten vorkommen */
 export interface FaqContext {
   /** z. B. „4 GB oder 6 GB“ */
@@ -22,6 +18,16 @@ export interface FaqContext {
   /** z. B. „Dual Intel Xeon Gold 6230“ */
   cpus: string;
 }
+
+/**
+ * Baut die deutschen Texte mit den AKTUELLEN Regeln (Fair-Use, Laufzeit). Die Werte sind im Admin-Bereich
+ * einstellbar – deshalb eine Funktion statt fester Konstanten. Aufruf über getDict()/useDict() (mit Zwischenspeicher).
+ */
+export function buildDe() {
+const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
+const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
+const botTypes = serverTypes.filter((t) => t.kind === 'discord');
+
 const hasRest = cycle.reactivationCooldownMinutes > 0;
 const rest = restPeriodText(cycle.reactivationCooldownMinutes, 'de');
 const afterRest = restPeriodAfterText(cycle.reactivationCooldownMinutes, 'de');
@@ -33,7 +39,7 @@ const xeon = hardware.cpus.find((c) => /xeon/i.test(c)) ?? 'Intel Xeon';
 /** „ein kostenloser Server“ / „2 kostenlose Server“ – Anzahl kommt aus den Admin-Einstellungen */
 const perPerson = (max: number) => (max === 1 ? 'ist ein kostenloser Server' : `sind ${max} kostenlose Server`);
 
-export const de = {
+return {
   meta: {
     title: 'CraftingHosting.free – Kostenlose Minecraft-Server & Discord-Bots von CraftingHosting',
     shortTitle: 'CraftingHosting.free – Kostenlose Minecraft-Server & Discord-Bots',
@@ -698,5 +704,6 @@ export const de = {
     retry: 'Erneut versuchen',
   },
 };
+}
 
-export type Dictionary = typeof de;
+export type Dictionary = ReturnType<typeof buildDe>;

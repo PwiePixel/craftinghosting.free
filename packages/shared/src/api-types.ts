@@ -279,6 +279,20 @@ export interface SiteSettings {
   };
   /** Fair-Use-System für Discord-Bots (Dauerbetrieb, aber faire Nutzung der geteilten Hardware) */
   botFairUse: BotFairUseSettings;
+  /** Links und Kontakt der Marke (leer = Standard aus Konfiguration bzw. .env) */
+  brand: BrandSettings;
+  /** Regeln: Fair-Use für Minecraft und der Laufzeit-Zyklus (früher fest im Code) */
+  rules: RuleSettings;
+  /** Auswählbare Versionen je Minecraft-Servertyp (fehlt ein Typ, gilt die Standardliste) */
+  versions: Record<string, string[]>;
+  /** Weitere Domains, unter denen die Website erreichbar ist (HTTPS wird automatisch eingerichtet) */
+  domains: { extra: DomainSetting[] };
+  newsletter: NewsletterSettings;
+  /** Hinweisleiste oben auf jeder Seite */
+  announcement: AnnouncementSettings;
+  /** Gesperrte E-Mail-Adressen und -Domains (Registrierung und Newsletter) */
+  blocklist: BlocklistSettings;
+  seo: SeoSettings;
   /** Spenden-Seite (Zahlungslink von SumUp) */
   donate: {
     enabled: boolean;
@@ -332,6 +346,81 @@ export interface BotFairUseSettings {
   inactiveDays: number;
   /** Erinnerung per E-Mail so viele Tage vorher */
   inactiveWarningDays: number;
+}
+
+export interface BrandSettings {
+  discordUrl: string;
+  supportEmail: string;
+  /** Hauptmarke (crafting.host) und deren Preisseite */
+  parentUrl: string;
+  parentPricingUrl: string;
+  statusUrl: string;
+}
+
+export interface RuleSettings {
+  /** Fair-Use für Minecraft-Server (und für Discord-Bots, falls dort eingeschaltet) */
+  fairUse: {
+    maxSessionHours: number;
+    sessionWarningMinutes: number;
+    cooldownMinutes: number;
+    weeklyOfflineHours: number;
+    weeklyOfflineWarningHours: number;
+  };
+  cycle: {
+    /** Laufzeit in Tagen */
+    days: number;
+    /** Erinnerungen X Tage vor Ablauf */
+    reminderDaysBefore: number[];
+    /** Ruhezeit nach Ablauf in Minuten (1440 = 1 Ruhetag, 0 = keine) */
+    reactivationCooldownMinutes: number;
+    /** Löschung so viele Stunden nach der Ruhezeit (0 = nie) */
+    deleteAfterRestHours: number;
+    deleteReminderHours: number;
+  };
+}
+
+export interface DomainSetting {
+  /** Hostname ohne Protokoll, z. B. free.example.com */
+  host: string;
+  /** true = dauerhaft auf die Hauptdomain weiterleiten (empfohlen für SEO) · false = Website dort ausliefern */
+  redirect: boolean;
+  addedAt: string | null;
+}
+
+export interface NewsletterSettings {
+  enabled: boolean;
+  /** Anmeldeformular im Footer */
+  footerForm: boolean;
+  /** Häkchen „Newsletter abonnieren“ beim Erstellen eines Servers */
+  signupCheckbox: boolean;
+  /** Höchstzahl E-Mails pro Minute beim Versand (schont den Mailserver) */
+  ratePerMinute: number;
+}
+
+export interface AnnouncementSettings {
+  enabled: boolean;
+  tone: 'info' | 'success' | 'warning';
+  text: Localized;
+  /** Optionaler Link hinter dem Text */
+  linkUrl: string;
+  linkLabel: Localized;
+}
+
+export interface BlocklistSettings {
+  /** Bekannte Wegwerf-Adressen (eingebaute Liste) ablehnen */
+  disposable: boolean;
+  emailDomains: string[];
+  emails: string[];
+}
+
+export interface SeoSettings {
+  /** Eigener Seitentitel / eigene Beschreibung der Startseite (leer = Standardtexte) */
+  title: Localized;
+  description: Localized;
+  /** false = Suchmaschinen sollen die Website nicht aufnehmen (noindex) */
+  indexing: boolean;
+  /** Kurzbeschreibung für KI-Assistenten und Suchmaschinen (llms.txt, strukturierte Daten). Leer = automatisch */
+  summary: Localized;
 }
 
 export interface HardwareLocation {
@@ -401,8 +490,8 @@ export interface PublicProductDTO {
   available: boolean;
   /** Nur aktive Pakete */
   plans: PublicPlanDTO[];
-  /** Servertypen und ob ein Egg dafür eingerichtet ist */
-  serverTypes: { id: string; available: boolean }[];
+  /** Servertypen: ob ein Egg dafür eingerichtet ist und welche Versionen wählbar sind */
+  serverTypes: { id: string; available: boolean; versions: string[] }[];
 }
 
 export interface WaitlistInfo {
@@ -422,6 +511,15 @@ export interface PublicSiteDTO {
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
   botFairUse: BotFairUseSettings;
+  /** Aufgelöste Links (Admin-Einstellung → .env → Standard) */
+  brand: BrandSettings;
+  rules: RuleSettings;
+  /** Weitere Domains (für Weiterleitungen und die Ursprungsprüfung) */
+  domains: { host: string; redirect: boolean }[];
+  newsletter: { enabled: boolean; footerForm: boolean; signupCheckbox: boolean };
+  /** null = keine Hinweisleiste */
+  announcement: Omit<AnnouncementSettings, 'enabled'> | null;
+  seo: SeoSettings;
   stats: { users: number; activeServers: number; uptime: number | null } | null;
 }
 
@@ -537,4 +635,99 @@ export interface BulkServerResult {
   /** Ausnahme-Adressen, zu denen es kein Konto gibt */
   unknownEmails: string[];
   errors: string[];
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Newsletter                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export type NewsletterStatus = 'pending' | 'active' | 'unsubscribed';
+
+export interface AdminSubscriberDTO {
+  id: string;
+  email: string;
+  locale: 'de' | 'en';
+  status: NewsletterStatus;
+  source: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  unsubscribedAt: string | null;
+}
+
+/** all_users = alle bestätigten Konten – nur für betriebliche Hinweise (z. B. Wartung, Umzug), nicht für Werbung */
+export type CampaignAudience = 'subscribers' | 'all_users';
+
+export interface CampaignInput {
+  subject: Localized;
+  /** Text mit Absätzen; **fett** und Links (https://…) werden erkannt */
+  body: Localized;
+  audience: CampaignAudience;
+  /** Optionaler Button */
+  ctaLabel: Localized;
+  ctaUrl: string;
+}
+
+export interface AdminCampaignDTO extends CampaignInput {
+  id: string;
+  status: 'draft' | 'sending' | 'sent' | 'cancelled';
+  total: number;
+  sent: number;
+  failed: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface AdminNewsletterDTO {
+  counts: Record<NewsletterStatus, number>;
+  /** Bestätigte Konten (Empfänger betrieblicher Hinweise) */
+  verifiedUsers: number;
+  campaigns: AdminCampaignDTO[];
+  smtpConfigured: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Domains und Tunnel                                                         */
+/* -------------------------------------------------------------------------- */
+
+export interface AdminDomainDTO {
+  host: string;
+  /** Hauptdomain aus der Installation (APP_URL) – nicht entfernbar */
+  primary: boolean;
+  redirect: boolean;
+  /** IP-Adressen, auf die die Domain zeigt */
+  addresses: string[];
+  /** DNS zeigt auf diesen Server (null = unbekannt, z. B. weil die eigene IP nicht ermittelt werden konnte) */
+  pointsHere: boolean | null;
+  /** Website ist über https://host erreichbar */
+  reachable: boolean;
+  /** Kurzer Hinweis, was noch zu tun ist */
+  hint: string | null;
+}
+
+export interface AdminTunnelDTO {
+  /** cloudflared ist auf dem Server installiert */
+  installed: boolean;
+  version: string | null;
+  /** Bei Cloudflare angemeldet (Zertifikat vorhanden) */
+  loggedIn: boolean;
+  /** Link zum Freigeben der Domain – nur während der Anmeldung */
+  loginUrl: string | null;
+  loginPending: boolean;
+  /** Tunnel angelegt */
+  tunnelId: string | null;
+  /** Domains, die über den Tunnel laufen */
+  hosts: string[];
+  /** Tunnel-Dienst läuft und ist mit Cloudflare verbunden */
+  running: boolean;
+  connections: number | null;
+  error: string | null;
+}
+
+export interface AdminDomainsDTO {
+  primary: string;
+  /** Öffentliche IP-Adressen dieses Servers (für den DNS-Eintrag) */
+  serverAddresses: string[];
+  domains: AdminDomainDTO[];
+  tunnel: AdminTunnelDTO;
 }

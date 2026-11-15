@@ -61,6 +61,7 @@ export const routes = {
   /** Nutzungsbedingungen für das Discord-Bot-Hosting */
   discordTerms: { en: '/discord-bot/terms-of-use', de: '/de/discord-bot/nutzungsbedingungen', internal: 'discord-bot/nutzungsbedingungen' },
   donate: { en: '/donate', de: '/de/spenden', internal: 'spenden' },
+  newsletter: { en: '/newsletter', de: '/de/newsletter', internal: 'newsletter' },
 } as const satisfies Record<string, Record<Locale | 'internal', string>>;
 
 export type RouteKey = keyof typeof routes;
@@ -149,6 +150,7 @@ export const validationMessages: Record<Locale, Record<string, string>> = {
     'v.type_unknown': 'Unbekannter Servertyp.',
     'v.version_unavailable': 'Diese Version ist für den Servertyp nicht verfügbar.',
     'v.accept_terms': 'Bitte akzeptiere die Nutzungsbedingungen und AGB.',
+    'v.email_blocked': 'Diese E-Mail-Adresse kann nicht verwendet werden. Bitte nimm eine andere.',
   },
   en: {
     'v.required': 'This field is required.',
@@ -168,6 +170,7 @@ export const validationMessages: Record<Locale, Record<string, string>> = {
     'v.type_unknown': 'Unknown server type.',
     'v.version_unavailable': 'This version is not available for the selected server type.',
     'v.accept_terms': 'Please accept the terms of use and terms and conditions.',
+    'v.email_blocked': 'This email address cannot be used. Please use a different one.',
   },
 };
 

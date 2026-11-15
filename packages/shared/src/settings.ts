@@ -2,8 +2,20 @@
  * Standardwerte der im Admin-Bereich änderbaren Einstellungen.
  * Gespeichert wird in der Datenbank nur, was vom Standard abweicht bzw. geändert wurde.
  */
-import type { EggRef, HardwareLocation, IncidentImpact, PlanSetting, ProductSettings, RegistrationMode, SiteSettings, WaitlistBlock } from './api-types';
-import { freeHostingConfig, productKinds, type PlanConfig, type ProductKind } from './config/freehosting.config';
+import type {
+  BrandSettings,
+  DomainSetting,
+  EggRef,
+  HardwareLocation,
+  IncidentImpact,
+  PlanSetting,
+  ProductSettings,
+  RegistrationMode,
+  RuleSettings,
+  SiteSettings,
+  WaitlistBlock,
+} from './api-types';
+import { freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind } from './config/freehosting.config';
 import type { Locale, Localized } from './i18n';
 
 const toSetting = (p: PlanConfig): PlanSetting => ({ ...p, highlighted: p.highlighted ?? false, enabled: true, reserved: 0 });
@@ -30,6 +42,100 @@ function defaultProduct(kind: ProductKind): ProductSettings {
   };
 }
 
+/**
+ * Werkseinstellungen der Regeln und Links – beim Laden des Moduls gesichert, weil `applyRuntimeConfig`
+ * die zentrale Konfiguration zur Laufzeit mit den Werten aus dem Admin-Bereich überschreibt.
+ */
+const factory = {
+  fairUse: { ...freeHostingConfig.fairUse },
+  cycle: { ...freeHostingConfig.cycle, reminderDaysBefore: [...freeHostingConfig.cycle.reminderDaysBefore] },
+  brand: { ...freeHostingConfig.brand },
+};
+
+export function defaultRules(): RuleSettings {
+  const { fairUse: f, cycle: c } = factory;
+  return {
+    fairUse: {
+      maxSessionHours: f.maxSessionHours,
+      sessionWarningMinutes: f.sessionWarningMinutes,
+      cooldownMinutes: f.cooldownMinutes,
+      weeklyOfflineHours: f.weeklyOfflineHours,
+      weeklyOfflineWarningHours: f.weeklyOfflineWarningHours,
+    },
+    cycle: {
+      days: c.days,
+      reminderDaysBefore: [...c.reminderDaysBefore],
+      reactivationCooldownMinutes: c.reactivationCooldownMinutes,
+      deleteAfterRestHours: c.deleteAfterRestHours,
+      deleteReminderHours: c.deleteReminderHours,
+    },
+  };
+}
+
+/** Standard-Links der Marke (aus der Konfigurationsdatei) */
+export function defaultBrand(): BrandSettings {
+  const b = factory.brand;
+  return { discordUrl: b.discordUrl, supportEmail: b.supportEmail, parentUrl: b.parentUrl, parentPricingUrl: b.parentPricingUrl, statusUrl: b.statusUrl };
+}
+
+let runtimeVersion = 0;
+
+/** Zählt hoch, sobald sich Regeln oder Links geändert haben (für Zwischenspeicher, die davon abhängen) */
+export function runtimeConfigVersion(): number {
+  return runtimeVersion;
+}
+
+/**
+ * Übernimmt Regeln und Links aus dem Admin-Bereich in die zentrale Konfiguration (`freeHostingConfig`).
+ * So greifen alle Stellen, die bisher feste Werte gelesen haben (Jobs, E-Mails, Texte), ohne Neustart auf
+ * die Einstellungen zu. Wird von API, Worker und Website nach jedem Laden der Einstellungen aufgerufen.
+ */
+export function applyRuntimeConfig(input: { rules: RuleSettings; brand: BrandSettings }): boolean {
+  const before = JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand]);
+  Object.assign(freeHostingConfig.fairUse, input.rules.fairUse);
+  Object.assign(freeHostingConfig.cycle, { ...input.rules.cycle, reminderDaysBefore: [...input.rules.cycle.reminderDaysBefore] });
+  Object.assign(freeHostingConfig.brand, input.brand);
+  const changed = before !== JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand]);
+  if (changed) runtimeVersion++;
+  return changed;
+}
+
+/** Wählbare Versionen eines Servertyps: Liste aus dem Admin-Bereich, sonst die Standardliste */
+export function versionsFor(settings: Pick<SiteSettings, 'versions'>, typeId: string): string[] {
+  const custom = settings.versions[typeId];
+  return custom && custom.length ? custom : (getServerType(typeId)?.versions ?? ['latest']);
+}
+
+/** Hostname prüfen und vereinheitlichen (klein, ohne Protokoll/Pfad) – null, wenn ungültig */
+export function normalizeHost(value: unknown): string | null {
+  const host = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/\.$/, '');
+  return /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host) ? host : null;
+}
+
+/** Bekannte Anbieter von Wegwerf-Adressen (Auswahl) – ergänzbar über die Sperrliste im Admin-Bereich */
+export const DISPOSABLE_EMAIL_DOMAINS = [
+  '10minutemail.com', '10minutemail.net', 'byom.de', 'discard.email', 'dispostable.com', 'emailondeck.com', 'fakeinbox.com', 'getnada.com',
+  'guerrillamail.com', 'guerrillamail.de', 'guerrillamail.net', 'guerrillamail.org', 'maildrop.cc', 'mailinator.com', 'mailnesia.com',
+  'minuteinbox.com', 'mohmal.com', 'muellmail.com', 'mytemp.email', 'sharklasers.com', 'spam4.me', 'spamgourmet.com', 'temp-mail.org',
+  'tempail.com', 'tempmail.com', 'tempmailo.com', 'tempr.email', 'throwawaymail.com', 'trash-mail.com', 'trashmail.com', 'trashmail.de',
+  'wegwerfmail.de', 'yopmail.com', 'yopmail.fr', 'yopmail.net',
+];
+
+/** Ist diese E-Mail-Adresse gesperrt (Sperrliste oder Wegwerf-Anbieter)? */
+export function isEmailBlocked(email: string, blocklist: SiteSettings['blocklist']): boolean {
+  const address = email.trim().toLowerCase();
+  const domain = address.slice(address.lastIndexOf('@') + 1);
+  if (blocklist.emails.includes(address)) return true;
+  const matches = (d: string) => domain === d || domain.endsWith(`.${d}`);
+  if (blocklist.emailDomains.some(matches)) return true;
+  return blocklist.disposable && DISPOSABLE_EMAIL_DOMAINS.some(matches);
+}
+
 export function defaultSiteSettings(): SiteSettings {
   return {
     maintenance: { enabled: false, message: { en: '', de: '' }, until: null, endedAt: null },
@@ -39,6 +145,15 @@ export function defaultSiteSettings(): SiteSettings {
     products: { minecraft: defaultProduct('minecraft'), discord: defaultProduct('discord') },
     hardware: { locations: freeHostingConfig.hardware.locations.map((l) => ({ ...l })), cpus: [...freeHostingConfig.hardware.cpus] },
     donate: { enabled: false, url: '' },
+    // Links: leer = Standard aus Konfiguration bzw. .env
+    brand: { discordUrl: '', supportEmail: '', parentUrl: '', parentPricingUrl: '', statusUrl: '' },
+    rules: defaultRules(),
+    versions: {},
+    domains: { extra: [] },
+    newsletter: { enabled: true, footerForm: true, signupCheckbox: true, ratePerMinute: 60 },
+    announcement: { enabled: false, tone: 'info', text: { de: '', en: '' }, linkUrl: '', linkLabel: { de: '', en: '' } },
+    blocklist: { disposable: true, emailDomains: [], emails: [] },
+    seo: { title: { de: '', en: '' }, description: { de: '', en: '' }, indexing: true, summary: { de: '', en: '' } },
     botFairUse: {
       enabled: true,
       cpuThresholdPercent: 90,
@@ -282,6 +397,44 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
   const hw = obj(i.hardware);
   const dn = obj(i.donate);
   const bf = obj(i.botFairUse);
+  const br = obj(i.brand);
+  const ru = obj(i.rules);
+  const rf = obj(ru.fairUse);
+  const rc = obj(ru.cycle);
+  const nl = obj(i.newsletter);
+  const an = obj(i.announcement);
+  const bl = obj(i.blocklist);
+  const seo = obj(i.seo);
+  const dr = d.rules;
+  const loose = (v: unknown, max: number): Localized => ({ de: str(obj(v).de, '', max).trim(), en: str(obj(v).en, '', max).trim() });
+  const link = (v: unknown) => {
+    const s = str(v, '', 500).trim();
+    return /^https?:\/\/[^\s]+$/.test(s) ? s : '';
+  };
+  const list = (v: unknown, max: number, test: (s: string) => boolean): string[] =>
+    Array.isArray(v)
+      ? [...new Set(v.map((x) => str(x, '', 254).trim().toLowerCase()).filter((x) => x && test(x)))].slice(0, max)
+      : [];
+  const reminderDays = Array.isArray(rc.reminderDaysBefore)
+    ? [...new Set(rc.reminderDaysBefore.map((n) => int(n, 0, 0, 60)).filter((n) => n > 0))].sort((a, b) => b - a).slice(0, 5)
+    : dr.cycle.reminderDaysBefore;
+  const cycleDays = int(rc.days, dr.cycle.days, 1, 365);
+  const seenHosts = new Set<string>();
+  const extraDomains: DomainSetting[] = Array.isArray(obj(i.domains).extra)
+    ? (obj(i.domains).extra as unknown[])
+        .slice(0, 50)
+        .map((raw) => {
+          const v = obj(raw);
+          return { host: normalizeHost(v.host) ?? '', redirect: bool(v.redirect, true), addedAt: isoOrNull(v.addedAt) };
+        })
+        .filter((x) => x.host && !seenHosts.has(x.host) && seenHosts.add(x.host))
+    : [];
+  const versions: Record<string, string[]> = {};
+  for (const [typeId, value] of Object.entries(obj(i.versions))) {
+    if (getServerType(typeId)?.kind !== 'minecraft' || !Array.isArray(value)) continue;
+    const cleaned = [...new Set(value.map((x) => str(x, '', 32).trim()).filter((x) => /^[A-Za-z0-9._-]{1,32}$/.test(x)))].slice(0, 80);
+    if (cleaned.length) versions[typeId] = cleaned;
+  }
   const inactiveDays = int(bf.inactiveDays, d.botFairUse.inactiveDays, 0, 365);
   const usedIds = new Set<string>();
   const cpus = Array.isArray(hw.cpus)
@@ -320,6 +473,56 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
     hardware: { locations: normalizeLocations(hw.locations, d.hardware.locations), cpus },
     // Ohne gültigen Zahlungslink bleibt die Spenden-Seite aus
     donate: { enabled: bool(dn.enabled, false) && donateUrl !== '', url: donateUrl },
+    brand: {
+      discordUrl: link(br.discordUrl),
+      supportEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str(br.supportEmail, '', 254).trim()) ? str(br.supportEmail, '', 254).trim() : '',
+      parentUrl: link(br.parentUrl),
+      parentPricingUrl: link(br.parentPricingUrl),
+      statusUrl: link(br.statusUrl),
+    },
+    rules: {
+      fairUse: {
+        maxSessionHours: int(rf.maxSessionHours, dr.fairUse.maxSessionHours, 1, 167),
+        sessionWarningMinutes: int(rf.sessionWarningMinutes, dr.fairUse.sessionWarningMinutes, 5, 720),
+        cooldownMinutes: int(rf.cooldownMinutes, dr.fairUse.cooldownMinutes, 0, 1440),
+        weeklyOfflineHours: int(rf.weeklyOfflineHours, dr.fairUse.weeklyOfflineHours, 0, 160),
+        weeklyOfflineWarningHours: int(rf.weeklyOfflineWarningHours, dr.fairUse.weeklyOfflineWarningHours, 1, 72),
+      },
+      cycle: {
+        days: cycleDays,
+        // Erinnerungen müssen vor dem Ablauf liegen
+        reminderDaysBefore: reminderDays.filter((n) => n < cycleDays),
+        reactivationCooldownMinutes: int(rc.reactivationCooldownMinutes, dr.cycle.reactivationCooldownMinutes, 0, 43_200),
+        deleteAfterRestHours: int(rc.deleteAfterRestHours, dr.cycle.deleteAfterRestHours, 0, 8760),
+        deleteReminderHours: int(rc.deleteReminderHours, dr.cycle.deleteReminderHours, 1, 720),
+      },
+    },
+    versions,
+    domains: { extra: extraDomains },
+    newsletter: {
+      enabled: bool(nl.enabled, d.newsletter.enabled),
+      footerForm: bool(nl.footerForm, d.newsletter.footerForm),
+      signupCheckbox: bool(nl.signupCheckbox, d.newsletter.signupCheckbox),
+      ratePerMinute: int(nl.ratePerMinute, d.newsletter.ratePerMinute, 1, 600),
+    },
+    announcement: {
+      enabled: bool(an.enabled, false),
+      tone: an.tone === 'success' || an.tone === 'warning' ? an.tone : 'info',
+      text: loose(an.text, 300),
+      linkUrl: link(an.linkUrl),
+      linkLabel: loose(an.linkLabel, 60),
+    },
+    blocklist: {
+      disposable: bool(bl.disposable, d.blocklist.disposable),
+      emailDomains: list(bl.emailDomains, 500, (x) => normalizeHost(x) !== null),
+      emails: list(bl.emails, 2000, (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
+    },
+    seo: {
+      title: loose(seo.title, 90),
+      description: loose(seo.description, 220),
+      indexing: bool(seo.indexing, true),
+      summary: loose(seo.summary, 1200),
+    },
     botFairUse: {
       enabled: bool(bf.enabled, d.botFairUse.enabled),
       cpuThresholdPercent: int(bf.cpuThresholdPercent, d.botFairUse.cpuThresholdPercent, 50, 100),

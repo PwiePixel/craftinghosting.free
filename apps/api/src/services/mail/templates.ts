@@ -11,8 +11,20 @@ interface LayoutInput {
   preheader: string;
   heading: string;
   paragraphs: string[];
+  /** true = Absätze dürfen **fett** und Links enthalten (Newsletter) */
+  rich?: boolean;
   cta?: { label: string; url: string };
   footnote?: string;
+  /** Zusätzliche Zeile im Fuß mit Link (z. B. Newsletter abbestellen) */
+  footerLink?: { text: string; label: string; url: string };
+}
+
+/** Sicherer Mini-Formatierer für Newsletter-Texte: erst alles maskieren, dann **fett** und https-Links erlauben */
+function richHtml(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#ffffff">$1</strong>')
+    .replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '<a href="$1" style="color:#60a5fa">$1</a>')
+    .replace(/\n/g, '<br>');
 }
 
 export interface MailContent {
@@ -35,7 +47,7 @@ const chrome = {
 function layout(subject: string, input: LayoutInput): MailContent {
   const c = chrome[input.locale];
   const paragraphs = input.paragraphs
-    .map((p) => `<p style="margin:0 0 16px;color:#d1d5db;font-size:15px;line-height:1.6">${escapeHtml(p)}</p>`)
+    .map((p) => `<p style="margin:0 0 16px;color:#d1d5db;font-size:15px;line-height:1.6">${input.rich ? richHtml(p) : escapeHtml(p)}</p>`)
     .join('');
   const cta = input.cta
     ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:8px 0 24px"><tr><td style="border-radius:8px;background:#2563eb">
@@ -56,7 +68,11 @@ function layout(subject: string, input: LayoutInput): MailContent {
     </td></tr>
     <tr><td style="padding:20px 4px;color:#6b7280;font-size:12px;line-height:1.5">
       ${escapeHtml(brand.productName)} · ${escapeHtml(brand.poweredBy)}<br>
-      ${escapeHtml(c.auto(brand.supportEmail))}
+      ${escapeHtml(c.auto(brand.supportEmail))}${
+        input.footerLink
+          ? `<br><br>${escapeHtml(input.footerLink.text)} <a href="${escapeHtml(input.footerLink.url)}" style="color:#9ca3af">${escapeHtml(input.footerLink.label)}</a>`
+          : ''
+      }
     </td></tr>
   </table>
 </td></tr></table></body></html>`;
@@ -68,6 +84,7 @@ function layout(subject: string, input: LayoutInput): MailContent {
     input.footnote ?? '',
     '',
     `— ${brand.productName} · ${brand.poweredBy}`,
+    input.footerLink ? `\n${input.footerLink.text} ${input.footerLink.url}` : '',
   ].join('\n');
   return { subject, html, text };
 }
@@ -152,5 +169,66 @@ export function notificationMail(title: string, body: string, cta: { label: stri
     heading: title,
     paragraphs: body.split('\n').filter(Boolean),
     cta,
+  });
+}
+
+/** Bestätigung der Newsletter-Anmeldung (Double-Opt-in) */
+export function newsletterConfirmMail(url: string, locale: Locale): MailContent {
+  if (locale === 'en') {
+    return layout('Please confirm your newsletter subscription', {
+      locale,
+      preheader: 'One click and you will get news and offers from CraftingHosting.free.',
+      heading: 'Confirm your subscription',
+      paragraphs: [
+        'You (or someone using your email address) signed up for the CraftingHosting.free newsletter: news, new plans and offers – a few times a year, no spam.',
+        'Please confirm with the button below. If you did not sign up, simply ignore this email – you will not receive anything.',
+      ],
+      cta: { label: 'Confirm subscription', url },
+      footnote: 'You can unsubscribe at any time via the link at the end of every newsletter.',
+    });
+  }
+  return layout('Bitte bestätige deine Newsletter-Anmeldung', {
+    locale,
+    preheader: 'Ein Klick und du bekommst Neuigkeiten und Angebote von CraftingHosting.free.',
+    heading: 'Anmeldung bestätigen',
+    paragraphs: [
+      'Du (oder jemand mit deiner E-Mail-Adresse) hast dich für den Newsletter von CraftingHosting.free angemeldet: Neuigkeiten, neue Pakete und Angebote – wenige Male im Jahr, kein Spam.',
+      'Bitte bestätige die Anmeldung mit dem Button. Falls du dich nicht angemeldet hast, ignoriere diese E-Mail einfach – du bekommst dann nichts.',
+    ],
+    cta: { label: 'Anmeldung bestätigen', url },
+    footnote: 'Abmelden kannst du dich jederzeit über den Link am Ende jedes Newsletters.',
+  });
+}
+
+/** Eine Newsletter-Ausgabe bzw. ein betrieblicher Hinweis an alle Konten */
+export function campaignMail(
+  input: { subject: string; body: string; cta?: { label: string; url: string }; unsubscribeUrl?: string },
+  locale: Locale,
+): MailContent {
+  const paragraphs = input.body
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const en = locale === 'en';
+  return layout(input.subject, {
+    locale,
+    preheader: paragraphs[0]?.slice(0, 120) ?? input.subject,
+    heading: input.subject,
+    paragraphs,
+    rich: true,
+    cta: input.cta,
+    footnote: input.unsubscribeUrl
+      ? undefined
+      : en
+        ? 'You are receiving this notice because you have an account at CraftingHosting.free. It concerns the operation of your free server.'
+        : 'Du erhältst diesen Hinweis, weil du ein Konto bei CraftingHosting.free hast. Er betrifft den Betrieb deines kostenlosen Servers.',
+    footerLink: input.unsubscribeUrl
+      ? {
+          text: en ? 'You are receiving this email because you subscribed to the newsletter.' : 'Du bekommst diese E-Mail, weil du den Newsletter abonniert hast.',
+          label: en ? 'Unsubscribe' : 'Abmelden',
+          url: input.unsubscribeUrl,
+        }
+      : undefined,
   });
 }

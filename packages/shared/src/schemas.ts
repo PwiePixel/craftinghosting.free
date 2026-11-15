@@ -51,11 +51,9 @@ const serverConfigShape = {
 
 function refineServerConfig(val: { planId: string; serverType: string; version: string }, ctx: z.RefinementCtx) {
   // Pakete sind im Admin-Bereich frei definierbar – ob es das Paket gibt (und ob es zum Servertyp passt), prüft die API
-  const type = getServerType(val.serverType);
-  if (!type) {
+  // Auch die Versionslisten sind im Admin-Bereich pflegbar – ob die Version wählbar ist, prüft die API
+  if (!getServerType(val.serverType)) {
     ctx.addIssue({ code: 'custom', path: ['serverType'], message: 'v.type_unknown' });
-  } else if (!type.versions.includes(val.version)) {
-    ctx.addIssue({ code: 'custom', path: ['version'], message: 'v.version_unavailable' });
   }
 }
 
@@ -65,6 +63,8 @@ export const startSchema = z
     ...serverConfigShape,
     email: emailSchema,
     acceptTerms: z.literal(true, { message: 'v.accept_terms' }),
+    /** Newsletter abonnieren (freiwillig) – wird mit der E-Mail-Bestätigung aktiv */
+    newsletter: z.boolean().optional(),
   })
   .superRefine(refineServerConfig);
 export type StartInput = z.infer<typeof startSchema>;
@@ -87,6 +87,9 @@ export const panelSetupSchema = z.object({
   password: panelPasswordSchema,
 });
 export type PanelSetupInput = z.infer<typeof panelSetupSchema>;
+
+export const newsletterSubscribeSchema = z.object({ email: emailSchema });
+export const newsletterTokenSchema = z.object({ token: z.string().min(20).max(200) });
 
 export const deleteServerSchema = z.object({ confirmName: z.string().min(1).max(64) });
 

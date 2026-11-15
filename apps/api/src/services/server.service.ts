@@ -8,6 +8,7 @@ import {
   type WaitlistInfo,
   findPlan,
   freeHostingConfig,
+  versionsFor,
   getServerType,
   type ProductKind,
   reactivationBlockMessages,
@@ -147,6 +148,11 @@ export async function assertConfigAvailable(input: ServerConfigInput, opts: { ig
     throw Errors.badRequest('server_type_unavailable', L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'), {
       serverType: L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'),
     });
+  }
+  // Versionslisten sind im Admin-Bereich pflegbar
+  if (type.kind === 'minecraft' && !versionsFor(settings, type.id).includes(input.version)) {
+    const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
+    throw Errors.badRequest('version_unavailable', msg, { version: msg });
   }
   if (opts.ignoreCapacity) return;
   const availability = await getAvailability();

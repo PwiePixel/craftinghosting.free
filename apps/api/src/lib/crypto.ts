@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, randomUUID } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '../env';
 
 /** Zufälliges, URL-sicheres Token (256 Bit). */
@@ -12,6 +12,27 @@ export function sha256(value: string): string {
 
 export function uuid(): string {
   return randomUUID();
+}
+
+/* ------------------------------------------------------------ Signierte Links */
+
+/**
+ * Link-Token ohne Datenbankeintrag: `<wert>.<signatur>` (HMAC-SHA256, Schlüssel aus DATABASE_ENCRYPTION_KEY abgeleitet).
+ * `purpose` trennt die Einsatzzwecke – ein Bestätigungslink taugt nicht als Abmeldelink.
+ */
+export function signToken(value: string, purpose: string): string {
+  const mac = createHmac('sha256', getFieldKey()).update(`${purpose}:${value}`).digest('base64url').slice(0, 32);
+  return `${value}.${mac}`;
+}
+
+/** Prüft ein mit signToken erzeugtes Token und gibt den Wert zurück (null = ungültig). */
+export function verifySignedToken(token: string, purpose: string): string | null {
+  const dot = token.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const value = token.slice(0, dot);
+  const expected = Buffer.from(signToken(value, purpose));
+  const given = Buffer.from(token);
+  return expected.length === given.length && timingSafeEqual(expected, given) ? value : null;
 }
 
 /* ------------------------------------------------------ Feldverschlüsselung */

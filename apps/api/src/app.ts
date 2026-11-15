@@ -9,7 +9,9 @@ import { authPlugin } from './plugins/auth';
 import { securityPlugin } from './plugins/security';
 import { adminRoutes } from './routes/admin.routes';
 import { authRoutes } from './routes/auth.routes';
+import { domainAdminRoutes } from './routes/domains.routes';
 import { metaRoutes } from './routes/meta.routes';
+import { newsletterAdminRoutes, newsletterRoutes } from './routes/newsletter.routes';
 import { serverRoutes } from './routes/servers.routes';
 
 export async function buildApp() {
@@ -49,6 +51,9 @@ export async function buildApp() {
       await api.register(authRoutes);
       await api.register(serverRoutes);
       await api.register(adminRoutes);
+      await api.register(newsletterRoutes);
+      await api.register(newsletterAdminRoutes);
+      await api.register(domainAdminRoutes);
     },
     { prefix: '/api/v1' },
   );

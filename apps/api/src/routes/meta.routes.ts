@@ -6,7 +6,7 @@ import { consentLogs } from '../db/schema';
 import { encryptField, uuid } from '../lib/crypto';
 import { pterodactyl } from '../pterodactyl';
 import { getAvailability } from '../services/server.service';
-import { getPublicSite, getSettings } from '../services/settings.service';
+import { allowedHosts, getPublicSite, getSettings } from '../services/settings.service';
 import { getStatus } from '../services/status.service';
 
 export async function metaRoutes(app: FastifyInstance) {
@@ -53,6 +53,15 @@ export async function metaRoutes(app: FastifyInstance) {
       userAgent: encryptField(String(request.headers['user-agent'] ?? '').slice(0, 255) || null),
     });
     return { ok: true };
+  });
+
+  /**
+   * Für Caddy („On-Demand TLS“): Darf für diese Domain ein Zertifikat geholt werden?
+   * 200 = Domain ist die Hauptdomain oder im Admin-Bereich eingetragen · 404 = nein.
+   */
+  app.get('/internal/tls-check', async (request, reply) => {
+    const domain = String((request.query as { domain?: string }).domain ?? '').toLowerCase();
+    return allowedHosts(await getSettings()).has(domain) ? { ok: true } : reply.status(404).send({ ok: false });
   });
 
   app.get('/status', async () => {
