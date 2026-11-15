@@ -943,6 +943,11 @@ export interface DiscordSetupStep {
   detail: string;
 }
 
+/** Social Ping im Admin-Bereich: Stand je Konto (letzte Prüfung, letztes Video, Fehler) */
+export interface AdminSocialDTO {
+  accounts: { id: string; checkedAt: string | null; error: string | null; latest: { title: string; url: string; publishedAt: string | null } | null; posted: number }[];
+}
+
 /** Belohnungssystem im Admin-Bereich: wer am meisten eingeladen hat und wer boostet */
 export interface AdminRewardsDTO {
   inviters: { discordId: string; username: string | null; email: string | null; total: number; qualified: number; rewards: number; redeemed: number }[];

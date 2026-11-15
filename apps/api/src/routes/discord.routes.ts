@@ -1,3 +1,4 @@
+import { checkSocialAccounts, resolveSocialAccount, sendSocialTest, socialAdminStatus } from '../discord/social-ping';
 import { boostOverview, setManualBoosts } from '../discord/boost-rewards';
 import { setupHoneypot } from '../discord/honeypot';
 import { inviteLeaderboard } from '../discord/invite-rewards';
@@ -256,6 +257,38 @@ export async function discordAdminRoutes(app: FastifyInstance) {
       throw discordFailed(err);
     }
     await audit({ userId: currentUser(request).id, actor: 'admin', action: 'discord.honeypot_setup', message: `Discord: Honeypot-Kanal ${body.channelId} eingerichtet`, ip: request.ip });
+    return { ok: true };
+  });
+
+  /* ---------------------------------------------------------- Social Ping */
+
+  /** Stand je Konto: letzte Prüfung, letztes Video, Fehler */
+  app.get('/admin/discord/social', async () => ({ social: await socialAdminStatus() }));
+
+  /** Link prüfen und den Feed dazu ermitteln (YouTube-Kanal oder RSS-/Atom-Feed) */
+  app.post('/admin/discord/social/resolve', strict(40, '10 minutes'), async (request) => {
+    const { url } = z.object({ url: z.string().trim().min(4).max(500) }).parse(request.body);
+    try {
+      return { account: await resolveSocialAccount(url) };
+    } catch (err) {
+      const message = (err as Error).message || 'Der Link konnte nicht geprüft werden.';
+      throw new ApiError(400, 'social_resolve_failed', L(message, message));
+    }
+  });
+
+  /** Sofort prüfen (statt auf den nächsten Lauf zu warten) */
+  app.post('/admin/discord/social/check', strict(20, '10 minutes'), async () => ({ result: await checkSocialAccounts(), social: await socialAdminStatus() }));
+
+  /** Testnachricht: das neueste Video eines Kontos in den Kanal posten */
+  app.post('/admin/discord/social/test', strict(20, '10 minutes'), async (request) => {
+    const { accountId } = z.object({ accountId: z.string().max(40) }).parse(request.body);
+    if (!(await discordConfig()).botReady) throw new ApiError(409, 'discord_not_ready', L('Die Discord-Anbindung ist noch nicht eingerichtet.', 'The Discord integration is not set up yet.'));
+    try {
+      await sendSocialTest(accountId);
+    } catch (err) {
+      const message = discordErrorText(err);
+      throw new ApiError(502, 'discord_error', L(message, message));
+    }
     return { ok: true };
   });
 

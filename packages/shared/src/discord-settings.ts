@@ -83,13 +83,90 @@ export interface DiscordSettings {
   boostRewards: BoostRewardSettings;
   /** Honeypot-Kanal zur Bot-Erkennung: Wer dort schreibt, wird automatisch gebannt */
   honeypot: { enabled: boolean; channelId: string };
+  /** Social Ping: Der Bot meldet neue Videos hinterlegter Konten in einem Kanal */
+  socialPing: SocialPingSettings;
   /** Hinweis auf der Website, warum Discord nötig ist (leer = Standardtext) */
   requiredNote: Localized;
   welcome: DiscordWelcomeSettings;
   rolePanels: DiscordRolePanel[];
 }
 
-export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5, rewardTiers: 10, boostTiers: 8, boostSlots: 4 } as const;
+export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5, rewardTiers: 10, boostTiers: 8, boostSlots: 4, socialAccounts: 10 } as const;
+
+/** Konto, dessen neue Videos der Bot meldet (YouTube-Kanal oder ein beliebiger RSS-/Atom-Feed) */
+export interface SocialAccount {
+  id: string;
+  /** Link, wie er im Admin-Bereich eingegeben wurde */
+  url: string;
+  /** Feed, den der Bot abfragt – wird beim Hinzufügen aus dem Link ermittelt */
+  feedUrl: string;
+  /** Anzeigename in der Nachricht */
+  name: string;
+}
+
+export interface SocialPingSettings {
+  enabled: boolean;
+  /** Kanal für die Meldungen */
+  channelId: string;
+  /** Rolle, die bei jeder Meldung erwähnt wird (leer = niemand) */
+  pingRoleId: string;
+  /** Text der Nachricht. Platzhalter: {name}, {title}, {url} – der Link sorgt für die Vorschau mit Player */
+  message: string;
+  accounts: SocialAccount[];
+}
+
+export const socialPingPlaceholders: [string, string][] = [
+  ['{name}', 'Name des Kontos'],
+  ['{title}', 'Titel des Videos'],
+  ['{url}', 'Link zum Video'],
+];
+
+export function defaultSocialPing(): SocialPingSettings {
+  return {
+    enabled: false,
+    channelId: '',
+    pingRoleId: '',
+    message: '🇩🇪 **{name}** hat ein neues Video hochgeladen!\n🇬🇧 **{name}** just uploaded a new video!\n\n**{title}**\n{url}',
+    accounts: [],
+  };
+}
+
+const httpUrl = (v: unknown): string => {
+  if (typeof v !== 'string') return '';
+  try {
+    const u = new URL(v.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString().slice(0, 500) : '';
+  } catch {
+    return '';
+  }
+};
+
+function normalizeSocialPing(input: unknown): SocialPingSettings {
+  const i = obj(input);
+  const d = defaultSocialPing();
+  const used = new Set<string>();
+  const accounts = (Array.isArray(i.accounts) ? i.accounts : [])
+    .slice(0, discordLimits.socialAccounts)
+    .map((raw, index): SocialAccount | null => {
+      const a = obj(raw);
+      const feedUrl = httpUrl(a.feedUrl);
+      if (!feedUrl) return null;
+      let id = /^[a-z0-9][a-z0-9-]{0,23}$/.test(String(a.id ?? '')) ? String(a.id) : `konto-${index + 1}`;
+      for (let n = 2; used.has(id); n++) id = `${id.replace(/-x\d+$/, '').slice(0, 19)}-x${n}`;
+      used.add(id);
+      return { id, url: httpUrl(a.url) || feedUrl, feedUrl, name: text(a.name, '', 80).trim() || 'Kanal' };
+    })
+    .filter((a): a is SocialAccount => a !== null);
+  const message = text(i.message, d.message, 1000).trim();
+  return {
+    enabled: bool(i.enabled, d.enabled),
+    channelId: snowflake(i.channelId),
+    pingRoleId: snowflake(i.pingRoleId),
+    // Ohne Link gäbe es keine Vorschau – dann gilt der Standardtext
+    message: message.includes('{url}') ? message : d.message,
+    accounts,
+  };
+}
 
 /** choice = der Nutzer wählt beim Einlösen zwischen Minecraft-Server und Discord-Bot */
 export type InviteRewardKind = 'choice' | 'minecraft' | 'discord';
@@ -301,6 +378,7 @@ export function defaultDiscordSettings(): DiscordSettings {
     inviteRewards: defaultInviteRewards(),
     boostRewards: defaultBoostRewards(),
     honeypot: { enabled: false, channelId: '' },
+    socialPing: defaultSocialPing(),
     requiredNote: { de: '', en: '' },
     welcome: defaultDiscordWelcome(),
     rolePanels: defaultDiscordRolePanels(),
@@ -377,6 +455,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
     inviteRewards: normalizeInviteRewards(i.inviteRewards),
     boostRewards: normalizeBoostRewards(i.boostRewards),
     honeypot: { enabled: bool(obj(i.honeypot).enabled, false), channelId: snowflake(obj(i.honeypot).channelId) },
+    socialPing: normalizeSocialPing(i.socialPing),
     requiredNote: { de: text(note.de, '', 400).trim(), en: text(note.en, '', 400).trim() },
     welcome: {
       enabled: bool(w.enabled, d.welcome.enabled),

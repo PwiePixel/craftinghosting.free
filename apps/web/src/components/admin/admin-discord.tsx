@@ -19,6 +19,7 @@ import {
   type SiteSettings,
 } from '@chfree/shared';
 import { RewardsSections } from '@/components/admin/admin-rewards';
+import { SocialSection } from '@/components/admin/admin-social';
 import { Labeled, NumberInput, Section, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -618,6 +619,9 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
       </Section>
 
       <RewardsSections d={d} set={set} settings={settings} status={status} dirty={dirty} />
+
+      <SocialSection d={d} set={set} status={status} dirty={dirty} />
+
 
       <Section
         title="Server per Direktnachricht steuern"

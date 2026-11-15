@@ -1,6 +1,7 @@
 import { cleanupJob } from './cleanup.job';
 import { cycleJob } from './cycle.job';
 import { discordRewardsJob } from './discord-rewards.job';
+import { discordSocialJob } from './discord-social.job';
 import { discordStatusFeedJob } from './discord-status-feed.job';
 import { discordSyncJob } from './discord-sync.job';
 import { enforceFairUseJob } from './enforce-fair-use.job';
@@ -26,4 +27,5 @@ export const allJobs: JobDefinition[] = [
   discordSyncJob,
   discordStatusFeedJob,
   discordRewardsJob,
+  discordSocialJob,
 ];

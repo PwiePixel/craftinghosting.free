@@ -82,6 +82,30 @@ describe('Discord-Einstellungen', () => {
     expect(custom.tiers).toEqual([{ boosts: 2, slots: [{ kind: 'discord', planId: 'bot-1gb' }] }]);
   });
 
+  it('prüft die Konten für den Social Ping', () => {
+    const d = normalizeDiscordSettings(undefined).socialPing;
+    expect(d).toMatchObject({ enabled: false, accounts: [] });
+    expect(d.message).toContain('{url}');
+    const s = normalizeDiscordSettings({
+      socialPing: {
+        enabled: true,
+        channelId: '423456789012345678',
+        message: 'Neues Video ohne Link',
+        accounts: [
+          { id: 'kanal', url: 'https://www.youtube.com/@beispiel', feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCabc', name: ' Beispiel ' },
+          { id: 'kanal', feedUrl: 'https://example.com/feed.xml' },
+          { url: 'https://example.com', feedUrl: 'javascript:alert(1)', name: 'Kaputt' },
+        ],
+      },
+    }).socialPing;
+    // Ohne {url} gäbe es keine Vorschau → Standardtext
+    expect(s.message).toBe(d.message);
+    expect(s.accounts).toEqual([
+      { id: 'kanal', url: 'https://www.youtube.com/@beispiel', feedUrl: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCabc', name: 'Beispiel' },
+      { id: 'kanal-x2', url: 'https://example.com/feed.xml', feedUrl: 'https://example.com/feed.xml', name: 'Kanal' },
+    ]);
+  });
+
   it('füllt die Platzhalter der Willkommensnachricht', () => {
     expect(fillDiscordTemplate('Welcome to **{server}**, {user}! {unbekannt}', { server: 'CraftingHosting', user: 'nick' })).toBe('Welcome to **CraftingHosting**, nick! {unbekannt}');
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111, 166].map(ordinalEn)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th', '166th']);

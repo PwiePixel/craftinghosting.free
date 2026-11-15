@@ -111,6 +111,11 @@ const schema = z
 
     STATUS_PROVIDER: z.enum(['internal', 'static']).default('internal'),
 
+    /** Adresse von YouTube (Kanalseiten und Feeds für den Social Ping). Nur für Tests ändern. */
+    YOUTUBE_BASE_URL: z.string().url().default('https://www.youtube.com'),
+    /** Nur für Tests: Feeds auch von lokalen Adressen abrufen */
+    SOCIAL_FEED_ALLOW_PRIVATE: z.string().optional(),
+
     /** Adresse der Discord-API. Nur für Tests ändern – Token, Secret und IDs stehen im Admin-Bereich (Discord). */
     DISCORD_API_URL: z.string().url().default('https://discord.com/api/v10'),
 
