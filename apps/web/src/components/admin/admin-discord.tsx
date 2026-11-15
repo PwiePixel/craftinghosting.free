@@ -204,8 +204,35 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
   const gateway = GATEWAY[status.gateway.status];
   const welcomeDefaults = defaultDiscordWelcome();
 
+  // Was fehlt, damit Verknüpfen und Pflicht-Mitgliedschaft wirklich arbeiten?
+  const missing = [
+    !d.enabled && 'Anbindung einschalten',
+    !d.clientId && 'Client-ID',
+    !d.guildId && 'Server-ID',
+    !status.hasBotToken && !botToken && 'Bot-Token',
+    !status.hasClientSecret && !clientSecret && 'Client-Secret',
+  ].filter((x): x is string => !!x);
+
   return (
     <div className="space-y-5">
+      {d.required && (!status.linkReady || missing.length > 0) && (
+        <div className="rounded-xl border border-red-400/40 bg-red-400/[0.08] p-4 text-sm leading-relaxed text-red-200">
+          <p className="font-semibold text-white">Die Pflicht-Mitgliedschaft ist eingeschaltet, greift aber noch nicht</p>
+          <p className="mt-1">
+            Solange die Anbindung nicht vollständig ist, wird niemand geprüft und jeder bekommt weiter einen Server. Auf der Website erscheint dann auch kein Button „Mit Discord
+            verbinden“. {missing.length > 0 ? `Es fehlt: ${missing.join(', ')}.` : 'Bitte speichern und „Verbindung prüfen & einrichten“ ausführen.'}
+          </p>
+        </div>
+      )}
+      {d.enabled && status.botReady && status.gateway.status !== 'online' && (
+        <div className="rounded-xl border border-amber-400/40 bg-amber-400/[0.08] p-4 text-sm leading-relaxed text-amber-100">
+          <p className="font-semibold text-white">Der Bot ist nicht mit Discord verbunden</p>
+          <p className="mt-1">
+            Verknüpfen und die Prüfung der Mitgliedschaft funktionieren trotzdem. Befehle, Buttons, Willkommensnachricht und Auto-Rollen brauchen aber die Verbindung.{' '}
+            {status.gateway.error ?? 'Läuft der Dienst chfree-worker? Nach dem Speichern dauert es bis zu 20 Sekunden.'}
+          </p>
+        </div>
+      )}
       <Section
         title="Discord-Bot verbinden"
         description="Der Bot verknüpft Website-Accounts mit Discord, prüft die Mitgliedschaft auf eurem Server, vergibt Rollen, begrüßt neue Mitglieder und betreibt das Ticketsystem."
@@ -295,7 +322,8 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
             )}
           </Row>
           <Row label="Verknüpfte Accounts">{status.linkedUsers}</Row>
-          <Row label="Verknüpfen möglich">{status.linkReady ? 'Ja' : 'Nein – es fehlen Angaben oben'}</Row>
+          <Row label="Verknüpfen möglich">{status.linkReady ? 'Ja – auf „Meine Server“ erscheint „Mit Discord verbinden“' : 'Nein – es fehlen Angaben oben'}</Row>
+          <Row label="Pflicht-Mitgliedschaft">{!d.required ? 'Aus – es wird niemand geprüft' : status.linkReady ? 'Aktiv – geprüft wird beim Erstellen und Reaktivieren' : 'Eingeschaltet, greift aber noch nicht'}</Row>
         </dl>
       </Section>
 

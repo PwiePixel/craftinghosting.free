@@ -121,7 +121,7 @@ export default async function StartPage({ params, searchParams }: Props) {
             {early ? e.startTitle : s.title}
           </h1>
           <p className="mt-3 max-w-xl text-muted">{early ? e.startIntro : s.intro}</p>
-          <DiscordRequiredNote site={settings} lang={lang} className="mt-6" />
+          <DiscordRequiredNote site={settings} lang={lang} user={me?.user} className="mt-6" />
           <div className="mt-8">{content}</div>
         </div>
 

@@ -668,6 +668,13 @@ return {
     noteText:
       'To use our free services you need to be on our Discord server. After signing up you connect your Discord account and join automatically – only then is your server set up.',
     noteButton: 'Open the Discord server',
+    noteSteps: [
+      'Request a server and confirm your email address.',
+      'Click “Connect with Discord” under “My servers”. Discord asks for your consent – you join our server automatically in the process.',
+      'We check your membership automatically and set up your server.',
+    ],
+    noteInviteOnly: 'Important: joining via the invite link alone is not enough. Only linking tells us which Discord account belongs to your account.',
+    noteLinked: (name: string) => `Your Discord account is connected (${name}).`,
     results: {
       linked: { ok: true, title: 'Discord connected', text: 'Your Discord account is linked and you are a member of our server.' },
       linked_not_member: { ok: false, title: 'Linked – but not a member yet', text: 'Your Discord account is linked. Now join our Discord server and click “Check again”.' },

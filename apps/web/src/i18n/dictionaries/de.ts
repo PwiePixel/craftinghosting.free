@@ -700,6 +700,14 @@ return {
     noteText:
       'Um unsere kostenlosen Dienste zu nutzen, musst du auf unserem Discord-Server sein. Nach der Anmeldung verbindest du dein Discord-Konto und trittst dabei automatisch bei – erst dann wird dein Server eingerichtet.',
     noteButton: 'Zum Discord-Server',
+    /** So läuft die Prüfung ab – der Einladungslink allein genügt nicht */
+    noteSteps: [
+      'Server anfordern und E-Mail-Adresse bestätigen.',
+      'Unter „Meine Server“ auf „Mit Discord verbinden“ klicken. Discord fragt nach deiner Zustimmung – dabei trittst du unserem Server automatisch bei.',
+      'Wir prüfen deine Mitgliedschaft automatisch und richten deinen Server ein.',
+    ],
+    noteInviteOnly: 'Wichtig: Nur über den Einladungslink beizutreten genügt nicht. Erst die Verknüpfung zeigt uns, welches Discord-Konto zu deinem Account gehört.',
+    noteLinked: (name: string) => `Dein Discord-Konto ist verbunden (${name}).`,
     results: {
       linked: { ok: true, title: 'Discord verbunden', text: 'Dein Discord-Konto ist verknüpft und du bist Mitglied auf unserem Server.' },
       linked_not_member: { ok: false, title: 'Verknüpft – aber noch kein Mitglied', text: 'Dein Discord-Konto ist verknüpft. Tritt jetzt unserem Discord-Server bei und klicke auf „Erneut prüfen“.' },

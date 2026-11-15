@@ -1,5 +1,5 @@
 import { ArrowUpRight } from 'lucide-react';
-import type { Locale, PublicSiteDTO } from '@chfree/shared';
+import type { Locale, PublicSiteDTO, UserDTO } from '@chfree/shared';
 import { getDict } from '@/i18n';
 import { cn } from '@/lib/utils';
 
@@ -12,26 +12,51 @@ export function DiscordIcon({ className }: { className?: string }) {
   );
 }
 
-/** Hinweis „Mitglied auf unserem Discord-Server“ – erscheint nur, wenn die Pflicht eingeschaltet ist */
-export function DiscordRequiredNote({ site, lang, className }: { site: PublicSiteDTO; lang: Locale; className?: string }) {
+/**
+ * Hinweis „Mitglied auf unserem Discord-Server“ – erscheint nur, wenn die Pflicht eingeschaltet ist.
+ * Erklärt den Ablauf: Geprüft wird über die Verknüpfung des Discord-Kontos, nicht über den Einladungslink.
+ * Wer angemeldet ist und noch nicht verknüpft hat, bekommt den Button zum Verbinden direkt hier.
+ */
+export function DiscordRequiredNote({ site, lang, user, className }: { site: PublicSiteDTO; lang: Locale; user?: UserDTO | null; className?: string }) {
   if (!site.discord.required) return null;
   const t = getDict(lang).discord;
   const text = site.discord.note[lang] || site.discord.note[lang === 'de' ? 'en' : 'de'] || t.noteText;
   const invite = site.discord.inviteUrl ?? site.brand.discordUrl;
+  const linked = user?.discord ?? null;
   return (
-    <div className={cn('flex flex-col gap-4 rounded-xl border border-[#5865f2]/35 bg-[#5865f2]/[0.08] p-5 sm:flex-row sm:items-center sm:justify-between', className)}>
+    <div className={cn('rounded-xl border border-[#5865f2]/35 bg-[#5865f2]/[0.08] p-5', className)}>
       <div className="flex gap-3.5">
         <DiscordIcon className="mt-0.5 size-6 shrink-0 text-[#8b93ff]" />
-        <div>
+        <div className="min-w-0">
           <p className="text-[15px] font-semibold text-white">{t.noteTitle}</p>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">{text}</p>
+          {linked ? (
+            <p className="mt-3 text-sm font-medium text-emerald-300">{t.noteLinked(linked.username)}</p>
+          ) : (
+            <>
+              <ol className="mt-3 max-w-2xl list-decimal space-y-1 pl-5 text-sm leading-relaxed text-gray-200">
+                {t.noteSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-subtle">{t.noteInviteOnly}</p>
+            </>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {user && !linked && (
+              // Normaler Link: Die API leitet zu Discord weiter und danach zurück zu „Meine Server“
+              <a href={`/api/v1/discord/connect?lang=${lang}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#5865f2] px-3.5 text-sm font-medium text-white hover:bg-[#6b76f5]">
+                <DiscordIcon className="size-4" /> {t.connect}
+              </a>
+            )}
+            {invite && (
+              <a href={invite} target="_blank" rel="noopener" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white/[0.03] px-3.5 text-sm font-medium text-white hover:bg-white/[0.07]">
+                {t.noteButton} <ArrowUpRight className="size-4" aria-hidden />
+              </a>
+            )}
+          </div>
         </div>
       </div>
-      {invite && (
-        <a href={invite} target="_blank" rel="noopener" className="inline-flex h-9 shrink-0 items-center gap-1.5 self-start rounded-lg border border-line-strong bg-white/[0.03] px-3.5 text-sm font-medium text-white hover:bg-white/[0.07] sm:self-auto">
-          {t.noteButton} <ArrowUpRight className="size-4" aria-hidden />
-        </a>
-      )}
     </div>
   );
 }
