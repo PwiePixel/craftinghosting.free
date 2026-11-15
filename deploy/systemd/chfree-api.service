@@ -1,0 +1,17 @@
+[Unit]
+Description=CraftingHosting.free API
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=chfree
+WorkingDirectory=/opt/craftinghosting-free/apps/api
+EnvironmentFile=/opt/craftinghosting-free/.env
+Environment=NODE_ENV=production
+Environment=RUN_JOBS_IN_API=false
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+{
+  "name": "craftinghosting-free",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CraftingHosting.free – kostenloses Minecraft-Hosting von CraftingHosting (Web, API, Worker)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,cyan \"npm:dev -w @chfree/api\" \"npm:dev -w @chfree/web\"",
+    "dev:api": "npm run dev -w @chfree/api",
+    "dev:web": "npm run dev -w @chfree/web",
+    "dev:worker": "npm run worker:dev -w @chfree/api",
+    "build": "npm run build -w @chfree/api && npm run build -w @chfree/web",
+    "start:api": "npm run start -w @chfree/api",
+    "start:worker": "npm run worker -w @chfree/api",
+    "start:web": "npm run start -w @chfree/web",
+    "db:generate": "npm run db:generate -w @chfree/api",
+    "db:migrate": "npm run db:migrate -w @chfree/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

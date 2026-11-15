@@ -1,0 +1,643 @@
+/**
+ * Admin-Bereich: Übersicht, Listen und Eingriffe (Sperren, Verlängern, Pause aufheben …).
+ * Jede Aktion wird im Audit-Log mit actor = admin protokolliert.
+ */
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, like, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import {
+  ADMIN_PAGE_SIZE,
+  cycleEndFrom,
+  freeHostingConfig,
+  type AdminAuditDTO,
+  type AdminJobDTO,
+  type AdminMailDTO,
+  type AdminOverviewDTO,
+  type AdminServerDTO,
+  type AdminUserDTO,
+  type AdminWaitlistDTO,
+  type AdminWaitlistBlockDTO,
+  type AdminIncidentInput,
+  type StatusIncidentDTO,
+  tierForPosition,
+  websiteEpycSlots,
+  type PageInfo,
+} from '@chfree/shared';
+import { adminEmails, env, mailFrom, panelPublicUrl, smtpSecure } from '../env';
+import { affectedRows, db } from '../db/client';
+import { auditLogs, jobRuns, notifications, servers, statusIncidents, users, type Server, type User } from '../db/schema';
+import { uuid } from '../lib/crypto';
+import { getSettings, waitlistRank } from './settings.service';
+import { toIncidentDTO } from './status.service';
+import { ApiError, Errors, L } from '../lib/errors';
+import { isAdmin } from '../plugins/auth';
+import { deleteAccount } from './account.service';
+import { allJobs } from '../jobs/registry';
+import { pterodactyl } from '../pterodactyl';
+import { audit } from './audit.service';
+import { sendMail } from './mail/mailer';
+import { notificationMail } from './mail/templates';
+import { trySyncPanelDescription } from './panel';
+import { hardDeleteServer } from './server.service';
+import { destroyAllSessions } from './session.service';
+
+const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+const panelServerAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/servers/view/${id}` : null);
+const panelUserAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/users/view/${id}` : null);
+const escapeLike = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/* ------------------------------------------------------------------ Übersicht */
+
+async function jobStatus(now: Date): Promise<AdminJobDTO[]> {
+  return Promise.all(
+    allJobs.map(async (job) => {
+      const [last] = await db.select().from(jobRuns).where(eq(jobRuns.job, job.name)).orderBy(desc(jobRuns.startedAt)).limit(1);
+      const [lastFailed] =
+        last?.status === 'failed' ? [last] : await db.select().from(jobRuns).where(and(eq(jobRuns.job, job.name), eq(jobRuns.status, 'failed'))).orderBy(desc(jobRuns.startedAt)).limit(1);
+      return {
+        name: job.name,
+        intervalSeconds: Math.round(job.intervalMs / 1000),
+        lastStatus: last?.status ?? null,
+        lastStartedAt: iso(last?.startedAt),
+        lastFinishedAt: iso(last?.finishedAt),
+        lastError: last?.status === 'failed' ? (last.error ?? null) : lastFailed && last && lastFailed.startedAt > new Date(now.getTime() - 3600_000) ? lastFailed.error : null,
+        stale: !last || now.getTime() - last.startedAt.getTime() > job.intervalMs * 3 + 60_000,
+      };
+    }),
+  );
+}
+
+export async function getOverview(): Promise<AdminOverviewDTO> {
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 86400_000);
+  const [u] = await db
+    .select({
+      total: count(),
+      verified: sql<number>`sum(${users.emailVerifiedAt} is not null)`,
+      locked: sql<number>`sum(${users.status} = 'locked')`,
+      admins: sql<number>`sum(${users.role} = 'admin')`,
+      newLast7Days: sql<number>`sum(${users.createdAt} >= ${weekAgo})`,
+    })
+    .from(users);
+  const statusRows = await db.select({ status: servers.status, n: count() }).from(servers).groupBy(servers.status);
+  const byStatus = Object.fromEntries(statusRows.map((r) => [r.status, Number(r.n)]));
+  const [live] = await db
+    .select({
+      online: sql<number>`sum(${servers.powerState} in ('running','starting') and ${servers.status} = 'active')`,
+      paused: sql<number>`sum(${servers.pausedUntil} > ${now} and ${servers.status} = 'active')`,
+    })
+    .from(servers);
+  const planRows = await db
+    .select({ planId: servers.planId, n: count() })
+    .from(servers)
+    .where(inArray(servers.status, ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended']))
+    .groupBy(servers.planId);
+  const [mailPending] = await db.select({ n: count() }).from(notifications).where(eq(notifications.emailStatus, 'pending'));
+  const [mailFailed] = await db.select({ n: count() }).from(notifications).where(eq(notifications.emailStatus, 'failed'));
+  const [lastMailError] = await db
+    .select({ e: notifications.emailLastError })
+    .from(notifications)
+    .where(isNotNull(notifications.emailLastError))
+    .orderBy(desc(notifications.createdAt))
+    .limit(1);
+
+  const settings = await getSettings();
+  const [wlc] = await db.select({ n: count() }).from(servers).where(and(eq(servers.status, 'waitlist'), isNotNull(servers.waitlistPosition)));
+  const [wlu] = await db.select({ n: count() }).from(servers).where(and(eq(servers.status, 'waitlist'), sql`${servers.waitlistPosition} is null`));
+  return {
+    site: {
+      maintenance: settings.maintenance.enabled,
+      registrationMode: settings.registration.mode,
+      maxServersPerUser: settings.registration.maxServersPerUser,
+      waitlistConfirmed: Number(wlc?.n ?? 0),
+      waitlistUnconfirmed: Number(wlu?.n ?? 0),
+    },
+    users: {
+      total: Number(u?.total ?? 0),
+      verified: Number(u?.verified ?? 0),
+      locked: Number(u?.locked ?? 0),
+      admins: Number(u?.admins ?? 0),
+      newLast7Days: Number(u?.newLast7Days ?? 0),
+    },
+    servers: {
+      byStatus,
+      online: Number(live?.online ?? 0),
+      paused: Number(live?.paused ?? 0),
+      total: Object.entries(byStatus).reduce((a, [k, v]) => (k === 'deleted' ? a : a + v), 0),
+    },
+    plans: freeHostingConfig.plans.map((p) => ({
+      id: p.id,
+      name: p.name,
+      count: Number(planRows.find((r) => r.planId === p.id)?.n ?? 0),
+      reserved: settings.plans[p.id]?.reserved ?? 0,
+      capacity: settings.plans[p.id] ? settings.plans[p.id]!.capacity : p.capacity,
+    })),
+    mails: { pending: Number(mailPending?.n ?? 0), failed: Number(mailFailed?.n ?? 0), lastError: lastMailError?.e ?? null },
+    jobs: await jobStatus(now),
+    system: {
+      pterodactylMode: pterodactyl().mode,
+      panelUrl: panelPublicUrl,
+      smtpConfigured: !!env.SMTP_HOST,
+      smtpTarget: env.SMTP_HOST ? `${env.SMTP_HOST}:${env.SMTP_PORT} (${smtpSecure ? 'SSL' : 'STARTTLS'}) · ${env.SMTP_USER ?? '–'}` : null,
+      mailFrom,
+      adminEmailsConfigured: adminEmails.size,
+    },
+  };
+}
+
+/* --------------------------------------------------------------------- Listen */
+
+/** Seite → Offset (50 pro Seite) und Seiteninfos */
+function paging(page: number | undefined, total: number): PageInfo & { offset: number } {
+  const pages = Math.max(1, Math.ceil(total / ADMIN_PAGE_SIZE));
+  const p = Math.min(Math.max(1, Math.floor(page ?? 1)), pages);
+  return { page: p, pageSize: ADMIN_PAGE_SIZE, total, pages, offset: (p - 1) * ADMIN_PAGE_SIZE };
+}
+
+export async function listServersAdmin(filter: { q?: string; status?: string; page?: number }): Promise<{ servers: AdminServerDTO[] } & PageInfo> {
+  const conds: SQL[] = [];
+  if (filter.status && filter.status !== 'all') conds.push(eq(servers.status, filter.status as Server['status']));
+  else conds.push(ne(servers.status, 'deleted'));
+  if (filter.q?.trim()) {
+    const q = escapeLike(filter.q.trim());
+    conds.push(or(like(servers.name, q), like(users.email, q), like(servers.id, q), like(servers.address, q))!);
+  }
+  const [totalRow] = await db
+    .select({ n: count() })
+    .from(servers)
+    .innerJoin(users, eq(users.id, servers.userId))
+    .where(and(...conds));
+  const { offset, ...info } = paging(filter.page, Number(totalRow?.n ?? 0));
+  const rows = await db
+    .select({ s: servers, email: users.email, locale: users.locale })
+    .from(servers)
+    .innerJoin(users, eq(users.id, servers.userId))
+    .where(and(...conds))
+    .orderBy(desc(servers.createdAt), desc(servers.id))
+    .limit(ADMIN_PAGE_SIZE)
+    .offset(offset);
+  const list = rows.map(({ s, email, locale }) => ({
+    id: s.id,
+    name: s.name,
+    ownerId: s.userId,
+    ownerEmail: email,
+    ownerLocale: locale,
+    planId: s.planId,
+    serverType: s.serverType,
+    version: s.version,
+    status: s.status,
+    suspensionReason: s.suspensionReason,
+    powerState: s.powerState,
+    address: s.address,
+    cycleNumber: s.cycleNumber,
+    cycleEndsAt: s.cycleEndsAt.toISOString(),
+    reactivationCount: s.reactivationCount,
+    suspendedAt: iso(s.suspendedAt),
+    pausedUntil: iso(s.pausedUntil),
+    pauseReason: s.pauseReason,
+    provisioningAttempts: s.provisioningAttempts,
+    provisioningError: s.provisioningError,
+    panelDescription: s.panelDescription,
+    pteroServerId: s.pteroServerId,
+    panelAdminUrl: panelServerAdminUrl(s.pteroServerId),
+    createdAt: s.createdAt.toISOString(),
+  }));
+  return { servers: list, ...info };
+}
+
+/** Filter der Nutzerliste (schnelles Aufräumen, z. B. nie bestätigte Konten) */
+export const USER_FILTERS = {
+  unverified: 'E-Mail unbestätigt',
+  'no-servers': 'ohne Server',
+  waitlist: 'auf der Warteliste',
+  locked: 'gesperrt',
+  admins: 'Admins',
+} as const;
+
+/**
+ * Server je Nutzer als Unterabfrage. Bewusst mit festen Tabellen-Aliasen: Drizzle lässt bei Abfragen auf nur
+ * eine Tabelle den Tabellennamen weg – aus `servers.user_id = users.id` würde sonst `user_id = id` (falsch).
+ */
+const userServerCount = sql<number>`(select count(*) from \`servers\` s_cnt where s_cnt.\`user_id\` = \`users\`.\`id\` and s_cnt.\`status\` <> 'deleted')`;
+
+/** Admin = Rolle in der Datenbank oder Adresse in ADMIN_EMAILS */
+function adminCond(): SQL {
+  const emails = [...adminEmails];
+  return emails.length ? or(eq(users.role, 'admin'), inArray(users.email, emails))! : eq(users.role, 'admin');
+}
+
+/** Suche + Filter der Nutzerliste (auch für „Alle Treffer löschen“) */
+function userConds(filter: { q?: string; status?: string }): SQL[] {
+  const conds: SQL[] = [];
+  if (filter.q?.trim()) conds.push(or(like(users.email, escapeLike(filter.q.trim())), like(users.pteroUsername, escapeLike(filter.q.trim())))!);
+  if (filter.status === 'unverified') conds.push(isNull(users.emailVerifiedAt));
+  if (filter.status === 'locked') conds.push(eq(users.status, 'locked'));
+  if (filter.status === 'admins') conds.push(adminCond());
+  if (filter.status === 'no-servers') conds.push(sql`${userServerCount} = 0`);
+  if (filter.status === 'waitlist') conds.push(sql`exists (select 1 from \`servers\` s_wl where s_wl.\`user_id\` = \`users\`.\`id\` and s_wl.\`status\` = 'waitlist')`);
+  return conds;
+}
+
+export async function listUsersAdmin(
+  filter: { q?: string; status?: string; page?: number },
+): Promise<{ users: AdminUserDTO[]; deletable: number } & PageInfo> {
+  const serverCount = userServerCount;
+  const conds = userConds(filter);
+  const where = conds.length ? and(...conds) : undefined;
+  const [totalRow] = await db.select({ n: count() }).from(users).where(where);
+  // Treffer ohne Admins – so viele Konten würde „Alle Treffer löschen“ entfernen
+  const [deletableRow] = await db
+    .select({ n: count() })
+    .from(users)
+    .where(and(...conds, sql`not (${adminCond()})`));
+  const { offset, ...info } = paging(filter.page, Number(totalRow?.n ?? 0));
+  const rows = await db
+    .select({ u: users, servers: serverCount })
+    .from(users)
+    .where(where)
+    .orderBy(desc(users.createdAt), desc(users.id))
+    .limit(ADMIN_PAGE_SIZE)
+    .offset(offset);
+  const list = rows.map(({ u, servers: n }): AdminUserDTO => ({
+    id: u.id,
+    email: u.email,
+    role: u.role === 'admin' || adminEmails.has(u.email.toLowerCase()) ? 'admin' : 'user',
+    status: u.status,
+    locale: u.locale,
+    emailVerified: !!u.emailVerifiedAt,
+    panelUsername: u.pteroUsername,
+    pteroUserId: u.pteroUserId,
+    panelAdminUrl: panelUserAdminUrl(u.pteroUserId),
+    servers: Number(n),
+    lastLoginAt: iso(u.lastLoginAt),
+    createdAt: u.createdAt.toISOString(),
+  }));
+  return { users: list, deletable: Number(deletableRow?.n ?? 0), ...info };
+}
+
+export async function listAudit(filter: { q?: string; page?: number }): Promise<{ entries: AdminAuditDTO[] } & PageInfo> {
+  const q = filter.q?.trim() ? escapeLike(filter.q.trim()) : null;
+  const where = q ? or(like(auditLogs.message, q), like(auditLogs.action, q), like(users.email, q), like(auditLogs.serverId, q)) : undefined;
+  const [totalRow] = await db.select({ n: count() }).from(auditLogs).leftJoin(users, eq(users.id, auditLogs.userId)).where(where);
+  const { offset, ...info } = paging(filter.page, Number(totalRow?.n ?? 0));
+  const rows = await db
+    .select({ a: auditLogs, email: users.email })
+    .from(auditLogs)
+    .leftJoin(users, eq(users.id, auditLogs.userId))
+    .where(where)
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+    .limit(ADMIN_PAGE_SIZE)
+    .offset(offset);
+  const list = rows.map(({ a, email }) => ({
+    id: a.id,
+    createdAt: a.createdAt.toISOString(),
+    actor: a.actor,
+    action: a.action,
+    message: a.message,
+    userEmail: email ?? null,
+    serverId: a.serverId,
+    ip: a.ip,
+  }));
+  return { entries: list, ...info };
+}
+
+export async function listMailProblems(): Promise<AdminMailDTO[]> {
+  const rows = await db
+    .select({ n: notifications, email: users.email })
+    .from(notifications)
+    .innerJoin(users, eq(users.id, notifications.userId))
+    .where(inArray(notifications.emailStatus, ['pending', 'failed']))
+    .orderBy(desc(notifications.createdAt))
+    .limit(100);
+  return rows.map(({ n, email }) => ({
+    id: n.id,
+    createdAt: n.createdAt.toISOString(),
+    type: n.type,
+    title: n.title,
+    userEmail: email,
+    emailStatus: n.emailStatus,
+    emailAttempts: n.emailAttempts,
+    emailLastError: n.emailLastError,
+  }));
+}
+
+/* -------------------------------------------------------------------- Aktionen */
+
+async function getServer(id: string): Promise<Server> {
+  const [server] = await db.select().from(servers).where(and(eq(servers.id, id), ne(servers.status, 'deleted'))).limit(1);
+  if (!server) throw Errors.notFound(L('Server nicht gefunden.', 'Server not found.'));
+  return server;
+}
+
+async function getUserById(id: string): Promise<User> {
+  const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  if (!user) throw Errors.notFound(L('Nutzer nicht gefunden.', 'User not found.'));
+  return user;
+}
+
+const stateChanged = () =>
+  Errors.conflict('state_changed', L('Der Status hat sich inzwischen geändert – bitte neu laden.', 'The status has changed in the meantime – please reload.'));
+
+export type ServerAction = 'suspend' | 'unsuspend' | 'extend' | 'clear-pause' | 'retry' | 'delete';
+
+export async function serverAction(admin: User, id: string, action: ServerAction, ip?: string): Promise<void> {
+  const server = await getServer(id);
+  const now = new Date();
+  const ptero = pterodactyl();
+  const log = (act: string, message: string) => audit({ userId: server.userId, serverId: server.id, actor: 'admin', action: act, message: `${message} (durch ${admin.email})`, ip });
+
+  switch (action) {
+    case 'suspend': {
+      const res = await db
+        .update(servers)
+        .set({ status: 'suspended', suspensionReason: 'admin', suspendedAt: now, expiringSince: null })
+        .where(and(eq(servers.id, id), inArray(servers.status, ['active', 'expiring'])));
+      if (affectedRows(res) !== 1) throw stateChanged();
+      // Pterodactyl stoppt den Server beim Sperren; die Laufzeit-Session schließt der Power-Sync
+      if (server.pteroServerId) await ptero.suspendServer(server.pteroServerId).catch(() => {});
+      await trySyncPanelDescription(server.id);
+      await log('admin.server_suspended', `Server „${server.name}“ vom Team gesperrt`);
+      return;
+    }
+    case 'unsuspend': {
+      const newCycle = server.cycleEndsAt <= now;
+      const res = await db
+        .update(servers)
+        .set({
+          status: 'active',
+          suspensionReason: null,
+          suspendedAt: null,
+          expiringSince: null,
+          ...(newCycle ? { cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFrom(now, freeHostingConfig.cycle) } : {}),
+        })
+        .where(and(eq(servers.id, id), eq(servers.status, 'suspended')));
+      if (affectedRows(res) !== 1) throw stateChanged();
+      if (server.pteroServerId) await ptero.unsuspendServer(server.pteroServerId).catch(() => {});
+      await trySyncPanelDescription(server.id);
+      await log('admin.server_unsuspended', `Server „${server.name}“ entsperrt${newCycle ? ' – neuer Zyklus gestartet' : ''}`);
+      return;
+    }
+    case 'extend': {
+      if (!['active', 'expiring', 'suspended'].includes(server.status) || (server.status === 'suspended' && server.suspensionReason !== 'cycle_expired')) {
+        throw Errors.conflict('not_extendable', L('Dieser Server kann nicht verlängert werden (gesperrt oder noch nicht eingerichtet).', 'This server cannot be extended.'));
+      }
+      const wasSuspended = server.status !== 'active';
+      const res = await db
+        .update(servers)
+        .set({
+          status: 'active',
+          suspensionReason: null,
+          suspendedAt: null,
+          expiringSince: null,
+          cycleNumber: server.cycleNumber + 1,
+          cycleStartedAt: now,
+          cycleEndsAt: cycleEndFrom(now, freeHostingConfig.cycle),
+          ...(wasSuspended ? { reactivationCount: server.reactivationCount + 1, lastReactivatedAt: now } : {}),
+        })
+        .where(and(eq(servers.id, id), eq(servers.status, server.status)));
+      if (affectedRows(res) !== 1) throw stateChanged();
+      if (wasSuspended && server.pteroServerId) await ptero.unsuspendServer(server.pteroServerId).catch(() => {});
+      await trySyncPanelDescription(server.id);
+      await log('admin.server_extended', `Server „${server.name}“ um ${freeHostingConfig.cycle.days} Tage verlängert (Zyklus ${server.cycleNumber + 1})`);
+      return;
+    }
+    case 'clear-pause': {
+      await db.update(servers).set({ pausedUntil: null, pauseReason: null, pausedAt: null }).where(eq(servers.id, id));
+      await trySyncPanelDescription(server.id);
+      await log('admin.pause_cleared', `Fair-Use-Pause von „${server.name}“ aufgehoben`);
+      return;
+    }
+    case 'retry': {
+      const res = await db
+        .update(servers)
+        .set({ provisioningAttempts: 0, lastProvisionAttemptAt: null, provisioningError: null })
+        .where(and(eq(servers.id, id), eq(servers.status, 'provisioning_failed')));
+      if (affectedRows(res) !== 1) throw stateChanged();
+      await log('admin.provisioning_retry', `Einrichtung von „${server.name}“ wird erneut versucht`);
+      return;
+    }
+    case 'delete': {
+      await hardDeleteServer(server);
+      await log('admin.server_deleted', `Server „${server.name}“ gelöscht`);
+      return;
+    }
+  }
+}
+
+export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin';
+
+/**
+ * Konten löschen (einzeln oder mehrere). Übersprungen werden das eigene Konto und Admins
+ * (erst die Admin-Rechte entfernen) sowie Konten, deren Server im Panel gerade nicht gelöscht werden können.
+ */
+export async function deleteUsersAdmin(
+  admin: User,
+  target: { ids?: string[]; emails?: string[] },
+  ip?: string,
+): Promise<{ deleted: number; servers: number; skipped: { email: string; reason: string }[] }> {
+  const result = { deleted: 0, servers: 0, skipped: [] as { email: string; reason: string }[] };
+  const ids = [...new Set(target.ids ?? [])];
+  const emails = [...new Set((target.emails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  const rows = [
+    ...(ids.length ? await db.select().from(users).where(inArray(users.id, ids)) : []),
+    ...(emails.length ? await db.select().from(users).where(inArray(users.email, emails)) : []),
+  ].filter((u, i, all) => all.findIndex((x) => x.id === u.id) === i);
+  // Adressen aus der Liste, zu denen es kein Konto gibt
+  for (const e of emails) if (!rows.some((u) => u.email === e)) result.skipped.push({ email: e, reason: 'kein Konto gefunden' });
+  for (const user of rows) {
+    if (user.id === admin.id) {
+      result.skipped.push({ email: user.email, reason: 'dein eigenes Konto' });
+      continue;
+    }
+    if (isAdmin(user)) {
+      result.skipped.push({ email: user.email, reason: adminEmails.has(user.email.toLowerCase()) ? 'Admin über ADMIN_EMAILS' : 'Admin – erst Admin-Rechte entfernen' });
+      continue;
+    }
+    try {
+      const r = await deleteAccount(user, { admin }, ip);
+      result.deleted++;
+      result.servers += r.servers;
+    } catch (err) {
+      result.skipped.push({ email: user.email, reason: err instanceof ApiError ? err.message : 'Fehler beim Löschen' });
+    }
+  }
+  return result;
+}
+
+/**
+ * „Alle Treffer löschen“: löscht bis zu `limit` Konten, die zu Suche/Filter passen (ohne Admins und dich selbst).
+ * Die Website ruft das in Runden auf, bis nichts mehr übrig ist – so gibt es eine Fortschrittsanzeige und keine Zeitüberschreitung.
+ */
+export async function deleteMatchingUsers(
+  admin: User,
+  filter: { q?: string; status?: string },
+  limit: number,
+  ip?: string,
+): Promise<{ deleted: number; servers: number; skipped: { email: string; reason: string }[]; remaining: number }> {
+  const conds = [...userConds(filter), sql`not (${adminCond()})`, ne(users.id, admin.id)];
+  const batch = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(...conds))
+    .orderBy(desc(users.createdAt), desc(users.id))
+    .limit(Math.max(1, Math.min(200, limit)));
+  const res = await deleteUsersAdmin(admin, { ids: batch.map((b) => b.id) }, ip);
+  const [left] = await db.select({ n: count() }).from(users).where(and(...conds));
+  return { ...res, remaining: Number(left?.n ?? 0) };
+}
+
+export async function userAction(admin: User, id: string, action: UserAction, ip?: string): Promise<void> {
+  const user = await getUserById(id);
+  if (user.id === admin.id && (action === 'lock' || action === 'remove-admin')) {
+    throw Errors.badRequest('self', L('Das geht nicht mit deinem eigenen Konto.', 'You cannot do this with your own account.'));
+  }
+  const log = (act: string, message: string) => audit({ userId: user.id, actor: 'admin', action: act, message: `${message} (durch ${admin.email})`, ip });
+  switch (action) {
+    case 'lock':
+      await db.update(users).set({ status: 'locked' }).where(eq(users.id, id));
+      await destroyAllSessions(id);
+      await log('admin.user_locked', `Konto ${user.email} gesperrt`);
+      return;
+    case 'unlock':
+      await db.update(users).set({ status: 'active' }).where(eq(users.id, id));
+      await log('admin.user_unlocked', `Konto ${user.email} entsperrt`);
+      return;
+    case 'make-admin':
+      await db.update(users).set({ role: 'admin' }).where(eq(users.id, id));
+      await log('admin.role_changed', `${user.email} ist jetzt Admin`);
+      return;
+    case 'remove-admin':
+      await db.update(users).set({ role: 'user' }).where(eq(users.id, id));
+      await log('admin.role_changed', `${user.email} ist kein Admin mehr`);
+      return;
+  }
+}
+
+/** Testmail aus dem Admin-Bereich */
+export async function sendTestMail(to: string): Promise<void> {
+  const mail = notificationMail(
+    'Testmail von CraftingHosting.free',
+    'Wenn du diese E-Mail liest, funktioniert der Versand.',
+    { label: 'craftinghosting.free', url: env.APP_URL },
+    'de',
+  );
+  await sendMail(to, mail);
+}
+
+/* ------------------------------------------------------------------ Warteliste */
+
+/** Vormerkungs-Blöcke außerhalb der Website mit den Plätzen (von–bis), die sie gerade belegen */
+export async function listExternalBlocks(): Promise<AdminWaitlistBlockDTO[]> {
+  const s = await getSettings();
+  const blocks = s.waitlist.blocks;
+  return Promise.all(
+    blocks.map(async (b, i) => {
+      const after = b.after ?? 0;
+      const [row] = await db
+        .select({ n: count() })
+        .from(servers)
+        .where(and(isNotNull(servers.waitlistPosition), ne(servers.status, 'deleted'), lte(servers.waitlistPosition, after)));
+      const earlier = blocks.reduce((sum, o, j) => (o.after !== null && (o.after < after || (o.after === after && j < i)) ? sum + o.count : sum), 0);
+      const fromRank = Number(row?.n ?? 0) + earlier + 1;
+      return { after, count: b.count, at: b.at, fromRank, toRank: fromRank + b.count - 1 };
+    }),
+  );
+}
+
+/**
+ * Warteliste seitenweise (50 pro Seite) – mit den Vormerkungs-Blöcken, die auf diese Seite fallen:
+ * Ein Block steht vor dem ersten Eintrag, dessen Position hinter dem Block liegt.
+ */
+export async function listWaitlistPage(page = 1): Promise<{ entries: AdminWaitlistDTO[]; blocks: AdminWaitlistBlockDTO[] } & PageInfo> {
+  const [totalRow] = await db.select({ n: count() }).from(servers).where(eq(servers.status, 'waitlist'));
+  const { offset, ...info } = paging(page, Number(totalRow?.n ?? 0));
+  const order = [sql`${servers.waitlistPosition} is null`, asc(servers.waitlistPosition), asc(servers.createdAt), asc(servers.id)];
+  const [entries, prev, allBlocks] = await Promise.all([
+    listWaitlist({ offset, limit: ADMIN_PAGE_SIZE }),
+    offset > 0
+      ? db.select({ p: servers.waitlistPosition }).from(servers).where(eq(servers.status, 'waitlist')).orderBy(...order).limit(1).offset(offset - 1)
+      : Promise.resolve([] as { p: number | null }[]),
+    listExternalBlocks(),
+  ]);
+  const INF = Number.POSITIVE_INFINITY;
+  const low = offset > 0 ? (prev[0]?.p ?? INF) : -INF;
+  const last = entries.at(-1);
+  const high = last ? (last.position ?? INF) : INF;
+  const isLast = info.page === info.pages;
+  const blocks = allBlocks.filter((b) => b.after >= low && (b.after < high || isLast));
+  return { entries, blocks, ...info };
+}
+
+export async function listWaitlist(opts: { offset?: number; limit?: number } = {}): Promise<AdminWaitlistDTO[]> {
+  const settings = await getSettings();
+  const rows = await db
+    .select({ s: servers, email: users.email, locale: users.locale, ptero: users.pteroUserId })
+    .from(servers)
+    .innerJoin(users, eq(users.id, servers.userId))
+    .where(eq(servers.status, 'waitlist'))
+    .orderBy(sql`${servers.waitlistPosition} is null`, asc(servers.waitlistPosition), asc(servers.createdAt), asc(servers.id))
+    .limit(opts.limit ?? ADMIN_PAGE_SIZE)
+    .offset(opts.offset ?? 0);
+  return Promise.all(
+    rows.map(async ({ s, email, locale, ptero }) => {
+      const rank = s.waitlistPosition != null ? await waitlistRank(s.waitlistPosition) : null;
+      return {
+        id: s.id,
+        name: s.name,
+        email,
+        locale,
+        planId: s.planId,
+        serverType: s.serverType,
+        version: s.version,
+        position: s.waitlistPosition,
+        rank,
+        tier: rank ? tierForPosition(rank, websiteEpycSlots(settings.waitlist)) : null,
+        panelLinked: !!ptero,
+        joinedAt: iso(s.waitlistJoinedAt),
+        createdAt: s.createdAt.toISOString(),
+      };
+    }),
+  );
+}
+
+/* ------------------------------------------------------------------ Statusseite */
+
+export async function listIncidents(): Promise<StatusIncidentDTO[]> {
+  const rows = await db.select().from(statusIncidents).orderBy(desc(statusIncidents.startsAt)).limit(100);
+  const now = new Date();
+  return rows.map((r) => toIncidentDTO(r, now));
+}
+
+function incidentValues(input: AdminIncidentInput) {
+  return {
+    kind: input.kind,
+    impact: input.impact,
+    components: input.components,
+    titleEn: (input.title.en || input.title.de).trim(),
+    titleDe: (input.title.de || input.title.en).trim(),
+    messageEn: (input.message.en || input.message.de).trim(),
+    messageDe: (input.message.de || input.message.en).trim(),
+    startsAt: input.startsAt ? new Date(input.startsAt) : new Date(),
+    endsAt: input.endsAt ? new Date(input.endsAt) : null,
+  };
+}
+
+export async function createIncident(admin: User, input: AdminIncidentInput, ip?: string): Promise<void> {
+  const id = uuid();
+  await db.insert(statusIncidents).values({ id, ...incidentValues(input) });
+  await audit({ actor: 'admin', action: 'status.incident_created', message: `Statusmeldung „${input.title.de || input.title.en}“ angelegt (durch ${admin.email})`, ip });
+}
+
+export async function updateIncident(admin: User, id: string, input: AdminIncidentInput, ip?: string): Promise<void> {
+  const res = await db.update(statusIncidents).set(incidentValues(input)).where(eq(statusIncidents.id, id));
+  if (affectedRows(res) !== 1) throw Errors.notFound();
+  await audit({ actor: 'admin', action: 'status.incident_updated', message: `Statusmeldung „${input.title.de || input.title.en}“ geändert (durch ${admin.email})`, ip });
+}
+
+export async function resolveIncident(admin: User, id: string, ip?: string): Promise<void> {
+  await db.update(statusIncidents).set({ resolvedAt: new Date() }).where(eq(statusIncidents.id, id));
+  await audit({ actor: 'admin', action: 'status.incident_resolved', message: `Statusmeldung als erledigt markiert (durch ${admin.email})`, ip });
+}
+
+export async function deleteIncident(admin: User, id: string, ip?: string): Promise<void> {
+  await db.delete(statusIncidents).where(eq(statusIncidents.id, id));
+  await audit({ actor: 'admin', action: 'status.incident_deleted', message: `Statusmeldung gelöscht (durch ${admin.email})`, ip });
+}

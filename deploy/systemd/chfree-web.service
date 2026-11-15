@@ -1,0 +1,17 @@
+[Unit]
+Description=CraftingHosting.free Website (Next.js)
+After=network.target chfree-api.service
+
+[Service]
+Type=simple
+User=chfree
+WorkingDirectory=/opt/craftinghosting-free/apps/web
+EnvironmentFile=/opt/craftinghosting-free/.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=/usr/bin/node .next/standalone/apps/web/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

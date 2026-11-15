@@ -1,0 +1,23 @@
+# Caddy – automatisches HTTPS (Let's Encrypt) für craftinghosting.free
+# /api/* geht direkt an die API, alles andere an die Next.js-Website.
+
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	@www host www.{$SITE_DOMAIN}
+	redir @www https://{$SITE_DOMAIN}{uri} permanent
+
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		-Server
+	}
+
+	# Bewusst keine Zugriffsprotokolle (Datenschutz) – Caddy schreibt nur Fehler ins Log.
+}

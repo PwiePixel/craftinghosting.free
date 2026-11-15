@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.pterodactyl-mock.json
+*.tsbuildinfo
+next-env.d.ts
+coverage/

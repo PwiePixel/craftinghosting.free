@@ -1,0 +1,43 @@
+{
+  "name": "@chfree/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CraftingHosting.free API + Worker (Fastify, Drizzle/MariaDB, Pterodactyl)",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "worker:dev": "tsx watch --clear-screen=false src/worker.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "worker": "node dist/worker.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:prod": "node dist/migrate.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "cli": "tsx src/cli.ts",
+    "cli:prod": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@chfree/shared": "*",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^11.2.0",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.0",
+    "fastify": "^5.6.1",
+    "fastify-plugin": "^5.1.0",
+    "mysql2": "^3.15.3",
+    "nodemailer": "^10.0.10",
+    "pino": "^10.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/nodemailer": "^8.0.2",
+    "drizzle-kit": "^0.31.5",
+    "pino-pretty": "^13.1.2",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6"
+  }
+}

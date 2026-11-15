@@ -1,0 +1,17 @@
+{
+  "name": "@chfree/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gemeinsame Konfiguration, Regeln (Fair-Use, 30-Tage-Zyklus), Schemas und Typen",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  }
+}

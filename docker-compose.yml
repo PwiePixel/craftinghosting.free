@@ -1,0 +1,125 @@
+# =============================================================================
+#  CraftingHosting.free – Produktions-Setup für eine KVM / VPS
+#
+#    cp .env.example .env        # Werte anpassen (siehe README)
+#    docker compose up -d --build
+#
+#  Dienste: MariaDB · Migration (einmalig) · API · Worker · Web · Caddy (HTTPS)
+#  Entwicklung mit Mail-Vorschau:  docker compose --profile dev up -d
+# =============================================================================
+
+# Logs rotieren (max. 3 × 10 MB je Dienst) – es werden keine Zugriffsprotokolle geschrieben
+x-logging: &logging
+  driver: json-file
+  options: { max-size: '10m', max-file: '3' }
+
+x-api-env: &api-env
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: mysql://${DB_USER:-chfree}:${DB_PASSWORD:?DB_PASSWORD fehlt}@mariadb:3306/${DB_NAME:-chfree}
+    WEB_INTERNAL_URL: http://web:3000
+    RUN_JOBS_IN_API: 'false'
+    TZ: UTC
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-chfree}
+      MARIADB_USER: ${DB_USER:-chfree}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD fehlt}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD fehlt}
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    logging: *logging
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    image: craftinghosting-free/api:latest
+    <<: *api-env
+    command: ['node', 'dist/migrate.js']
+    restart: 'no'
+    healthcheck: { disable: true }
+    depends_on:
+      mariadb: { condition: service_healthy }
+
+  api:
+    logging: *logging
+    image: craftinghosting-free/api:latest
+    pull_policy: never # wird lokal vom Dienst "migrate" gebaut
+    <<: *api-env
+    restart: unless-stopped
+    volumes:
+      - api-data:/app/data
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    expose: ['4000']
+
+  worker:
+    logging: *logging
+    image: craftinghosting-free/api:latest
+    pull_policy: never # wird lokal vom Dienst "migrate" gebaut
+    <<: *api-env
+    command: ['node', 'dist/worker.js']
+    restart: unless-stopped
+    # Gleiches Volume wie die API – im Mock-Modus teilen sich beide den simulierten Panel-Zustand
+    volumes:
+      - api-data:/app/data
+    # Der Worker hat keinen HTTP-Port – den HEALTHCHECK des API-Images hier abschalten
+    healthcheck: { disable: true }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    logging: *logging
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://craftinghosting.free}
+        NEXT_PUBLIC_PARENT_URL: ${NEXT_PUBLIC_PARENT_URL:-https://crafting.host}
+        NEXT_PUBLIC_PARENT_PRICING_URL: ${NEXT_PUBLIC_PARENT_PRICING_URL:-https://crafting.host/pricing}
+        NEXT_PUBLIC_DISCORD_URL: ${NEXT_PUBLIC_DISCORD_URL:-}
+        NEXT_PUBLIC_STATUS_URL: ${NEXT_PUBLIC_STATUS_URL:-}
+        NEXT_PUBLIC_PANEL_URL: ${NEXT_PUBLIC_PANEL_URL:-https://panel.craftinghosting.free}
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:4000
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-chf_session}
+      # Geheimer Pfad des Admin-Bereichs (nirgends verlinkt) – in der .env ändern, z. B. /team-7f3k9
+      ADMIN_PATH: ${ADMIN_PATH:-/admin}
+    depends_on: [api]
+    expose: ['3000']
+
+  caddy:
+    image: caddy:2-alpine
+    logging: *logging
+    restart: unless-stopped
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-craftinghosting.free}
+    depends_on: [web, api]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ['dev']
+    ports: ['8025:8025', '1025:1025']
+
+volumes:
+  api-data:
+  mariadb-data:
+  caddy-data:
+  caddy-config:

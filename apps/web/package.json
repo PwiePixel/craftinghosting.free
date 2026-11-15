@@ -1,0 +1,33 @@
+{
+  "name": "@chfree/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CraftingHosting.free Website (Next.js)",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build && node scripts/copy-standalone-assets.mjs",
+    "start": "node .next/standalone/apps/web/server.js",
+    "typecheck": "tsc --noEmit",
+    "start:next": "next start --port 3000"
+  },
+  "dependencies": {
+    "@chfree/shared": "*",
+    "@fontsource-variable/inter": "^5.2.8",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.0.0",
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.16",
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "dotenv": "^17.2.3",
+    "tailwindcss": "^4.1.16"
+  }
+}
