@@ -128,6 +128,18 @@ export interface StatusComponentSetting {
   visible: boolean;
 }
 
+/** Nachgetragener Zeitraum im Verlauf, z. B. „vom 1.9. bis 14.10. war alles betriebsbereit“ */
+export interface StatusRangeSetting {
+  /** ID der Komponente oder „*“ für alle */
+  component: string;
+  /** Erster und letzter Tag (YYYY-MM-DD, jeweils einschließlich) */
+  from: string;
+  to: string;
+  state: StatusCategory;
+  /** true = nur Tage ohne Messdaten füllen, gemessene Tage bleiben wie sie sind */
+  onlyEmpty: boolean;
+}
+
 export interface StatusPageSettings {
   /** Überschrift und Einleitung (leer = Standardtext) */
   title: Localized;
@@ -399,6 +411,8 @@ export interface SiteSettings {
     pingNodes: boolean;
     /** Nachträgliche Korrekturen am Verlauf: Komponente → Tag (YYYY-MM-DD) → Zustand */
     history: Record<string, Record<string, StatusCategory>>;
+    /** Nachgetragene Zeiträume – gelten vor den Korrekturen einzelner Tage, spätere Einträge gewinnen */
+    ranges: StatusRangeSetting[];
   };
 }
 

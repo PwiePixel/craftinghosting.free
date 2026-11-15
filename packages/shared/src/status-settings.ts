@@ -14,6 +14,7 @@ import {
   type StatusGroupSetting,
   type StatusIcon,
   type StatusPageSettings,
+  type StatusRangeSetting,
   type StatusSource,
 } from './api-types';
 import type { Localized } from './i18n';
@@ -21,7 +22,7 @@ import type { Localized } from './i18n';
 export type StatusSettings = SiteSettings['status'];
 
 export const statusCategories: StatusCategory[] = ['operational', 'degraded', 'maintenance', 'outage'];
-export const statusLimits = { groups: 12, components: 40, minDays: 7, maxDays: 90, corrections: 200 } as const;
+export const statusLimits = { groups: 12, components: 40, minDays: 7, maxDays: 90, corrections: 200, ranges: 50 } as const;
 
 /** Ordnet den Status einer Komponente einer der vier Kategorien der Legende zu (none = unbekannt) */
 export function statusCategory(status: ComponentStatus): StatusDayState {
@@ -113,7 +114,7 @@ export function defaultStatusComponents(): StatusComponentSetting[] {
 }
 
 export function defaultStatusSettings(): StatusSettings {
-  return { overrides: {}, page: defaultStatusPage(), groups: defaultStatusGroups(), components: defaultStatusComponents(), pingNodes: true, history: {} };
+  return { overrides: {}, page: defaultStatusPage(), groups: defaultStatusGroups(), components: defaultStatusComponents(), pingNodes: true, history: {}, ranges: [] };
 }
 
 /* ------------------------------------------------------------------ Prüfung */
@@ -147,6 +148,8 @@ export function statusIdFromName(name: string, fallback = 'eintrag'): string {
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const HEX = /^#[0-9a-f]{6}$/i;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** Gültiger Kalendertag (kein 31. Februar) */
+const validDay = (v: string) => DAY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const IMPACTS: IncidentImpact[] = ['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance'];
 
 function uniqueId(raw: unknown, name: string, used: Set<string>, fallback: string): string {
@@ -256,5 +259,30 @@ export function normalizeStatusSettings(input: unknown, now = Date.now()): Statu
     if (entries.length) history[id] = Object.fromEntries(entries) as Record<string, StatusCategory>;
   }
 
-  return { overrides, page, groups, components, pingNodes: bool(i.pingNodes, d.pingNodes), history };
+  // Nachgetragene Zeiträume: gültige Tage, bekannte Komponente (oder alle), nichts komplett außerhalb des Verlaufs
+  const ranges: StatusRangeSetting[] = (Array.isArray(i.ranges) ? i.ranges : [])
+    .map((raw): StatusRangeSetting | null => {
+      const r = obj(raw);
+      const a = String(r.from ?? '');
+      const b = String(r.to ?? '');
+      if (!validDay(a) || !validDay(b) || !statusCategories.includes(r.state as StatusCategory)) return null;
+      const component = r.component === '*' ? '*' : String(r.component ?? '');
+      if (component !== '*' && !componentIds.has(component)) return null;
+      const [from, to] = a <= b ? [a, b] : [b, a];
+      if (to < oldest) return null;
+      return { component, from, to, state: r.state as StatusCategory, onlyEmpty: bool(r.onlyEmpty, true) };
+    })
+    .filter((r): r is StatusRangeSetting => r !== null)
+    .slice(-statusLimits.ranges);
+
+  return { overrides, page, groups, components, pingNodes: bool(i.pingNodes, d.pingNodes), history, ranges };
+}
+
+/** Zustand, den die nachgetragenen Zeiträume für einen Tag festlegen (null = keiner). Spätere Einträge gewinnen. */
+export function rangeStateFor(ranges: StatusRangeSetting[], component: string, date: string, hasData: boolean): StatusCategory | null {
+  let state: StatusCategory | null = null;
+  for (const r of ranges) {
+    if ((r.component === '*' || r.component === component) && date >= r.from && date <= r.to && (!r.onlyEmpty || !hasData)) state = r.state;
+  }
+  return state;
 }

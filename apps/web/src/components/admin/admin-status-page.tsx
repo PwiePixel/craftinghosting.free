@@ -24,6 +24,7 @@ import {
   type StatusGroupSetting,
   type StatusIcon,
   type StatusPageSettings,
+  type StatusRangeSetting,
   type StatusSource,
 } from '@chfree/shared';
 import { Labeled, NumberInput, Section, Toggle } from '@/components/admin/admin-settings';
@@ -102,7 +103,7 @@ function toDrafts(status: Status): Draft[] {
 }
 
 /** Formular → Einstellungen. Neue Komponenten bekommen eine ID aus ihrem Namen. */
-function buildStatus(page: StatusPageSettings, groups: StatusGroupSetting[], drafts: Draft[], pingNodes: boolean, history: Status['history']): Status {
+function buildStatus(page: StatusPageSettings, groups: StatusGroupSetting[], drafts: Draft[], pingNodes: boolean, history: Status['history'], ranges: StatusRangeSetting[]): Status {
   const used = new Set(drafts.map((d) => d.id).filter(Boolean));
   const overrides: Status['overrides'] = {};
   const components = drafts
@@ -118,7 +119,7 @@ function buildStatus(page: StatusPageSettings, groups: StatusGroupSetting[], dra
       if (override !== 'auto') overrides[id] = override;
       return { ...c, id };
     });
-  return { overrides, page, groups: groups.filter((g) => g.name.de.trim() || g.name.en.trim()), components, pingNodes, history };
+  return { overrides, page, groups: groups.filter((g) => g.name.de.trim() || g.name.en.trim()), components, pingNodes, history, ranges };
 }
 
 function move<T>(list: T[], index: number, by: number): T[] {
@@ -176,8 +177,9 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
   const [drafts, setDrafts] = useState<Draft[]>(() => toDrafts(initial));
   const [pingNodes, setPingNodes] = useState(initial.pingNodes);
   const [history, setHistory] = useState<Status['history']>(initial.history);
+  const [ranges, setRanges] = useState<StatusRangeSetting[]>(initial.ranges);
   // Vergleichsstand für „ungespeicherte Änderungen“
-  const [baseline, setBaseline] = useState(() => JSON.stringify(buildStatus(initial.page, initial.groups, toDrafts(initial), initial.pingNodes, initial.history)));
+  const [baseline, setBaseline] = useState(() => JSON.stringify(buildStatus(initial.page, initial.groups, toDrafts(initial), initial.pingNodes, initial.history, initial.ranges)));
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [nodes, setNodes] = useState<{ id: number; name: string }[] | null>(null);
@@ -199,7 +201,7 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
     };
   }, [wantsNodes, nodes]);
 
-  const build = () => buildStatus(page, groups, drafts, pingNodes, history);
+  const build = () => buildStatus(page, groups, drafts, pingNodes, history, ranges);
   const dirty = JSON.stringify(build()) !== baseline;
 
   async function onSave() {
@@ -214,7 +216,8 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
       setDrafts(toDrafts(saved));
       setPingNodes(saved.pingNodes);
       setHistory(saved.history);
-      setBaseline(JSON.stringify(buildStatus(saved.page, saved.groups, toDrafts(saved), saved.pingNodes, saved.history)));
+      setRanges(saved.ranges);
+      setBaseline(JSON.stringify(buildStatus(saved.page, saved.groups, toDrafts(saved), saved.pingNodes, saved.history, saved.ranges)));
       setMessage({ ok: true, text: 'Gespeichert. Die Statusseite zeigt die Änderungen sofort.' });
       router.refresh();
     } catch (err) {
@@ -488,6 +491,8 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
         </Button>
       </Section>
 
+      <HistoryRanges drafts={drafts} days={page.days} colors={page.colors} ranges={ranges} onChange={setRanges} />
+
       <HistoryCorrections drafts={drafts} days={page.days} colors={page.colors} history={history} onChange={setHistory} />
 
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-[#0d1017]/95 px-4 py-3 shadow-xl backdrop-blur">
@@ -504,6 +509,105 @@ export function StatusPageEditor({ settings, live, statusPath }: { settings: Sit
         )}
       </div>
     </div>
+  );
+}
+
+const germanDay = (day: string) => day.split('-').reverse().join('.');
+
+/** Einen ganzen Zeitraum nachtragen, z. B. die Zeit vor Beginn der Messung („von – bis war alles betriebsbereit“) */
+function HistoryRanges({
+  drafts,
+  days,
+  colors,
+  ranges,
+  onChange,
+}: {
+  drafts: Draft[];
+  days: number;
+  colors: StatusPageSettings['colors'];
+  ranges: StatusRangeSetting[];
+  onChange: (r: StatusRangeSetting[]) => void;
+}) {
+  const saved = drafts.filter((d) => d.id);
+  const today = new Date().toISOString().slice(0, 10);
+  const oldest = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+  const [component, setComponent] = useState('*');
+  const [from, setFrom] = useState(oldest);
+  const [to, setTo] = useState(today);
+  const [state, setState] = useState<StatusCategory>('operational');
+  const [onlyEmpty, setOnlyEmpty] = useState(true);
+  const names: Record<string, string> = { '*': 'Alle Komponenten', ...Object.fromEntries(saved.map((d) => [d.id, d.name.de || d.name.en])) };
+  const selected = names[component] ? component : '*';
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to);
+
+  function add() {
+    if (!valid || ranges.length >= statusLimits.ranges) return;
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    onChange([...ranges, { component: selected, from: a, to: b, state, onlyEmpty }]);
+  }
+
+  return (
+    <Section
+      title="Verlauf nachtragen: Zeitraum"
+      description="Trage einen ganzen Zeitraum auf einmal nach – zum Beispiel die Zeit, bevor die Messung begonnen hat und alle Dienste online waren. So entstehen keine grauen Lücken ohne Messdaten. Mit „Nur Tage ohne Messdaten“ bleiben gemessene Tage unverändert; ohne den Schalter überschreibt der Zeitraum auch gemessene Tage. Spätere Einträge haben Vorrang vor früheren."
+    >
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_160px_160px_1fr]">
+        <Labeled label="Komponente">
+          <select className="input" value={selected} onChange={(e) => setComponent(e.target.value)}>
+            <option value="*">Alle Komponenten</option>
+            {saved.map((d) => (
+              <option key={d.id} value={d.id}>
+                {names[d.id]}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+        <Labeled label="Von">
+          <input type="date" className="input" value={from} min={oldest} max={today} onChange={(e) => setFrom(e.target.value)} />
+        </Labeled>
+        <Labeled label="Bis">
+          <input type="date" className="input" value={to} min={oldest} max={today} onChange={(e) => setTo(e.target.value)} />
+        </Labeled>
+        <Labeled label="Zustand in diesem Zeitraum">
+          <select className="input" value={state} onChange={(e) => setState(e.target.value as StatusCategory)}>
+            {statusCategories.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_NAME[c]}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <Toggle checked={onlyEmpty} onChange={setOnlyEmpty} label="Nur Tage ohne Messdaten" hint="Empfohlen: Gemessene Tage (auch Ausfälle) bleiben, wie sie sind." />
+        <Button variant="secondary" icon={<Plus />} disabled={!valid || ranges.length >= statusLimits.ranges} onClick={add}>
+          Zeitraum eintragen
+        </Button>
+      </div>
+      <p className="text-[13px] text-subtle">Der Verlauf reicht {days} Tage zurück (bis {germanDay(oldest)}). Wirksam wird der Eintrag erst mit „Statusseite speichern“.</p>
+      {ranges.length > 0 && (
+        <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+          {ranges.map((r, i) => (
+            <li key={`${r.component}:${r.from}:${r.to}:${i}`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+                <span className="text-gray-200 tabular-nums">
+                  {germanDay(r.from)} – {germanDay(r.to)}
+                </span>
+                <span className="text-white">{names[r.component] ?? r.component}</span>
+                <span className="flex items-center gap-1.5 text-muted">
+                  <span className="size-2.5 rounded-[3px]" style={{ backgroundColor: colors[r.state] }} aria-hidden />
+                  {CATEGORY_NAME[r.state]}
+                </span>
+                <span className="text-[12px] text-subtle">{r.onlyEmpty ? 'nur Tage ohne Messdaten' : 'überschreibt auch gemessene Tage'}</span>
+              </span>
+              <IconButton label="Zeitraum entfernen" danger onClick={() => onChange(ranges.filter((_, j) => j !== i))}>
+                <Trash2 />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 
@@ -549,8 +653,8 @@ function HistoryCorrections({
 
   return (
     <Section
-      title="Verlauf korrigieren"
-      description="Der Verlauf entsteht automatisch: alle 5 Minuten wird der Status jeder Komponente gespeichert. Hier legst du einzelne Tage von Hand fest – etwa um einen Fehlalarm auszubessern oder einen Ausfall nachzutragen. Tage ohne Messdaten (z. B. vor dem Anlegen einer Komponente) bleiben grau, solange du nichts einträgst. „Ausfall“ färbt den Tag rot, die Prozentzahl folgt dabei weiter den Messungen; jeder andere Zustand zählt den Tag als voll verfügbar."
+      title="Verlauf korrigieren: einzelner Tag"
+      description="Der Verlauf entsteht automatisch: alle 5 Minuten wird der Status jeder Komponente gespeichert. Hier legst du einzelne Tage von Hand fest – etwa um einen Fehlalarm auszubessern oder einen Ausfall nachzutragen. Ein einzelner Tag hat Vorrang vor einem nachgetragenen Zeitraum. „Ausfall“ färbt den Tag rot, die Prozentzahl folgt dabei weiter den Messungen; jeder andere Zustand zählt den Tag als voll verfügbar."
     >
       {saved.length === 0 ? (
         <p className="text-sm text-muted">Speichere zuerst mindestens eine Komponente.</p>

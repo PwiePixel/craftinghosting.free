@@ -11,6 +11,7 @@ import { count, desc, eq, gte, isNull, lt, or, sql } from 'drizzle-orm';
 import {
   freeHostingConfig,
   getTimeZoneOffset,
+  rangeStateFor,
   statusCategory,
   type ComponentStatus,
   type SiteSettings,
@@ -21,6 +22,7 @@ import {
   type StatusDayDTO,
   type StatusDayState,
   type StatusIncidentDTO,
+  type StatusRangeSetting,
 } from '@chfree/shared';
 import { env } from '../env';
 import { db, pingDb } from '../db/client';
@@ -287,8 +289,10 @@ function dayState(c: DayCounts | undefined): StatusDayState {
 }
 
 function buildDays(
+  component: string,
   measured: Map<number, DayCounts> | undefined,
   corrections: Record<string, StatusCategory> | undefined,
+  ranges: StatusRangeSetting[],
   today: number,
   days: number,
   current: ComponentStatus,
@@ -301,8 +305,9 @@ function buildDays(
     const c = measured?.get(idx);
     let state = dayState(c);
     let uptime = c && c.total > 0 ? ((c.total - c.outage) / c.total) * 100 : null;
-    // Korrektur aus dem Admin-Bereich (z. B. Fehlalarm oder nachgetragener Ausfall)
-    const fixed = corrections?.[date];
+    // Aus dem Admin-Bereich: nachgetragener Zeitraum, darüber die Korrektur eines einzelnen Tages
+    // (z. B. Zeit vor Beginn der Messung, Fehlalarm oder nachgetragener Ausfall)
+    const fixed = corrections?.[date] ?? rangeStateFor(ranges, component, date, uptime !== null);
     if (fixed) {
       state = fixed;
       // „Ausfall“ färbt den Tag rot, die Prozentzahl folgt weiter den Messungen (ohne Messung zählt der Tag als ausgefallen).
@@ -357,7 +362,7 @@ async function compose(fresh: boolean, withHistory: boolean): Promise<Composed> 
     // Manueller Status aus dem Admin-Bereich hat immer Vorrang
     const override = cfg.overrides[c.id];
     if (override && override !== 'auto') status = override;
-    const h = history ? buildDays(history.get(c.id), cfg.history[c.id], today, cfg.page.days, status) : { days: [], uptime: null };
+    const h = history ? buildDays(c.id, history.get(c.id), cfg.history[c.id], cfg.ranges, today, cfg.page.days, status) : { days: [], uptime: null };
     return {
       id: c.id,
       group: c.group,

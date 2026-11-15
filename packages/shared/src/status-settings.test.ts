@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSiteSettings } from './settings';
-import { defaultStatusSettings, normalizeStatusSettings, statusCategory } from './status-settings';
+import { defaultStatusSettings, normalizeStatusSettings, rangeStateFor, statusCategory } from './status-settings';
 
 describe('Statusseite – Einstellungen', () => {
   it('liefert ohne Angaben die eingebauten Gruppen und Komponenten', () => {
@@ -64,5 +64,46 @@ describe('Statusseite – Einstellungen', () => {
     expect(statusCategory('major_outage')).toBe('outage');
     expect(statusCategory('maintenance')).toBe('maintenance');
     expect(statusCategory('unknown')).toBe('none');
+  });
+});
+
+describe('Statusseite – Zeiträume nachtragen', () => {
+  const now = Date.parse('2026-06-30T12:00:00Z');
+
+  it('prüft Zeiträume und dreht vertauschte Daten um', () => {
+    const s = normalizeStatusSettings(
+      {
+        ranges: [
+          { component: '*', from: '2026-05-01', to: '2026-06-10', state: 'operational' },
+          { component: 'api', from: '2026-06-20', to: '2026-06-15', state: 'maintenance', onlyEmpty: false },
+          { component: 'gibtsnicht', from: '2026-06-01', to: '2026-06-02', state: 'operational' },
+          { component: '*', from: '2026-02-30', to: '2026-06-02', state: 'operational' },
+          { component: '*', from: '2025-01-01', to: '2025-02-01', state: 'operational' },
+          { component: '*', from: '2026-06-01', to: '2026-06-02', state: 'kaputt' },
+        ],
+      },
+      now,
+    );
+    expect(s.ranges).toEqual([
+      { component: '*', from: '2026-05-01', to: '2026-06-10', state: 'operational', onlyEmpty: true },
+      { component: 'api', from: '2026-06-15', to: '2026-06-20', state: 'maintenance', onlyEmpty: false },
+    ]);
+  });
+
+  it('füllt nur Tage ohne Messdaten, wenn so eingestellt – spätere Einträge gewinnen', () => {
+    const ranges = normalizeStatusSettings(
+      {
+        ranges: [
+          { component: '*', from: '2026-06-01', to: '2026-06-10', state: 'operational', onlyEmpty: true },
+          { component: 'api', from: '2026-06-05', to: '2026-06-06', state: 'maintenance', onlyEmpty: false },
+        ],
+      },
+      now,
+    ).ranges;
+    expect(rangeStateFor(ranges, 'website', '2026-06-03', false)).toBe('operational');
+    expect(rangeStateFor(ranges, 'website', '2026-06-03', true)).toBeNull();
+    expect(rangeStateFor(ranges, 'website', '2026-06-11', false)).toBeNull();
+    expect(rangeStateFor(ranges, 'api', '2026-06-05', true)).toBe('maintenance');
+    expect(rangeStateFor(ranges, 'api', '2026-06-04', false)).toBe('operational');
   });
 });
