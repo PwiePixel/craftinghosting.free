@@ -193,6 +193,23 @@ export class PterodactylHttpClient implements PterodactylGateway {
     }
   }
 
+  async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {
+    // Das Panel verlangt beim Ändern immer den vollständigen Satz – deshalb zuerst den aktuellen Stand lesen
+    const res = await this.request('application', 'GET', `/servers/${id}`);
+    const a = res.attributes as Json;
+    await this.request('application', 'PATCH', `/servers/${id}/build`, {
+      allocation: a.allocation,
+      memory: a.limits.memory,
+      swap: a.limits.swap,
+      disk: a.limits.disk,
+      io: a.limits.io,
+      cpu: a.limits.cpu,
+      threads: a.limits.threads ?? null,
+      ...(typeof a.limits.oom_disabled === 'boolean' ? { oom_disabled: a.limits.oom_disabled } : {}),
+      feature_limits: { databases: limits.databases, allocations: limits.allocations, backups: limits.backups },
+    });
+  }
+
   async updateServerDescription(id: number, description: string) {
     const current = await this.getServer(id);
     if (!current) throw new PterodactylError('Server nicht gefunden', 404);

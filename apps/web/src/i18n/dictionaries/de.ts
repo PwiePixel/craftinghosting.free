@@ -157,6 +157,8 @@ return {
       cpuValue: (threads: string, one: boolean) => `bis ${threads} ${one ? 'Thread' : 'Threads'} · geteilt`,
       disk: 'NVMe-Speicher',
       backups: 'Backups',
+      databases: 'Datenbanken',
+      ports: 'Ports',
       backupsValue: (n: number) => `${n}, täglich automatisch`,
       manage: 'Verwaltung',
       manageValue: 'Pterodactyl-Panel',

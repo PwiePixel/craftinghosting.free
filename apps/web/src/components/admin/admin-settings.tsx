@@ -275,7 +275,7 @@ export function SettingsForm({
 
       <Section
         title="Produkte & Pakete"
-        description="Minecraft-Server und Discord-Bots – jeweils mit eigenen Paketen und eigener Kapazität. Auf der Website steht dann z. B. „Noch 12 von 100 Plätzen frei“, bei 0 freien Plätzen „Ausgebucht“. „Außerhalb belegt“ ist für Server, die auf denselben Nodes laufen, aber nicht über diese Website erstellt wurden (z. B. altes System). Geänderte Ressourcen gelten für neue Server; Nodes und Eggs stellst du im Tab „Pterodactyl“ ein."
+        description="Minecraft-Server und Discord-Bots – jeweils mit eigenen Paketen und eigener Kapazität. Auf der Website steht dann z. B. „Noch 12 von 100 Plätzen frei“, bei 0 freien Plätzen „Ausgebucht“. „Außerhalb belegt“ ist für Server, die auf denselben Nodes laufen, aber nicht über diese Website erstellt wurden (z. B. altes System). Je Paket stellst du auch die Slots im Panel ein (Backups, Datenbanken, Ports). Geänderte Ressourcen gelten für neue Server, Slots lassen sich auf bestehende übertragen; Nodes und Eggs stellst du im Tab „Pterodactyl“ ein."
       >
         <div className="space-y-4">
           {productKinds.map((kind) => (
@@ -286,6 +286,7 @@ export function SettingsForm({
               onChange={(v) => patch('products', { [kind]: { ...s.products[kind], ...v } })}
               planCounts={planCounts}
               productCount={productCounts[kind] ?? null}
+              savedPlans={saved.products[kind].plans}
             />
           ))}
         </div>

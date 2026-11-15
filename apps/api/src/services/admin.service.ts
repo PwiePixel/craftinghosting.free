@@ -7,6 +7,7 @@ import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInAr
 import {
   ADMIN_PAGE_SIZE,
   allPlans,
+  findPlan,
   cycleEndFor,
   productHasCycle,
   freeHostingConfig,
@@ -39,7 +40,7 @@ import { isAdmin } from '../plugins/auth';
 import { deleteAccount } from './account.service';
 import { allJobs } from '../jobs/registry';
 import { pterodactyl } from '../pterodactyl';
-import { suggestEggs } from '../config/pterodactyl.config';
+import { pterodactylConfig, suggestEggs } from '../config/pterodactyl.config';
 import { mapLimit } from '../jobs/types';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
@@ -793,4 +794,53 @@ export async function resolveIncident(admin: User, id: string, ip?: string): Pro
 export async function deleteIncident(admin: User, id: string, ip?: string): Promise<void> {
   await db.delete(statusIncidents).where(eq(statusIncidents.id, id));
   await audit({ actor: 'admin', action: 'status.incident_deleted', message: `Statusmeldung gelöscht (durch ${admin.email})`, ip });
+}
+
+/* ------------------------------------------------------------ Slots eines Pakets auf bestehende Server übertragen */
+
+export interface ApplySlotsResult {
+  /** Server mit diesem Paket, die es im Panel gibt */
+  total: number;
+  updated: number;
+  failed: number;
+  /** Erster Fehler (falls etwas fehlschlug) */
+  error: string | null;
+}
+
+/**
+ * Überträgt die gespeicherten Slots eines Pakets (Backups, Datenbanken, Ports) auf alle bestehenden Server mit
+ * diesem Paket. Arbeitsspeicher, CPU und Speicherplatz bleiben unverändert – geändert werden nur die Slots.
+ * Bekommt ein Server dadurch erstmals Backup-Slots, wird auch der automatische Backup-Zeitplan angelegt.
+ */
+export async function applyPlanSlots(admin: User, planId: string, ip?: string): Promise<ApplySlotsResult> {
+  const plan = findPlan(await getSettings(), planId);
+  if (!plan) throw Errors.notFound();
+  const limits = { databases: plan.databases, allocations: plan.allocations, backups: plan.backups };
+  const rows = await db
+    .select()
+    .from(servers)
+    .where(and(eq(servers.planId, planId), isNotNull(servers.pteroServerId), inArray(servers.status, ['active', 'expiring', 'suspended'])));
+  const ptero = pterodactyl();
+  const result: ApplySlotsResult = { total: rows.length, updated: 0, failed: 0, error: null };
+  await mapLimit(rows, 4, async (server) => {
+    try {
+      await ptero.updateServerFeatureLimits(server.pteroServerId!, limits);
+      result.updated++;
+      // Erstmals Backup-Slots: Zeitplan nachholen (wie bei einem neuen Server)
+      if (pterodactylConfig.backupSchedule.enabled && plan.backups > 0 && !server.backupScheduleId && server.postProvisionDone && server.pteroIdentifier && server.status !== 'suspended') {
+        const scheduleId = await ptero.createBackupSchedule(server.pteroIdentifier, pterodactylConfig.backupSchedule).catch(() => null);
+        if (scheduleId) await db.update(servers).set({ backupScheduleId: scheduleId }).where(eq(servers.id, server.id));
+      }
+    } catch (err) {
+      result.failed++;
+      result.error ??= `${server.name}: ${(err as Error).message}`.slice(0, 300);
+    }
+  });
+  await audit({
+    actor: 'admin',
+    action: 'admin.plan_slots_applied',
+    message: `Slots des Pakets „${plan.name}“ auf bestehende Server übertragen (${limits.backups} Backups, ${limits.databases} Datenbanken, ${limits.allocations} Ports): ${result.updated} geändert, ${result.failed} fehlgeschlagen (durch ${admin.email})`,
+    ip,
+  });
+  return result;
 }

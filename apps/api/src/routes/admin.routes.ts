@@ -27,6 +27,7 @@ import {
   serverAction,
   updateIncident,
   userAction,
+  applyPlanSlots,
 } from '../services/admin.service';
 import { audit } from '../services/audit.service';
 import { deleteLogo, saveLogo } from '../services/logo.service';
@@ -192,6 +193,12 @@ export async function adminRoutes(app: FastifyInstance) {
     const { id } = idParams.parse(request.params);
     await removeWaitlistEntry(id, currentUser(request), request.ip);
     return { ok: true };
+  });
+
+  /** Slots eines Pakets (Backups, Datenbanken, Ports) auf bestehende Server übertragen */
+  app.post('/admin/plans/:planId/apply-slots', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
+    const { planId } = z.object({ planId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/) }).parse(request.params);
+    return { result: await applyPlanSlots(currentUser(request), planId, request.ip) };
   });
 
   /* -------------------------------------------------------------- Statusseite */

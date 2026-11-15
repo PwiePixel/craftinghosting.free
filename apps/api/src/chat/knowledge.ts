@@ -47,7 +47,7 @@ export async function currentFacts(s: SiteSettings): Promise<string> {
       lines.push(`- ${label}: werden derzeit nicht angeboten.`);
       continue;
     }
-    lines.push(`- ${label} – Pakete: ${p.plans.filter((x) => x.enabled).map((x) => `${x.name} (${formatMb(x.memoryMb, 'de')} RAM, ${x.cpuLabel.de}, ${formatMb(x.diskMb, 'de')} Speicher)`).join('; ')}.`);
+    lines.push(`- ${label} – Pakete: ${p.plans.filter((x) => x.enabled).map((x) => `${x.name} (${formatMb(x.memoryMb, 'de')} RAM, ${x.cpuLabel.de}, ${formatMb(x.diskMb, 'de')} Speicher, ${x.backups} Backup-Slots, ${x.databases} Datenbank-Slots, ${x.allocations} ${x.allocations === 1 ? 'Port' : 'Ports'})`).join('; ')}.`);
     lines.push(`  Auswahl: ${serverTypesOf(kind).map((t) => t.name).join(', ')}.`);
   }
   lines.push(`- ${describeServerLimits(s.registration.limits, 'de', productKinds.filter((k) => s.products[k].enabled))}`);

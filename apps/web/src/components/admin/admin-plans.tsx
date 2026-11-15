@@ -12,6 +12,7 @@ import { ActionButton } from '@/components/admin/admin-actions';
 import { PRODUCT_LABEL, formatMb, formatThreads } from '@/components/admin/admin-labels';
 import { CapacityInput, Labeled, NumberInput, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
+import { api } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 const nf = (n: number) => n.toLocaleString('de-DE');
@@ -21,9 +22,9 @@ const RANGES = [
   ['memoryMb', 'RAM', 64, 262_144, ' MB'],
   ['cpuPercent', 'CPU', 5, 3200, ' %'],
   ['diskMb', 'Speicher', 128, 2_097_152, ' MB'],
-  ['backups', 'Backups', 0, 20, ''],
-  ['databases', 'Datenbanken', 0, 20, ''],
-  ['allocations', 'Ports', 1, 10, ''],
+  ['backups', 'Backup-Slots', 0, 20, ''],
+  ['databases', 'Datenbank-Slots', 0, 20, ''],
+  ['allocations', 'Netzwerk-Slots', 1, 10, ''],
 ] as const;
 
 function planIssues(p: PlanSetting): string[] {
@@ -91,10 +92,46 @@ function PublicUsage({ capacity, used }: { capacity: number | null; used: number
   return <span className="text-amber-300">Ausgebucht</span>;
 }
 
+/** Überträgt die gespeicherten Slots des Pakets auf alle bestehenden Server mit diesem Paket */
+function ApplySlots({ planId, count, unsaved }: { planId: string; count: number; unsaved: boolean }) {
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line pt-4">
+      {unsaved ? (
+        <p className="text-[13px] text-amber-300">
+          Neue Server bekommen die Slots ab dem Speichern. Für die {nf(count)} bestehenden Server mit diesem Paket: erst speichern, dann hier übertragen.
+        </p>
+      ) : (
+        <>
+          <ActionButton
+            label={`Slots auf ${nf(count)} ${count === 1 ? 'bestehenden Server' : 'bestehende Server'} übertragen`}
+            confirm="Wirklich übertragen?"
+            run={async () => {
+              setResult(null);
+              const res = await api<{ result: { total: number; updated: number; failed: number; error: string | null } }>(`/admin/plans/${planId}/apply-slots`, { body: {} });
+              const r = res.result;
+              setResult({
+                ok: r.failed === 0,
+                text: r.failed === 0 ? `${nf(r.updated)} Server aktualisiert.` : `${nf(r.updated)} aktualisiert, ${nf(r.failed)} fehlgeschlagen${r.error ? ` – ${r.error}` : ''}`,
+              });
+            }}
+          />
+          {result ? (
+            <span className={cn('text-[13px]', result.ok ? 'text-emerald-300' : 'text-red-300')}>{result.text}</span>
+          ) : (
+            <span className="text-[13px] text-subtle">RAM, CPU und Speicher der Server bleiben unverändert.</span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ Paket */
 
 function PlanRow({
   plan: p,
+  saved,
   count,
   open,
   first,
@@ -105,6 +142,8 @@ function PlanRow({
   onRemove,
 }: {
   plan: PlanSetting;
+  /** Gespeicherter Stand dieses Pakets (fehlt bei einem neuen Paket) */
+  saved?: PlanSetting;
   /** Bestehende Server mit diesem Paket (über die Website) */
   count: number;
   open: boolean;
@@ -131,7 +170,8 @@ function PlanRow({
               {issues.length > 0 && <Badge tone="amber">prüfen</Badge>}
             </span>
             <span className="mt-0.5 block text-[12px] text-subtle">
-              {formatMb(p.memoryMb)} RAM · {nf(p.cpuPercent)} % CPU · {formatMb(p.diskMb)} Speicher ·{' '}
+              {formatMb(p.memoryMb)} RAM · {nf(p.cpuPercent)} % CPU · {formatMb(p.diskMb)} Speicher · {nf(p.backups)} Backups · {nf(p.databases)} Datenbanken ·{' '}
+              {nf(p.allocations)} {p.allocations === 1 ? 'Port' : 'Ports'} ·{' '}
               {p.capacity === null ? `${nf(used)} belegt (unbegrenzt)` : `${nf(used)} / ${nf(p.capacity)} Plätze belegt`}
             </span>
           </span>
@@ -167,15 +207,6 @@ function PlanRow({
             <Labeled label="Speicher (MB)" hint={`= ${formatMb(p.diskMb)}`}>
               <NumberInput value={p.diskMb} min={128} max={2097152} step={128} onChange={(v) => onChange({ diskMb: v })} />
             </Labeled>
-            <Labeled label="Backups" hint="0–20">
-              <NumberInput value={p.backups} max={20} onChange={(v) => onChange({ backups: v })} />
-            </Labeled>
-            <Labeled label="Datenbanken" hint="0–20">
-              <NumberInput value={p.databases} max={20} onChange={(v) => onChange({ databases: v })} />
-            </Labeled>
-            <Labeled label="Ports" hint="Allokationen je Server, 1–10">
-              <NumberInput value={p.allocations} min={1} max={10} onChange={(v) => onChange({ allocations: v })} />
-            </Labeled>
             <Labeled label="Maximale Plätze" hint="leer = unbegrenzt">
               <CapacityInput value={p.capacity} onChange={(v) => onChange({ capacity: v })} />
             </Labeled>
@@ -192,6 +223,32 @@ function PlanRow({
               </p>
             </div>
           </div>
+          <div className="rounded-lg border border-line bg-black/20 p-4">
+            <p className="text-sm font-medium text-gray-200">Slots im Panel</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-subtle">
+              Wie viele Backups, Datenbanken und Ports ein Nutzer in seinem Server im Pterodactyl-Panel selbst anlegen darf.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <Labeled label="Backup-Slots" hint="0–20. 0 = keine Backups. Ab 1 legt das System auch den automatischen täglichen Backup-Zeitplan an.">
+                <NumberInput value={p.backups} max={20} onChange={(v) => onChange({ backups: v })} />
+              </Labeled>
+              <Labeled label="Datenbank-Slots" hint="0–20. Braucht einen Datenbank-Host im Panel (Admin → Databases).">
+                <NumberInput value={p.databases} max={20} onChange={(v) => onChange({ databases: v })} />
+              </Labeled>
+              <Labeled label="Netzwerk-Slots (Ports)" hint="1–10. 1 = nur der Hauptport. Weitere Ports legt der Nutzer im Panel unter „Network“ an.">
+                <NumberInput value={p.allocations} min={1} max={10} onChange={(v) => onChange({ allocations: v })} />
+              </Labeled>
+            </div>
+            {p.allocations > 1 && (
+              <p className="mt-3 text-[13px] leading-relaxed text-subtle">
+                Damit Nutzer zusätzliche Ports selbst anlegen können, muss im Panel unter Settings → Advanced die „Automatic Allocation Creation“ mit einem Portbereich
+                eingeschaltet sein – sonst bleibt der Knopf dort ohne Wirkung.
+              </p>
+            )}
+            {count > 0 && (
+              <ApplySlots planId={p.id} count={count} unsaved={!saved || saved.backups !== p.backups || saved.databases !== p.databases || saved.allocations !== p.allocations} />
+            )}
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <Toggle checked={p.highlighted ?? false} onChange={(v) => onChange({ highlighted: v })} label="Hervorgehoben" hint="Hervorgehobene Karte auf der Website" />
             <Toggle checked={p.enabled} onChange={(v) => onChange({ enabled: v })} label="Aktiv (wählbar)" hint="Aus = nicht mehr wählbar, bestehende Server laufen weiter" />
@@ -206,7 +263,7 @@ function PlanRow({
           {count > 0 && (
             <p className="text-[13px] text-amber-300">
               {nf(count)} {count === 1 ? 'bestehender Server nutzt' : 'bestehende Server nutzen'} dieses Paket. Beim Entfernen laufen sie mit ihren bisherigen Ressourcen
-              weiter; geänderte Werte gelten nur für neue Server.
+              weiter; geänderte Ressourcen (RAM, CPU, Speicher) gelten nur für neue Server. Slots lassen sich oben auf bestehende Server übertragen.
             </p>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -242,6 +299,7 @@ export function ProductEditor({
   onChange,
   planCounts,
   productCount,
+  savedPlans = [],
 }: {
   kind: ProductKind;
   product: ProductSettings;
@@ -250,6 +308,8 @@ export function ProductEditor({
   planCounts: Record<string, number>;
   /** Über die Website belegte Plätze des Produkts (null = unbekannt) */
   productCount: number | null;
+  /** Gespeicherter Stand der Pakete (für „Slots übertragen“) */
+  savedPlans?: PlanSetting[];
 }) {
   // Immer nur ein Paket aufgeklappt (Index in der Liste)
   const [open, setOpen] = useState<number | null>(null);
@@ -313,6 +373,7 @@ export function ProductEditor({
               <PlanRow
                 key={index}
                 plan={p}
+                saved={p.id ? savedPlans.find((x) => x.id === p.id) : undefined}
                 count={planCounts[p.id] ?? 0}
                 open={open === index}
                 first={index === 0}

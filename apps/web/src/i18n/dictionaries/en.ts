@@ -132,6 +132,8 @@ return {
       cpuValue: (threads: string, one: boolean) => `up to ${threads} ${one ? 'thread' : 'threads'} · shared`,
       disk: 'NVMe storage',
       backups: 'Backups',
+      databases: 'Databases',
+      ports: 'Ports',
       backupsValue: (n: number) => `${n}, automatic daily`,
       manage: 'Management',
       manageValue: 'Pterodactyl panel',

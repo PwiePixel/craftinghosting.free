@@ -41,6 +41,8 @@ interface MockServer {
   schedules: number;
   description: string;
   console: string[];
+  /** Slots (Datenbanken, Ports, Backups) */
+  featureLimits?: { databases: number; allocations: number; backups: number };
   /** Node, auf der der Server liegt (0 = automatisch über die Location platziert) */
   nodeId?: number;
   /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
@@ -165,6 +167,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       schedules: 0,
       description: spec.description,
       console: [],
+      featureLimits: { ...spec.featureLimits },
       // Die „Allokations-ID“ des Mocks kodiert die Node (siehe freeAllocations)
       nodeId: spec.allocationId ? Math.floor(spec.allocationId / 100_000) : 0,
     };
@@ -202,6 +205,12 @@ export class PterodactylMockClient implements PterodactylGateway {
     const state = this.load();
     state.servers = state.servers.filter((s) => s.id !== id);
     this.save(state);
+  }
+
+  async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {
+    this.mutate(id, (s) => {
+      s.featureLimits = { ...limits };
+    });
   }
 
   async updateServerDescription(id: number, description: string) {

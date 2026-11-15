@@ -143,9 +143,11 @@ function PlanCard({
     [h.planRows.ram, f.mb(plan.memoryMb)],
     [h.planRows.cpu, h.planRows.cpuValue((plan.cpuPercent / 100).toLocaleString(intlLocale(lang)), plan.cpuPercent === 100)],
     [h.planRows.disk, f.mb(plan.diskMb)],
-    ...(bot
-      ? ([[h.discord.rows.runtime, h.discord.rows.runtimeValue]] as [string, string][])
-      : ([[h.planRows.backups, h.planRows.backupsValue(plan.backups)]] as [string, string][])),
+    ...(bot ? ([[h.discord.rows.runtime, h.discord.rows.runtimeValue]] as [string, string][]) : []),
+    // Slots aus dem Paket (Admin → Einstellungen): nur zeigen, was es wirklich gibt
+    ...(plan.backups > 0 ? ([[h.planRows.backups, h.planRows.backupsValue(plan.backups)]] as [string, string][]) : []),
+    ...(plan.databases > 0 ? ([[h.planRows.databases, String(plan.databases)]] as [string, string][]) : []),
+    ...(plan.allocations > 1 ? ([[h.planRows.ports, String(plan.allocations)]] as [string, string][]) : []),
     [h.planRows.manage, h.planRows.manageValue],
   ];
   return (
