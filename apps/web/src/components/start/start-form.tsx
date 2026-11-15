@@ -156,12 +156,18 @@ export function StartForm({
   if (sentTo) {
     return (
       <div className="surface p-8 sm:p-10">
-        <p className="mb-6 text-sm leading-relaxed text-muted">
-          {s.sentBefore}
-          <span className="text-white">{sentTo}</span>
-          {early ? e.sentAfter(name.trim()) : s.sentAfter(name.trim())}
-        </p>
-        <VerifyFlow embedded email={sentTo} onBack={() => setSentTo(null)} />
+        <VerifyFlow
+          embedded
+          email={sentTo}
+          onBack={() => setSentTo(null)}
+          intro={
+            <p className="mb-6 text-sm leading-relaxed text-muted">
+              {s.sentBefore}
+              <span className="text-white">{sentTo}</span>
+              {early ? e.sentAfter(name.trim()) : s.sentAfter(name.trim())}
+            </p>
+          }
+        />
       </div>
     );
   }

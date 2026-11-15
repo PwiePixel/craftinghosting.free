@@ -342,6 +342,13 @@ return {
     confirmed: 'E-Mail bestätigt',
     setupTitle: 'Zugang zum Panel festlegen',
     setupText: 'Deinen Server verwaltest du im Pterodactyl-Panel von Crafting Hosting. Lege dafür jetzt Benutzername und Passwort fest.',
+    discordTitle: 'Fast geschafft – verbinde jetzt dein Discord-Konto',
+    discordText: 'Dein Server ist für dich reserviert. Erstellt wird er, sobald dein Discord-Konto verbunden ist – das dauert nur ein paar Sekunden.',
+    discordSteps: (existing: boolean) => ['E-Mail bestätigt', existing ? 'Bestehendes Panel-Konto verknüpft' : 'Panel-Zugang angelegt', 'Discord-Konto verbinden', 'Server wird danach automatisch installiert'],
+    discordWhy: 'Klicke auf „Mit Discord verbinden“ und bestätige bei Discord. Dabei trittst du unserem Discord-Server automatisch bei – einen Einladungslink brauchst du nicht.',
+    discordNotMember: 'Dein Discord-Konto ist verknüpft, aber du bist kein Mitglied unseres Discord-Servers. Verbinde es noch einmal – dabei trittst du automatisch bei.',
+    discordUnavailable: 'Deine Discord-Mitgliedschaft lässt sich gerade nicht prüfen. Versuche es gleich noch einmal oder unter „Meine Server“ mit „Erneut prüfen“.',
+    discordHint: 'Danach landest du unter „Meine Server“ und dein Server wird installiert. Sobald er fertig ist, bekommst du eine E-Mail.',
     doneTitle: 'Dein Server wird erstellt',
     doneText: 'Alles erledigt – ab jetzt geht es im Panel weiter.',
     doneSteps: (existing: boolean) => ['E-Mail bestätigt', existing ? 'Bestehendes Panel-Konto verknüpft' : 'Panel-Zugang angelegt', 'Server wird installiert (ca. 1–2 Minuten)'],
@@ -806,11 +813,13 @@ return {
     /** So läuft die Prüfung ab – der Einladungslink allein genügt nicht */
     noteSteps: [
       'Server anfordern und E-Mail-Adresse bestätigen.',
-      'Unter „Meine Server“ auf „Mit Discord verbinden“ klicken. Discord fragt nach deiner Zustimmung – dabei trittst du unserem Server automatisch bei.',
+      'Direkt danach auf „Mit Discord verbinden“ klicken. Discord fragt nach deiner Zustimmung – dabei trittst du unserem Server automatisch bei.',
       'Wir prüfen deine Mitgliedschaft automatisch und richten deinen Server ein.',
     ],
     noteInviteOnly: 'Wichtig: Nur über den Einladungslink beizutreten genügt nicht. Erst die Verknüpfung zeigt uns, welches Discord-Konto zu deinem Account gehört.',
     noteLinked: (name: string) => `Dein Discord-Konto ist verbunden (${name}).`,
+    noteLinkedShort: 'Dein Discord-Konto ist verbunden.',
+    noteConnectNow: 'Du bist angemeldet – verbinde jetzt dein Discord-Konto. Dabei trittst du unserem Discord-Server automatisch bei, und dein Server wird eingerichtet.',
     results: {
       linked: { ok: true, title: 'Discord verbunden', text: 'Dein Discord-Konto ist verknüpft und du bist Mitglied auf unserem Server.' },
       linked_not_member: { ok: false, title: 'Verknüpft – aber noch kein Mitglied', text: 'Dein Discord-Konto ist verknüpft. Tritt jetzt unserem Discord-Server bei und klicke auf „Erneut prüfen“.' },

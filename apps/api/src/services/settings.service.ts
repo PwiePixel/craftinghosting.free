@@ -351,6 +351,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     discord: {
       available: discordAvailable,
       required: discordAvailable && s.discord.required,
+      autoJoin: s.discord.autoJoin,
       inviteUrl: s.discord.enabled ? botInviteUrl : null,
       note: s.discord.requiredNote,
     },

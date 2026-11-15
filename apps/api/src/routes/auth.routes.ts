@@ -1,3 +1,4 @@
+import { discordGate } from '../discord/service';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { deleteAccount } from '../services/account.service';
@@ -57,7 +58,7 @@ export async function authRoutes(app: FastifyInstance) {
   }
 
   /** Sitzung anlegen und die Antwort für die Website bauen */
-  const signIn = async (request: FastifyRequest, reply: FastifyReply, result: { user: User; next: VerifyResult['next']; existingPanelAccount: boolean; waitlist: VerifyResult['waitlist'] }) => {
+  const signIn = async (request: FastifyRequest, reply: FastifyReply, result: { user: User; next: VerifyResult['next']; existingPanelAccount: boolean; waitlist: VerifyResult['waitlist']; discordBlocked?: VerifyResult['discordBlocked'] }) => {
     const session = await createSession(result.user.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
     setSessionCookie(reply, session.token, session.expiresAt);
     const body: VerifyResult = {
@@ -66,6 +67,7 @@ export async function authRoutes(app: FastifyInstance) {
       existingPanelAccount: result.existingPanelAccount,
       panelUrl: panelPublicUrl,
       waitlist: result.waitlist,
+      discordBlocked: result.discordBlocked ?? null,
     };
     return body;
   };
@@ -166,7 +168,9 @@ export async function authRoutes(app: FastifyInstance) {
     }
     const fresh = await getUser(user.id);
     const activated = await activatePendingServers(fresh, request.ip);
-    return { user: toUserDTO(fresh), existingPanelAccount: existing, serversCreated: activated.length, panelUrl: panelPublicUrl };
+    // Nichts erstellt, weil die Discord-Pflicht noch nicht erfüllt ist → die Website zeigt „Mit Discord verbinden“
+    const gate = activated.length === 0 ? await discordGate(fresh) : { ok: true as const };
+    return { user: toUserDTO(fresh), existingPanelAccount: existing, serversCreated: activated.length, panelUrl: panelPublicUrl, discordBlocked: gate.ok ? null : gate.reason };
   });
 
   /** Konto löschen – inkl. aller Server. Das Panel-Konto selbst bleibt bestehen. */

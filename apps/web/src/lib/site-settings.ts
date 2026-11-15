@@ -40,7 +40,7 @@ export const fallbackSite: PublicSiteDTO = {
   hardware: { ...defaults.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
   donate: { enabled: false, url: null },
   chat: null,
-  discord: { available: false, required: false, inviteUrl: null, note: { de: '', en: '' } },
+  discord: { available: false, required: false, autoJoin: true, inviteUrl: null, note: { de: '', en: '' } },
   botFairUse: defaults.botFairUse,
   brand: {
     ...defaultBrand(),

@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import type { Locale, PublicSiteDTO, UserDTO } from '@chfree/shared';
 import { getDict } from '@/i18n';
@@ -15,14 +18,26 @@ export function DiscordIcon({ className }: { className?: string }) {
 /**
  * Hinweis „Mitglied auf unserem Discord-Server“ – erscheint nur, wenn die Pflicht eingeschaltet ist.
  * Erklärt den Ablauf: Geprüft wird über die Verknüpfung des Discord-Kontos, nicht über den Einladungslink.
- * Wer angemeldet ist und noch nicht verknüpft hat, bekommt den Button zum Verbinden direkt hier.
+ * Wer angemeldet ist und noch nicht verknüpft hat, bekommt hier den Button „Mit Discord verbinden“ (Verbindungslink).
+ * Meldet sich jemand auf derselben Seite an (Code-Eingabe beim Erstellen), stellt sich der Hinweis sofort um.
+ * Den Einladungslink zeigt er nur, wenn das Verbinden nicht automatisch beitreten lässt.
  */
 export function DiscordRequiredNote({ site, lang, user, className }: { site: PublicSiteDTO; lang: Locale; user?: UserDTO | null; className?: string }) {
+  const [session, setSession] = useState<{ signedIn: boolean; linked: string | null }>({ signedIn: !!user, linked: user?.discord?.username ?? null });
+  useEffect(() => {
+    const onSession = (e: Event) => {
+      const linked = (e as CustomEvent<{ discordLinked?: boolean }>).detail?.discordLinked;
+      setSession((s) => ({ signedIn: true, linked: linked ? (s.linked ?? '') : null }));
+    };
+    window.addEventListener('chf:session', onSession);
+    return () => window.removeEventListener('chf:session', onSession);
+  }, []);
   if (!site.discord.required) return null;
   const t = getDict(lang).discord;
   const text = site.discord.note[lang] || site.discord.note[lang === 'de' ? 'en' : 'de'] || t.noteText;
-  const invite = site.discord.inviteUrl ?? site.brand.discordUrl;
-  const linked = user?.discord ?? null;
+  // Beim Verbinden tritt das Konto automatisch bei – der Einladungslink würde nur verwirren
+  const invite = site.discord.autoJoin ? null : (site.discord.inviteUrl ?? site.brand.discordUrl);
+  const linked = session.linked !== null;
   return (
     <div className={cn('rounded-xl border border-[#5865f2]/35 bg-[#5865f2]/[0.08] p-5', className)}>
       <div className="flex gap-3.5">
@@ -31,7 +46,9 @@ export function DiscordRequiredNote({ site, lang, user, className }: { site: Pub
           <p className="text-[15px] font-semibold text-white">{t.noteTitle}</p>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">{text}</p>
           {linked ? (
-            <p className="mt-3 text-sm font-medium text-emerald-300">{t.noteLinked(linked.username)}</p>
+            <p className="mt-3 text-sm font-medium text-emerald-300">{session.linked ? t.noteLinked(session.linked) : t.noteLinkedShort}</p>
+          ) : session.signedIn ? (
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-gray-200">{t.noteConnectNow}</p>
           ) : (
             <>
               <ol className="mt-3 max-w-2xl list-decimal space-y-1 pl-5 text-sm leading-relaxed text-gray-200">
@@ -39,22 +56,24 @@ export function DiscordRequiredNote({ site, lang, user, className }: { site: Pub
                   <li key={step}>{step}</li>
                 ))}
               </ol>
-              <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-subtle">{t.noteInviteOnly}</p>
+              {invite && <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-subtle">{t.noteInviteOnly}</p>}
             </>
           )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {user && !linked && (
-              // Normaler Link: Die API leitet zu Discord weiter und danach zurück zu „Meine Server“
-              <a href={`/api/v1/discord/connect?lang=${lang}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#5865f2] px-3.5 text-sm font-medium text-white hover:bg-[#6b76f5]">
-                <DiscordIcon className="size-4" /> {t.connect}
-              </a>
-            )}
-            {invite && (
-              <a href={invite} target="_blank" rel="noopener" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white/[0.03] px-3.5 text-sm font-medium text-white hover:bg-white/[0.07]">
-                {t.noteButton} <ArrowUpRight className="size-4" aria-hidden />
-              </a>
-            )}
-          </div>
+          {((session.signedIn && !linked) || invite) && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {session.signedIn && !linked && (
+                // Normaler Link: Die API leitet zu Discord weiter und danach zurück zu „Meine Server“
+                <a href={`/api/v1/discord/connect?lang=${lang}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#5865f2] px-3.5 text-sm font-medium text-white hover:bg-[#6b76f5]">
+                  <DiscordIcon className="size-4" /> {t.connect}
+                </a>
+              )}
+              {invite && (
+                <a href={invite} target="_blank" rel="noopener" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white/[0.03] px-3.5 text-sm font-medium text-white hover:bg-white/[0.07]">
+                  {t.noteButton} <ArrowUpRight className="size-4" aria-hidden />
+                </a>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -14,7 +14,7 @@ import { getSite } from '@/lib/site-settings';
 import { siteTexts } from '@/lib/site-texts';
 
 /** Discord: verbinden, Mitgliedschaft prüfen, Verknüpfung lösen */
-function DiscordCard({ me, lang, inviteUrl, note, waiting }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; note: string; waiting: boolean }) {
+function DiscordCard({ me, lang, inviteUrl, autoJoin, note, waiting }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; autoJoin: boolean; note: string; waiting: boolean }) {
   const t = getDict(lang).discord;
   const connectHref = `/api/v1/discord/connect?lang=${lang}`;
   const attention = me.blocked !== null;
@@ -47,7 +47,13 @@ function DiscordCard({ me, lang, inviteUrl, note, waiting }: { me: DiscordMeDTO;
             </a>
           ) : me.blocked ? (
             <>
-              {me.blocked === 'not_member' && inviteUrl && (
+              {/* Kein Mitglied (mehr): Neu verbinden tritt automatisch bei – der Einladungslink nur, wenn das ausgeschaltet ist */}
+              {me.blocked === 'not_member' && autoJoin && (
+                <a href={connectHref} className={buttonClasses('primary', 'sm')}>
+                  {t.connect}
+                </a>
+              )}
+              {me.blocked === 'not_member' && !autoJoin && inviteUrl && (
                 <a href={inviteUrl} target="_blank" rel="noopener" className={buttonClasses('primary', 'sm')}>
                   {t.join} <ArrowUpRight aria-hidden />
                 </a>
@@ -339,6 +345,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
               me={discordMe}
               lang={lang}
               inviteUrl={settings.discord.inviteUrl}
+              autoJoin={settings.discord.autoJoin}
               note={settings.discord.note[lang] || settings.discord.note[lang === 'de' ? 'en' : 'de']}
               waiting={hasPending && user.panelLinked}
             />

@@ -5,6 +5,7 @@
  *  – Freiwillige zweite Stufe: eigenes Passwort oder Authenticator-App (two-factor.service.ts)
  * Das Passwort des Pterodactyl-Panels wird nur an Pterodactyl übergeben und nie von uns gespeichert.
  */
+import { discordGate } from '../discord/service';
 import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { findPlan, isEmailBlocked, serverLimitBlock, type Locale, type StartInput, type TwoFactorMethod, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
@@ -231,7 +232,7 @@ export async function requestLoginCode(email: string, locale: Locale): Promise<v
   await sendCodeMail(user, type, (code) => loginMail(code, locale, CODE_MINUTES[type]));
 }
 
-type LoginDone = { user: User; next: VerifyNext; existingPanelAccount: boolean; waitlist: WaitlistInfo | null };
+type LoginDone = { user: User; next: VerifyNext; existingPanelAccount: boolean; waitlist: WaitlistInfo | null; discordBlocked?: 'not_linked' | 'not_member' | 'unavailable' | null };
 export type LoginStep = ({ kind: 'done' } & LoginDone) | { kind: 'two_factor'; method: TwoFactorMethod; ticket: string };
 
 const TWO_FACTOR_PURPOSE = 'two-factor';
@@ -303,8 +304,10 @@ async function completeLogin(userId: string, meta: { ip?: string; locale: Locale
 
   if (pending.length > 0) {
     if (!user.pteroUserId) return { user, next: 'panel_setup', existingPanelAccount, waitlist: null };
-    await activatePendingServers(user, meta.ip);
-    return { user, next: 'done', existingPanelAccount, waitlist: null };
+    const activated = await activatePendingServers(user, meta.ip);
+    // Nichts erstellt, weil die Discord-Pflicht noch nicht erfüllt ist → die Website zeigt „Mit Discord verbinden“
+    const gate = activated.length === 0 ? await discordGate(user) : { ok: true as const };
+    return { user, next: 'done', existingPanelAccount, waitlist: null, discordBlocked: gate.ok ? null : gate.reason };
   }
   if (waitlist) return { user, next: 'waitlist', existingPanelAccount, waitlist };
   return { user, next: 'overview', existingPanelAccount, waitlist: null };

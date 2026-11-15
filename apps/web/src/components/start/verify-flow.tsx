@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowUpRight, Check, CircleX, KeyRound, LoaderCircle, MailCheck, ShieldCheck } from 'lucide-react';
 import { localePath, type TwoFactorMethod, type VerifyResponse, type VerifyResult, type WaitlistInfo } from '@chfree/shared';
+import { DiscordIcon } from '@/components/discord/discord-note';
 import { Button, ButtonLink, buttonClasses } from '@/components/ui/button';
 import { Alert, Field } from '@/components/ui/primitives';
 import { useDict, useLang } from '@/i18n/client';
@@ -16,8 +17,54 @@ type State =
   | { kind: 'twoFactor'; method: TwoFactorMethod; ticket: string }
   | { kind: 'error'; message: string }
   | { kind: 'setup'; email: string }
-  | { kind: 'done'; email: string; panelUrl: string; existing: boolean }
+  | { kind: 'done'; email: string; panelUrl: string; existing: boolean; discord: DiscordBlocked }
   | { kind: 'waitlist'; waitlist: WaitlistInfo };
+
+type DiscordBlocked = 'not_linked' | 'not_member' | 'unavailable' | null;
+
+/** Meldet dem Rest der Seite (z. B. dem Discord-Hinweis über dem Formular), dass jetzt jemand angemeldet ist */
+function announceSession(discordLinked: boolean) {
+  window.dispatchEvent(new CustomEvent('chf:session', { detail: { discordLinked } }));
+}
+
+/**
+ * Letzter Schritt, wenn die Discord-Mitgliedschaft Pflicht ist und noch fehlt: Der Server ist reserviert, wird aber
+ * erst nach der Verbindung erstellt. Der Knopf führt zum Verbindungslink (Zustimmung bei Discord, Beitritt inklusive) –
+ * nicht zum Einladungslink.
+ */
+function DiscordStep({ blocked, existing }: { blocked: Exclude<DiscordBlocked, null>; existing: boolean }) {
+  const lang = useLang();
+  const t = useDict();
+  const v = t.verify;
+  const steps = v.discordSteps(existing);
+  return (
+    <div>
+      <ol className="space-y-3 text-sm">
+        {steps.map((step, i) => (
+          <li key={step} className={i === 2 ? 'flex items-center gap-3 font-medium text-white' : i < 2 ? 'flex items-center gap-3 text-gray-200' : 'flex items-center gap-3 text-subtle'}>
+            <span className={i < 2 ? 'flex size-5 items-center justify-center rounded-full bg-emerald-400/15' : i === 2 ? 'flex size-5 items-center justify-center rounded-full bg-[#5865f2]/25' : 'flex size-5 items-center justify-center rounded-full border border-line-strong'}>
+              {i < 2 ? <Check className="size-3 text-emerald-400" strokeWidth={3} /> : i === 2 ? <span className="size-2 rounded-full bg-[#8b93ff]" /> : null}
+            </span>
+            {step}
+          </li>
+        ))}
+      </ol>
+      <div className="mt-7 rounded-lg border border-[#5865f2]/40 bg-[#5865f2]/[0.08] p-5">
+        <p className="text-sm font-medium text-white">{blocked === 'not_member' ? v.discordNotMember : blocked === 'unavailable' ? v.discordUnavailable : v.discordWhy}</p>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          {/* Normaler Link: Die API leitet zu Discord weiter und danach zurück zu „Meine Server“ */}
+          <a href={`/api/v1/discord/connect?lang=${lang}`} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#5865f2] px-6 text-base font-medium text-white hover:bg-[#6b76f5] sm:flex-1">
+            <DiscordIcon className="size-5" /> {t.discord.connect}
+          </a>
+          <a href={localePath(lang, 'myServers')} className={buttonClasses('secondary', 'lg')}>
+            {t.common.myServers}
+          </a>
+        </div>
+      </div>
+      <p className="mt-4 text-[13px] leading-relaxed text-subtle">{v.discordHint}</p>
+    </div>
+  );
+}
 
 export function DoneCard({ email, panelUrl, existing }: { email: string; panelUrl: string; existing: boolean }) {
   const lang = useLang();
@@ -274,7 +321,7 @@ function afterLoginTarget(fallback: string): string {
  * `embedded` = ohne eigenen Rahmen (z. B. innerhalb des Anmelde- oder Bestellformulars).
  * Links aus älteren E-Mails (`token`) funktionieren bis zu ihrem Ablauf weiter.
  */
-export function VerifyFlow({ token, email, embedded = false, onBack }: { token?: string; email?: string; embedded?: boolean; onBack?: () => void }) {
+export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { token?: string; email?: string; embedded?: boolean; onBack?: () => void; /** Hinweis über der Code-Eingabe – verschwindet, sobald der Code eingegeben ist */ intro?: ReactNode }) {
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
@@ -284,6 +331,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
   const handle = useCallback(
     (res: VerifyResponse) => {
       if ('twoFactor' in res) return setState({ kind: 'twoFactor', method: res.twoFactor.method, ticket: res.twoFactor.ticket });
+      announceSession(!!res.user.discord);
       if (res.next === 'overview') {
         // Vollständiger Seitenwechsel statt Navigation im Browser-Router: Der hat „Meine Server“ oft noch als
         // „nicht angemeldet → zum Login“ vorgeladen und würde sonst auf der Anmeldeseite hängen bleiben.
@@ -293,7 +341,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
       } else if (res.next === 'panel_setup') {
         setState({ kind: 'setup', email: res.user.email });
       } else {
-        setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount });
+        setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount, discord: res.discordBlocked ?? null });
       }
     },
     [lang],
@@ -309,6 +357,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
 
   return (
     <div className={embedded ? undefined : 'surface mx-auto max-w-lg p-7 sm:p-9'}>
+      {state.kind === 'code' && intro}
       {state.kind === 'code' && <CodeStep email={email} onResult={handle} onBack={onBack} />}
       {state.kind === 'twoFactor' && <TwoFactorStep method={state.method} ticket={state.ticket} onResult={handle} />}
 
@@ -343,7 +392,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
           <div className="mt-7">
             <PanelSetupForm
               email={state.email}
-              onDone={(r) => setState({ kind: 'done', email: state.email, panelUrl: r.panelUrl, existing: r.existingPanelAccount })}
+              onDone={(r) => setState({ kind: 'done', email: state.email, panelUrl: r.panelUrl, existing: r.existingPanelAccount, discord: r.discordBlocked ?? null })}
             />
           </div>
         </div>
@@ -351,10 +400,11 @@ export function VerifyFlow({ token, email, embedded = false, onBack }: { token?:
 
       {state.kind === 'done' && (
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">{v.doneTitle}</h1>
-          <p className="mt-2 text-muted">{v.doneText}</p>
+          {/* Discord-Pflicht noch offen: Der Server wird erst nach der Verbindung erstellt – das sagt die Seite auch so */}
+          <h1 className="text-2xl font-semibold tracking-tight text-white">{state.discord ? v.discordTitle : v.doneTitle}</h1>
+          <p className="mt-2 text-muted">{state.discord ? v.discordText : v.doneText}</p>
           <div className="mt-7">
-            <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} />
+            {state.discord ? <DiscordStep blocked={state.discord} existing={state.existing} /> : <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} />}
           </div>
         </div>
       )}

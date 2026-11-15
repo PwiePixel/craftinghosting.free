@@ -13,6 +13,8 @@ export interface PanelSetupResult {
   existingPanelAccount: boolean;
   serversCreated: number;
   panelUrl: string;
+  /** Der Server wartet noch auf die Discord-Verbindung (null = nichts offen) */
+  discordBlocked?: 'not_linked' | 'not_member' | 'unavailable' | null;
 }
 
 function suggestUsername(email: string) {

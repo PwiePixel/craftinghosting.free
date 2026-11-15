@@ -64,6 +64,11 @@ export interface VerifyResult {
   /** Es gab bereits ein Panel-Konto mit dieser E-Mail – bekannte Zugangsdaten nutzen */
   existingPanelAccount: boolean;
   panelUrl: string;
+  /**
+   * Der Server wartet noch auf die Discord-Verbindung (Pflicht-Mitgliedschaft): not_linked = Konto verbinden ·
+   * not_member = verknüpft, aber kein Mitglied · unavailable = Prüfung gerade nicht möglich · null = nichts offen
+   */
+  discordBlocked?: 'not_linked' | 'not_member' | 'unavailable' | null;
   /** Nur bei next = waitlist: Platz in der Warteliste */
   waitlist?: WaitlistInfo | null;
 }
@@ -684,7 +689,8 @@ export interface PublicSiteDTO {
   /** Support-Chat: Anzeige auf der Website (null = ausgeschaltet) */
   chat: { name: string; teaser: Localized; welcome: Localized; quick: { id: string; question: Localized }[]; ai: boolean; handoff: boolean; retentionDays: number } | null;
   /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
-  discord: { available: boolean; required: boolean; inviteUrl: string | null; note: Localized };
+  /** autoJoin = beim Verbinden tritt das Konto dem Discord-Server automatisch bei (dann braucht niemand den Einladungslink) */
+  discord: { available: boolean; required: boolean; autoJoin: boolean; inviteUrl: string | null; note: Localized };
   botFairUse: BotFairUseSettings;
   /** Aufgelöste Links (Admin-Einstellung → .env → Standard) */
   brand: BrandSettings;
