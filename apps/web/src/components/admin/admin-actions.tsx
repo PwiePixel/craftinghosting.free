@@ -83,6 +83,8 @@ export function ServerActions({ server }: { server: AdminServerDTO }) {
       )}
       {paused && s === 'active' && <ActionButton label="Pause aufheben" run={act('clear-pause')} />}
       {s === 'provisioning_failed' && <ActionButton label="Erneut versuchen" run={act('retry')} />}
+      {/* Offene Anfrage mit Panel-Konto: Voraussetzungen jetzt prüfen und den Server erstellen */}
+      {s === 'pending' && server.pendingReason !== 'email' && server.pendingReason !== 'panel' && <ActionButton label="Erneut versuchen" run={act('retry')} />}
       {(s === 'active' || s === 'expiring') && <ActionButton label="Sperren" confirm="Wirklich sperren?" danger run={act('suspend')} />}
       {s === 'suspended' && <ActionButton label="Entsperren" run={act('unsuspend')} />}
       {s !== 'provisioning' && <ActionButton label="Löschen" confirm="Endgültig löschen?" danger run={act('delete')} />}

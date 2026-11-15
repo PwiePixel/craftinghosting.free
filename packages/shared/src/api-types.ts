@@ -279,6 +279,13 @@ export interface AdminOverviewDTO {
   };
 }
 
+/**
+ * Worauf eine offene Anfrage (Status „pending“) wartet:
+ * email = E-Mail noch nicht bestätigt · panel = noch kein Panel-Konto · discord_* = Discord-Pflicht nicht erfüllt ·
+ * stuck = alles erfüllt, der Server wurde aber nicht erstellt (Fehler – „Erneut versuchen“)
+ */
+export type PendingReason = 'email' | 'panel' | 'discord_not_linked' | 'discord_not_member' | 'discord_unavailable' | 'stuck';
+
 export interface AdminServerDTO {
   id: string;
   name: string;
@@ -299,6 +306,8 @@ export interface AdminServerDTO {
   suspendedAt: string | null;
   pausedUntil: string | null;
   pauseReason: string | null;
+  /** Nur bei offenen Anfragen (status = pending), sonst null */
+  pendingReason: PendingReason | null;
   provisioningAttempts: number;
   provisioningError: string | null;
   panelDescription: string | null;

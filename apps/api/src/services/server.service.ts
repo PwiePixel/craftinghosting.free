@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, ne, isNotNull } from 'drizzle-orm';
 import {
   cycleEndFor,
   deleteAt as deleteAtFor,
@@ -17,6 +17,7 @@ import {
   describeServerLimits,
   serverLimitBlock,
   type OwnedServerRef,
+  type PendingReason,
   type ServerLimitBlock,
   type ServerLimits,
 } from '@chfree/shared';
@@ -257,6 +258,43 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
   // Mit dem ersten Server gibt es auf Discord die Customer-Rolle
   if (activated.length > 0) syncCustomerRoleSoon(user.id);
   return activated;
+}
+
+/**
+ * Worauf wartet eine offene Anfrage dieses Accounts? `stuck` = alle Voraussetzungen sind erfüllt, der Server
+ * wurde aber (noch) nicht erstellt – z. B. weil die Erstellung beim letzten Versuch abgebrochen ist.
+ */
+export async function pendingReasonFor(user: Pick<User, 'emailVerifiedAt' | 'pteroUserId' | 'discordId'>, opts: { cached?: boolean } = {}): Promise<PendingReason> {
+  if (!user.emailVerifiedAt) return 'email';
+  if (!user.pteroUserId) return 'panel';
+  const gate = await discordGate(user, opts);
+  if (!gate.ok) return gate.reason === 'not_linked' ? 'discord_not_linked' : gate.reason === 'not_member' ? 'discord_not_member' : 'discord_unavailable';
+  return 'stuck';
+}
+
+/**
+ * Offene Anfragen von Accounts nachholen, die E-Mail und Panel-Konto längst haben: etwa wenn jemand dem
+ * Discord-Server erst später beigetreten ist, Discord bei der Prüfung nicht erreichbar war oder die Erstellung
+ * abgebrochen ist. Je Account höchstens alle 10 Minuten (schont das Anfrage-Kontingent bei Discord).
+ */
+const pendingTried = new Map<string, number>();
+export async function retryPendingServers(now = new Date()): Promise<{ accounts: number; created: number }> {
+  const rows = await db
+    .selectDistinct({ userId: servers.userId })
+    .from(servers)
+    .innerJoin(users, eq(users.id, servers.userId))
+    .where(and(eq(servers.status, 'pending'), isNotNull(users.emailVerifiedAt), isNotNull(users.pteroUserId), eq(users.status, 'active')))
+    .limit(200);
+  if (pendingTried.size > 5000) pendingTried.clear();
+  const due = rows.filter((r) => now.getTime() - (pendingTried.get(r.userId) ?? 0) >= 10 * 60_000).slice(0, 20);
+  let created = 0;
+  for (const { userId } of due) {
+    pendingTried.set(userId, now.getTime());
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) continue;
+    created += (await activatePendingServers(user).catch(() => [])).length;
+  }
+  return { accounts: due.length, created };
 }
 
 /** Server (ohne offene Anfragen und Wartelisten-Plätze), die auf die Grenzen angerechnet werden */

@@ -1,11 +1,13 @@
 /**
  * Job: fehlgeschlagene oder hängende Server-Anlagen erneut versuchen
- * (mit exponentiellem Backoff, maximal MAX_PROVISIONING_ATTEMPTS Versuche).
+ * (mit exponentiellem Backoff, maximal MAX_PROVISIONING_ATTEMPTS Versuche) – und offene Anfragen
+ * von Accounts nachholen, die ihr Panel-Konto schon haben.
  */
 import { and, eq, inArray, lt, or } from 'drizzle-orm';
 import { db } from '../db/client';
 import { servers } from '../db/schema';
 import { MAX_PROVISIONING_ATTEMPTS, provisionServer } from '../services/provisioning.service';
+import { retryPendingServers } from '../services/server.service';
 import type { JobDefinition } from './types';
 
 export const provisioningJob: JobDefinition = {
@@ -25,7 +27,7 @@ export const provisioningJob: JobDefinition = {
         ),
       );
 
-    const stats = { candidates: rows.length, provisioned: 0, failed: 0, backoff: 0 };
+    const stats = { candidates: rows.length, provisioned: 0, failed: 0, backoff: 0, pendingAccounts: 0, pendingCreated: 0 };
     for (const server of rows) {
       // Backoff: 1, 4, 9, 16 … Minuten nach dem letzten Versuch
       const waitMs = Math.max(1, server.provisioningAttempts) ** 2 * 60_000;
@@ -37,6 +39,10 @@ export const provisioningJob: JobDefinition = {
       if (result === 'active') stats.provisioned++;
       if (result === 'failed') stats.failed++;
     }
+    // Offene Anfragen von Accounts mit Panel-Konto nachholen (z. B. später dem Discord beigetreten)
+    const pending = await retryPendingServers(now).catch(() => ({ accounts: 0, created: 0 }));
+    stats.pendingAccounts = pending.accounts;
+    stats.pendingCreated = pending.created;
     return stats;
   },
 };

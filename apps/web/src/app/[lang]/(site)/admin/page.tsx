@@ -10,6 +10,7 @@ import {
   type AdminAuditDTO,
   type AdminChatDTO,
   type AdminDiscordDTO,
+  type PendingReason,
   type AdminMailDTO,
   type AdminOverviewDTO,
   type AdminServerDTO,
@@ -81,13 +82,23 @@ type Tab = (typeof TABS)[number]['id'];
 
 const STATUS_LABEL: Record<string, { label: string; tone: 'green' | 'amber' | 'red' | 'blue' | 'gray' }> = {
   waitlist: { label: 'Warteliste', tone: 'blue' },
-  pending: { label: 'Wartet (Panel-Zugang)', tone: 'gray' },
+  pending: { label: 'Offene Anfrage', tone: 'gray' },
   provisioning: { label: 'Wird eingerichtet', tone: 'blue' },
   provisioning_failed: { label: 'Einrichtung fehlgeschlagen', tone: 'red' },
   active: { label: 'Aktiv', tone: 'green' },
   expiring: { label: 'Läuft ab', tone: 'amber' },
   suspended: { label: 'Suspendiert', tone: 'red' },
   deleted: { label: 'Gelöscht', tone: 'gray' },
+};
+
+/** Offene Anfragen: worauf sie wirklich warten */
+const PENDING_LABEL: Record<PendingReason, { label: string; tone: 'amber' | 'red' | 'gray'; hint: string }> = {
+  email: { label: 'Wartet auf E-Mail-Bestätigung', tone: 'gray', hint: 'Der Nutzer hat den Code aus der E-Mail noch nicht eingegeben.' },
+  panel: { label: 'Wartet auf Panel-Zugang', tone: 'gray', hint: 'Der Nutzer hat noch kein Panel-Konto angelegt.' },
+  discord_not_linked: { label: 'Wartet auf Discord-Verbindung', tone: 'amber', hint: 'Panel-Konto ist da – das Discord-Konto ist noch nicht verbunden.' },
+  discord_not_member: { label: 'Wartet auf Discord-Beitritt', tone: 'amber', hint: 'Discord-Konto verknüpft, aber kein Mitglied eures Servers.' },
+  discord_unavailable: { label: 'Discord-Prüfung nicht möglich', tone: 'amber', hint: 'Discord war nicht erreichbar – „Erneut versuchen“ prüft noch einmal.' },
+  stuck: { label: 'Fehler: nicht erstellt', tone: 'red', hint: 'Alle Voraussetzungen sind erfüllt, der Server wurde aber nicht erstellt – „Erneut versuchen“ klicken.' },
 };
 
 const MODE_LABEL: Record<SiteSettings['registration']['mode'], string> = {
@@ -432,7 +443,8 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
     <>
       <Table head={['Server', 'Besitzer', 'Status', 'Laufzeit', 'Paket', 'Adresse', 'Aktionen']}>
         {list.map((s) => {
-          const st = STATUS_LABEL[s.status] ?? { label: s.status, tone: 'gray' as const };
+          const pendingInfo = s.status === 'pending' && s.pendingReason ? PENDING_LABEL[s.pendingReason] : null;
+          const st = pendingInfo ?? STATUS_LABEL[s.status] ?? { label: s.status, tone: 'gray' as const };
           const paused = s.pausedUntil && new Date(s.pausedUntil).getTime() > now;
           return (
             <tr key={s.id}>
@@ -458,6 +470,7 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
                 <span className="inline-flex items-center gap-1.5 text-gray-200">
                   <StatusDot tone={st.tone} /> {st.label}
                 </span>
+                {pendingInfo && <p className={cn('max-w-[240px] text-[11px]', pendingInfo.tone === 'red' ? 'text-red-300' : 'text-subtle')}>{pendingInfo.hint}</p>}
                 {s.suspensionReason && <p className="text-[11px] text-subtle">Grund: {s.suspensionReason === 'cycle_expired' ? '30 Tage abgelaufen' : s.suspensionReason === 'admin' ? 'vom Team' : s.suspensionReason}</p>}
                 <p className="text-[11px] text-subtle">Power: {s.powerState}</p>
                 {paused && (

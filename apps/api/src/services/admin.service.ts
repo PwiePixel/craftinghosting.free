@@ -20,6 +20,7 @@ import {
   type AdminMailDTO,
   type AdminOverviewDTO,
   type AdminServerDTO,
+  type PendingReason,
   type AdminUserDTO,
   type AdminWaitlistDTO,
   type AdminWaitlistBlockDTO,
@@ -46,7 +47,7 @@ import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { notificationMail } from './mail/templates';
 import { trySyncPanelDescription } from './panel';
-import { hardDeleteServer } from './server.service';
+import { activatePendingServers, hardDeleteServer, pendingReasonFor } from './server.service';
 import { destroyAllSessions } from './session.service';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
@@ -190,13 +191,20 @@ export async function listServersAdmin(
     .where(and(...conds));
   const { offset, ...info } = paging(filter.page, Number(totalRow?.n ?? 0));
   const rows = await db
-    .select({ s: servers, email: users.email, locale: users.locale })
+    .select({ s: servers, email: users.email, locale: users.locale, emailVerifiedAt: users.emailVerifiedAt, pteroUserId: users.pteroUserId, discordId: users.discordId })
     .from(servers)
     .innerJoin(users, eq(users.id, servers.userId))
     .where(and(...conds))
     .orderBy(desc(servers.createdAt), desc(servers.id))
     .limit(ADMIN_PAGE_SIZE)
     .offset(offset);
+  // Offene Anfragen: worauf sie warten (für Discord genügt ein bis zu 60 Sekunden alter Stand)
+  const reasons = new Map<string, PendingReason>();
+  await mapLimit(
+    rows.filter((r) => r.s.status === 'pending'),
+    5,
+    async (r) => void reasons.set(r.s.id, await pendingReasonFor(r, { cached: true })),
+  );
   const list = rows.map(({ s, email, locale }) => ({
     id: s.id,
     name: s.name,
@@ -217,6 +225,7 @@ export async function listServersAdmin(
     suspendedAt: iso(s.suspendedAt),
     pausedUntil: iso(s.pausedUntil),
     pauseReason: s.pauseReason,
+    pendingReason: s.status === 'pending' ? (reasons.get(s.id) ?? 'stuck') : null,
     provisioningAttempts: s.provisioningAttempts,
     provisioningError: s.provisioningError,
     panelDescription: s.panelDescription,
@@ -441,6 +450,35 @@ export async function serverAction(admin: User, id: string, action: ServerAction
       return;
     }
     case 'retry': {
+      // Offene Anfrage: Voraussetzungen jetzt prüfen und den Server erstellen
+      if (server.status === 'pending') {
+        const owner = await getUserById(server.userId);
+        let activated: string[];
+        try {
+          activated = await activatePendingServers(owner, ip);
+        } catch (err) {
+          throw new ApiError(502, 'retry_failed', L(`Die Erstellung ist fehlgeschlagen: ${(err as Error).message}`.slice(0, 300), `Creation failed: ${(err as Error).message}`.slice(0, 300)));
+        }
+        if (activated.includes(id)) {
+          await log('admin.pending_retry', `Offene Anfrage „${server.name}“ erneut versucht – der Server wird erstellt`);
+          return;
+        }
+        const [still] = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.id, id), eq(servers.status, 'pending'))).limit(1);
+        if (!still) {
+          await log('admin.pending_retry', `Offene Anfrage „${server.name}“ erneut versucht – verworfen, weil die Server-Grenze des Nutzers erreicht ist`);
+          throw new ApiError(409, 'limit_reached', L('Die Anfrage wurde verworfen: Der Nutzer hat die maximale Anzahl an Servern bereits erreicht.', 'The request was discarded: the user has already reached the maximum number of servers.'));
+        }
+        const why: Record<PendingReason, string> = {
+          email: 'Der Nutzer hat seine E-Mail-Adresse noch nicht bestätigt.',
+          panel: 'Der Nutzer hat noch kein Panel-Konto angelegt.',
+          discord_not_linked: 'Der Nutzer hat sein Discord-Konto noch nicht verbunden.',
+          discord_not_member: 'Das Discord-Konto ist verknüpft, aber kein Mitglied eures Discord-Servers.',
+          discord_unavailable: 'Discord ist gerade nicht erreichbar – die Mitgliedschaft lässt sich nicht prüfen. Bitte gleich noch einmal versuchen.',
+          stuck: 'Der Server konnte nicht erstellt werden. Bitte gleich noch einmal versuchen.',
+        };
+        const message = why[await pendingReasonFor(owner)];
+        throw new ApiError(409, 'not_ready', L(message, message));
+      }
       const res = await db
         .update(servers)
         .set({ provisioningAttempts: 0, lastProvisionAttemptAt: null, provisioningError: null })
