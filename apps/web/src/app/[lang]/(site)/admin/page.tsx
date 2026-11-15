@@ -27,8 +27,9 @@ import { DomainManager } from '@/components/admin/admin-domains';
 import { NewsletterManager } from '@/components/admin/admin-newsletter';
 import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
-import { MaintenanceQuickToggle, SettingsForm, StatusOverrides } from '@/components/admin/admin-settings';
+import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
 import { IncidentForm, IncidentList } from '@/components/admin/admin-status';
+import { StatusPageEditor } from '@/components/admin/admin-status-page';
 import { UsersTable } from '@/components/admin/admin-users';
 import { ExternalSpotsForm, WaitlistAddForm, WaitlistManager } from '@/components/admin/admin-waitlist';
 import { Alert, StatusDot } from '@/components/ui/primitives';
@@ -89,8 +90,6 @@ const MODE_LABEL: Record<SiteSettings['registration']['mode'], string> = {
 };
 
 /** Komponenten der Statusseite (Namen wie auf der Website) */
-const STATUS_COMPONENTS = Object.entries(getDict('de').status.components).map(([id, c]) => ({ id, name: c.name }));
-
 /** Seitenzahlen mit Auslassungen: 1 … 4 5 [6] 7 8 … 20 */
 function pageNumbers(page: number, pages: number): (number | '…')[] {
   const set = new Set([1, pages, page - 2, page - 1, page, page + 1, page + 2].filter((n) => n >= 1 && n <= pages));
@@ -673,27 +672,24 @@ function WaitlistTab({
   );
 }
 
-function StatusTab({ settings, incidents, live }: { settings: SiteSettings; incidents: StatusIncidentDTO[]; live: StatusDTO | null }) {
+function StatusTab({ settings, incidents, live, statusPath }: { settings: SiteSettings; incidents: StatusIncidentDTO[]; live: StatusDTO | null; statusPath: string }) {
   const labels = getDict('de').status.states;
-  const components = STATUS_COMPONENTS.map((c) => {
-    const l = live?.components.find((x) => x.id === c.id);
-    return { ...c, live: l ? labels[l.status].label : null };
-  });
+  // Auswahl für Meldungen: alle eingerichteten Komponenten
+  const components = settings.status.components.map((c) => ({ id: c.id, name: c.name.de }));
+  const shown = Object.fromEntries((live?.components ?? []).map((c) => [c.id, labels[c.status].label]));
   return (
     <div className="space-y-5">
-      <Card title="Status je Dienst">
-        <p className="mb-4 text-sm leading-relaxed text-muted">
-          „Automatisch“ nutzt die eigenen Prüfungen. Aktive Meldungen ersetzen die Prüfung für die betroffenen Dienste, der Wartungsmodus zeigt „Wartung“ für FreeHosting
-          und Website. Ein fester Status hat immer Vorrang und gilt, bis du ihn wieder auf „Automatisch“ stellst.
-        </p>
-        <StatusOverrides settings={settings} components={components} />
-      </Card>
       <Card title="Neue Meldung">
-        <IncidentForm components={STATUS_COMPONENTS} />
+        <p className="mb-4 text-sm leading-relaxed text-muted">
+          Störungen, Wartungen und Hinweise erscheinen oben auf der Statusseite. Solange eine Meldung läuft, ersetzt ihre Auswirkung die automatische Prüfung der betroffenen
+          Komponenten. Geplante Wartungen stehen vorab unter „Geplante Wartungen“.
+        </p>
+        <IncidentForm components={components} />
       </Card>
       <Card title="Meldungen">
-        <IncidentList incidents={incidents} components={STATUS_COMPONENTS} />
+        <IncidentList incidents={incidents} components={components} />
       </Card>
+      <StatusPageEditor settings={settings} live={shown} statusPath={statusPath} />
     </div>
   );
 }
@@ -767,7 +763,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'status') {
     const [inc, live] = await Promise.all([apiServer<{ incidents: StatusIncidentDTO[] }>('/admin/incidents', lang), apiServer<{ status: StatusDTO }>('/status', lang)]);
     failed = !inc.ok || !settings;
-    if (inc.ok && settings) content = <StatusTab settings={settings} incidents={inc.data.incidents} live={live.ok ? live.data.status : null} />;
+    if (inc.ok && settings) content = <StatusTab settings={settings} incidents={inc.data.incidents} live={live.ok ? live.data.status : null} statusPath={localePath(lang, 'status')} />;
   }
   if (tab === 'servers') {
     const res = await apiServer<{ servers: AdminServerDTO[] } & PageInfo>(`/admin/servers${suffix}`, lang);

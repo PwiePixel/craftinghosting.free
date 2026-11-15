@@ -7,7 +7,6 @@ import type {
   DomainSetting,
   EggRef,
   HardwareLocation,
-  IncidentImpact,
   PlanSetting,
   ProductSettings,
   RegistrationMode,
@@ -17,6 +16,7 @@ import type {
 } from './api-types';
 import { freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind } from './config/freehosting.config';
 import type { Locale, Localized } from './i18n';
+import { defaultStatusSettings, normalizeStatusSettings } from './status-settings';
 
 const toSetting = (p: PlanConfig): PlanSetting => ({ ...p, highlighted: p.highlighted ?? false, enabled: true, reserved: 0 });
 
@@ -171,12 +171,11 @@ export function defaultSiteSettings(): SiteSettings {
       servers: { mode: 'auto', value: 0, offset: 0 },
       uptime: { mode: 'auto', value: 99.9 },
     },
-    status: { overrides: {} },
+    status: defaultStatusSettings(),
   };
 }
 
 const REG_MODES: RegistrationMode[] = ['open', 'preregistration', 'closed'];
-const IMPACTS: (IncidentImpact | 'auto')[] = ['auto', 'operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance'];
 
 const int = (v: unknown, def: number, min: number, max: number) => {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
@@ -393,7 +392,6 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
   const su = obj(st.users);
   const ss = obj(st.servers);
   const sp = obj(st.uptime);
-  const overrides = obj(obj(i.status).overrides);
   const products = obj(i.products);
   const hw = obj(i.hardware);
   const dn = obj(i.donate);
@@ -542,11 +540,7 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
       servers: { mode: ss.mode === 'manual' ? 'manual' : 'auto', value: int(ss.value, 0, 0, 100_000_000), offset: int(ss.offset, 0, 0, 100_000_000) },
       uptime: { mode: sp.mode === 'manual' ? 'manual' : 'auto', value: num(sp.value, d.stats.uptime.value, 0, 100) },
     },
-    status: {
-      overrides: Object.fromEntries(
-        Object.entries(overrides).filter(([k, v]) => /^[a-z0-9_-]{1,32}$/.test(k) && IMPACTS.includes(v as IncidentImpact | 'auto') && v !== 'auto'),
-      ) as SiteSettings['status']['overrides'],
-    },
+    status: normalizeStatusSettings(i.status),
   };
 }
 

@@ -6,3 +6,4 @@ export * from './api-types';
 export * from './format';
 export * from './i18n';
 export * from './settings';
+export * from './status-settings';

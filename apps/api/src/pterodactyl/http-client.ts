@@ -225,6 +225,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
       id: n.attributes.id,
       name: n.attributes.name,
       fqdn: n.attributes.fqdn ?? '',
+      daemonUrl: n.attributes.fqdn ? `${n.attributes.scheme === 'http' ? 'http' : 'https'}://${n.attributes.fqdn}:${n.attributes.daemon_listen ?? 8080}` : null,
       maintenanceMode: !!n.attributes.maintenance_mode,
       locationId: n.attributes.location_id,
       memoryMb: n.attributes.memory ?? 0,

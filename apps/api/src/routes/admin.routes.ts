@@ -30,7 +30,6 @@ import {
 import { audit } from '../services/audit.service';
 import { deleteLogo, saveLogo } from '../services/logo.service';
 import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } from '../services/settings.service';
-import { COMPONENTS } from '../services/status.service';
 import { addWaitlistEntries, nextWaitlistIds, releaseWaitlist, removeWaitlistEntry } from '../services/waitlist.service';
 import { explainSmtpError } from '../services/mail/mailer';
 
@@ -194,7 +193,7 @@ export async function adminRoutes(app: FastifyInstance) {
   const incidentSchema = z.object({
     kind: z.enum(['incident', 'maintenance', 'notice']),
     impact: z.enum(['operational', 'degraded', 'partial_outage', 'major_outage', 'maintenance']),
-    components: z.array(z.enum(Object.keys(COMPONENTS) as [string, ...string[]])).max(10),
+    components: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/)).max(40),
     title: localizedText(160).refine((t) => !!(t.en || t.de), { message: 'Bitte einen Titel angeben (Englisch oder Deutsch).' }),
     message: z.object({ en: z.string().trim().max(5000).default(''), de: z.string().trim().max(5000).default('') }),
     startsAt: z.string().datetime({ offset: true }).nullable().optional().transform((v) => v ?? null),

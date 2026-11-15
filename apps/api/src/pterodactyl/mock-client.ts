@@ -232,9 +232,9 @@ export class PterodactylMockClient implements PterodactylGateway {
 
   async listNodes(): Promise<PteroNode[]> {
     return [
-      { id: 1, name: 'free-de-1 (Xeon Gold 6230)', fqdn: 'free-de-1.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
-      { id: 2, name: 'free-de-2 (Xeon Gold 6230)', fqdn: 'free-de-2.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
-      { id: 3, name: 'bots-de-1 (Discord-Bots)', fqdn: 'bots-de-1.craftinghosting.free', maintenanceMode: false, locationId: 1, memoryMb: 65_536, diskMb: 524_288 },
+      { id: 1, name: 'free-de-1 (Xeon Gold 6230)', fqdn: 'free-de-1.craftinghosting.free', daemonUrl: null, maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
+      { id: 2, name: 'free-de-2 (Xeon Gold 6230)', fqdn: 'free-de-2.craftinghosting.free', daemonUrl: null, maintenanceMode: false, locationId: 1, memoryMb: 262_144, diskMb: 1_048_576 },
+      { id: 3, name: 'bots-de-1 (Discord-Bots)', fqdn: 'bots-de-1.craftinghosting.free', daemonUrl: null, maintenanceMode: false, locationId: 1, memoryMb: 65_536, diskMb: 524_288 },
     ];
   }
 

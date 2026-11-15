@@ -21,21 +21,26 @@ export default async function StatusPage({ params }: Props) {
   const lang = await resolveLang(params);
   const t = getDict(lang).status;
   const res = await apiPublic<{ status: StatusDTO }>('/status', 0);
+  const status = res.ok ? res.data.status : null;
+  // Überschrift, Einleitung und Link sind im Admin-Bereich einstellbar (leer = Standardtext)
+  const page = status?.page;
   return (
     <div className="container-page py-14 sm:py-20">
       <div className="mx-auto max-w-3xl">
         <p className="label">Status</p>
-        <h1 className="h2 mt-3">{t.title}</h1>
-        <p className="lead mt-4">{t.intro}</p>
+        <h1 className="h2 mt-3">{page?.title[lang] || t.title}</h1>
+        <p className="lead mt-4">{page?.intro[lang] || t.intro}</p>
         <div className="mt-10">
-          <StatusBoard initial={res.ok ? res.data.status : null} />
+          <StatusBoard initial={status} />
         </div>
-        <p className="mt-6 text-sm text-muted">
-          {t.allServices}{' '}
-          <a href={site.statusUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-blue-400 hover:text-blue-300">
-            {site.statusUrl.replace(/^https?:\/\//, '')} <ArrowUpRight className="size-3.5" aria-hidden />
-          </a>
-        </p>
+        {(page?.showExternalLink ?? true) && (
+          <p className="mt-8 text-sm text-muted">
+            {t.allServices}{' '}
+            <a href={site.statusUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-0.5 text-blue-400 hover:text-blue-300">
+              {site.statusUrl.replace(/^https?:\/\//, '')} <ArrowUpRight className="size-3.5" aria-hidden />
+            </a>
+          </p>
+        )}
       </div>
     </div>
   );

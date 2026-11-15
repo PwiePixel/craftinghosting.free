@@ -134,7 +134,12 @@ Anmeldung wie gewohnt per E-Mail-Link (`/login`), danach `/admin` aufrufen. Zugr
 - **Übersicht:** Website-Zustand (Wartung, Registrierungsmodus, Warteliste) mit Wartungs-Schnellschalter, Nutzer, Server nach Status, Pakete, E-Mail-Warteschlange, Pterodactyl-/SMTP-Einstellungen, Zustand aller Jobs (mit „Jetzt ausführen“) – Warnung, wenn der Worker nicht läuft
 - **Einstellungen:** Wartungsmodus (Hinweis DE/EN, voraussichtliches Ende), Registrierung *Offen / Vorregistrierung / Geschlossen*, kostenlose Server pro Person, **Kapazität je Paket** (maximale Plätze + außerhalb belegte Plätze → auf der Website „Noch 12 von 100 Plätzen frei“ bzw. „Ausgebucht“), EPYC-Plätze gesamt und davon außerhalb belegt, Anmeldungen außerhalb der Website, Zahlen auf der Startseite (automatisch + Zusatz oder fester Wert). Wirkt nach wenigen Sekunden – kein Neustart nötig.
 - **Warteliste:** Plätze mit Rang und Hardware (EPYC/Xeon), 50 pro Seite mit Blättern, „Die nächsten N freischalten“, Auswahl freischalten, Einträge entfernen, **Personen hinzufügen** (E-Mail-Liste von Vormerkungen aus dem alten System/Discord – auf Wunsch vor allen anderen eingereiht, mit Info-Mail) und **Vormerkungen als Anzahl** mit „+ / −“ (siehe unten)
-- **Statusseite:** Status je Dienst (Automatisch / Online / Beeinträchtigt / Teilausfall / Down / Wartung), Meldungen anlegen (Störung, Wartung, Hinweis; DE/EN; Beginn/Ende – in der Zukunft = geplante Wartung), bearbeiten, beenden, löschen
+- **Statusseite:** Meldungen anlegen (Störung, Wartung, Hinweis; DE/EN; Beginn/Ende – in der Zukunft = geplante Wartung), bearbeiten, beenden, löschen. Darunter **„Statusseite gestalten“** – alles, was die Statusseite zeigt, ist einstellbar:
+  - *Darstellung:* Überschrift, Einleitung, Zeitraum des Verlaufs (7–90 Tage), Banner, Tagesbalken, Prozentzahl, Legende, Antwortzeit, vergangene Meldungen, Link zur Statusseite des Hauptanbieters
+  - *Zustände:* Text, Banner-Text und Farbe für Betriebsbereit / Eingeschränkt / Geplante Wartung / Ausfall (DE/EN) sowie die Farbe für Tage ohne Messdaten
+  - *Gruppen:* beliebige Karten (z. B. „Netzwerk“, „Game-Nodes“) mit Name, Symbol und Reihenfolge
+  - *Komponenten:* Name, Unterzeile, Gruppe, Reihenfolge, Sichtbarkeit, eigener Text für „Betriebsbereit“ (z. B. „Aktiv“) und die **Prüfung**: FreeHosting gesamt, Website, API & Datenbank, Pterodactyl Panel, alle Nodes, ein bestimmter Node (Wartungsmodus aus dem Panel + direkter Ping auf Wings), eigene Adresse (HTTP-Check) oder manuell. Ein fester Status (Automatisch / Betriebsbereit / Eingeschränkt / Teilausfall / Ausfall / Wartung) hat immer Vorrang
+  - *Verlauf korrigieren:* einzelne Tage je Komponente von Hand festlegen (Fehlalarm ausbessern, Ausfall nachtragen)
 - **Server:** 50 pro Seite mit Blättern, Suche/Filter, Link ins Pterodactyl-Admin, Aktionen: +30 Tage, Pause aufheben, Sperren/Entsperren, Einrichtung erneut versuchen, Löschen
 - **Nutzer:** 50 pro Seite, Suche und Filter (E-Mail unbestätigt, ohne Server, auf der Warteliste, gesperrt, Admins), Panel-Konto, Sperren/Entsperren, Admin-Rechte und **Konten löschen**: einzeln, per Häkchen (Umschalt + Klick für ganze Bereiche, „alle auf dieser Seite“), **alle Treffer** von Suche/Filter über alle Seiten (Bestätigung mit „LÖSCHEN“, Fortschrittsanzeige) oder per eingefügter E-Mail-Liste. Gelöscht werden das Website-Konto und die kostenlosen Server; das Pterodactyl-Konto bleibt (dort können bezahlte Server liegen). Admins und das eigene Konto werden nie gelöscht.
 - **Protokoll:** komplettes Audit-Log (Nutzer, System, Admin), 50 pro Seite
@@ -142,7 +147,7 @@ Anmeldung wie gewohnt per E-Mail-Link (`/login`), danach `/admin` aufrufen. Zugr
 
 ## Wartungsmodus
 
-Im Admin unter *Einstellungen* oder mit dem Schnellschalter in der Übersicht. Besucher sehen dann eine eigene Wartungsseite (EN/DE, eigener Hinweis, voraussichtliches Ende, Discord-Button, „Anmelden“ im Header, lädt sich selbst neu, sobald die Wartung vorbei ist). **Anmelden bleibt möglich**: Login, E-Mail-Link und „Meine Server“ funktionieren (mit Hinweis auf die Wartung), ebenso Statusseite und Rechtstexte – gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (Startseite, FAQ und `/start` zeigen die Wartungsseite). **Admins sehen die Website normal**. Die API lehnt Registrieren, Erstellen, Reaktivieren und Löschen durch Nutzer ab. Automatische Löschungen pausieren während der Wartung und 24 h danach. Die Statusseite zeigt „Wartung“ für FreeHosting und Website.
+Im Admin unter *Einstellungen* oder mit dem Schnellschalter in der Übersicht. Besucher sehen dann eine eigene Wartungsseite (EN/DE, eigener Hinweis, voraussichtliches Ende, Discord-Button, „Anmelden“ im Header, lädt sich selbst neu, sobald die Wartung vorbei ist). **Anmelden bleibt möglich**: Login, E-Mail-Link und „Meine Server“ funktionieren (mit Hinweis auf die Wartung), ebenso Statusseite und Rechtstexte – gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (Startseite, FAQ und `/start` zeigen die Wartungsseite). **Admins sehen die Website normal**. Die API lehnt Registrieren, Erstellen, Reaktivieren und Löschen durch Nutzer ab. Automatische Löschungen pausieren während der Wartung und 24 h danach. Die Statusseite zeigt „Wartung“ für alle Komponenten mit der Prüfung „FreeHosting gesamt“ oder „Website“.
 
 ## Vorregistrierung (Early Access)
 
@@ -247,7 +252,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | `sync-power-states` | 60 s | Zustand aus dem Panel lesen, Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation, **Fair-Use für Discord-Bots** (CPU-Dauerlast, Inaktivität) |
 | `enforce-fair-use` | 60 s | Chat-Warnungen, 24-h-Limit, Wochen-Offline-Zeit, Pausen-Verstöße |
 | `cycle-lifecycle` | 60 s | Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag |
-| `status-history` | 5 min | Status aller Dienste speichern (Grundlage für die Uptime der letzten 30 Tage) |
+| `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |
 | `notification-emails` | 30 s | E-Mail-Outbox mit Wiederholungen |
@@ -274,7 +279,7 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 | GET | `/meta` · `/site` · `/status` · `/health` | Pakete & Verfügbarkeit, öffentliche Einstellungen + Zahlen, Netzwerkstatus (inkl. Meldungen und Uptime), Liveness |
 | GET | `/admin/overview` · `/admin/servers` · `/admin/users` · `/admin/audit` · `/admin/mails` | Admin: Übersicht und Listen (nur Admins, sonst 404) |
 | POST | `/admin/servers/:id/{extend,clear-pause,suspend,unsuspend,retry,delete}` · `/admin/users/:id/{lock,unlock,make-admin,remove-admin}` · `/admin/jobs/:name/run` · `/admin/mail-test` | Admin-Aktionen (alle im Audit-Log) |
-| GET/POST | `/admin/settings` | Einstellungen (Wartung, Registrierung, Produkte & Pakete, Hardware, Spenden, Bot-Fair-Use, Warteliste, Zahlen, Status je Dienst) |
+| GET/POST | `/admin/settings` | Einstellungen (Wartung, Registrierung, Produkte & Pakete, Hardware, Spenden, Bot-Fair-Use, Warteliste, Zahlen, Statusseite: Gruppen, Komponenten, Texte, Farben, Verlauf) |
 | GET | `/admin/panel` | Pterodactyl: Verbindung, Nodes mit freien Ports, alle Eggs, Vorschläge je Servertyp |
 | POST | `/admin/servers/bulk` | Alle Server sperren / entsperren / löschen (in Runden, mit `dryRun`-Vorschau und Ausnahmen) |
 | POST | `/consent` | Bestätigung des Cookie-Hinweises protokollieren |

@@ -44,6 +44,8 @@ export interface PteroNode {
   id: number;
   name: string;
   fqdn: string;
+  /** Adresse von Wings (Schema, Host, Port) – null, wenn unbekannt (z. B. im Mock-Modus) */
+  daemonUrl: string | null;
   maintenanceMode: boolean;
   locationId: number;
   memoryMb: number;

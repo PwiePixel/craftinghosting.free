@@ -87,15 +87,84 @@ export interface NotificationDTO {
 
 export type ComponentStatus = 'operational' | 'degraded' | 'partial_outage' | 'major_outage' | 'maintenance' | 'unknown';
 
+/** Zustand eines Tages im Verlauf der Statusseite (none = keine Messdaten) */
+export type StatusDayState = 'operational' | 'degraded' | 'maintenance' | 'outage' | 'none';
+/** Die vier Kategorien der Legende */
+export type StatusCategory = Exclude<StatusDayState, 'none'>;
+
+export interface StatusDayDTO {
+  /** Kalendertag (YYYY-MM-DD, Zeitzone der Website) */
+  date: string;
+  state: StatusDayState;
+  /** Verfügbarkeit an diesem Tag in Prozent (null = keine Messdaten) */
+  uptime: number | null;
+}
+
+/** Woher der Status einer Komponente kommt */
+export type StatusSource = 'manual' | 'service' | 'api' | 'panel' | 'nodes' | 'node' | 'website' | 'http';
+export const statusSources: StatusSource[] = ['manual', 'service', 'website', 'api', 'panel', 'nodes', 'node', 'http'];
+
+export const statusIcons = ['network', 'server', 'cpu', 'globe', 'database', 'shield', 'bot', 'gamepad', 'cloud', 'activity', 'mail', 'lock', 'zap', 'box'] as const;
+export type StatusIcon = (typeof statusIcons)[number];
+
+export interface StatusGroupSetting {
+  id: string;
+  name: Localized;
+  icon: StatusIcon;
+}
+
+export interface StatusComponentSetting {
+  id: string;
+  /** ID der Gruppe */
+  group: string;
+  name: Localized;
+  /** Kleine Zeile unter dem Namen, z. B. „DE-XEON-01 · Dual Intel Xeon Gold 6230“ */
+  subtitle: Localized;
+  source: StatusSource;
+  /** Bei „node“: ID des Pterodactyl-Nodes · bei „http“: Adresse, die geprüft wird */
+  target: string;
+  /** Eigener Text für „Betriebsbereit“, z. B. „Aktiv“ (leer = Standard) */
+  operationalLabel: Localized;
+  visible: boolean;
+}
+
+export interface StatusPageSettings {
+  /** Überschrift und Einleitung (leer = Standardtext) */
+  title: Localized;
+  intro: Localized;
+  /** Länge des Verlaufs in Tagen (7–90) */
+  days: number;
+  showBanner: boolean;
+  showBars: boolean;
+  showUptime: boolean;
+  showLegend: boolean;
+  showLatency: boolean;
+  /** Vergangene Meldungen der letzten 14 Tage */
+  showPast: boolean;
+  /** Link zur Statusseite des Hauptanbieters unter der Seite (Adresse: Einstellungen → Links) */
+  showExternalLink: boolean;
+  /** Bezeichnungen der vier Zustände (Legende und Status je Komponente) */
+  labels: Record<StatusCategory, Localized>;
+  /** Text im Banner über der Seite je Gesamtzustand */
+  banners: Record<StatusCategory, Localized>;
+  /** Farben als Hex-Wert (#rrggbb) */
+  colors: Record<StatusDayState, string>;
+}
+
 export interface StatusComponentDTO {
   id: string;
-  name: string;
-  description: string;
+  group: string;
+  name: Localized;
+  subtitle: Localized;
+  /** Eigener Text für „Betriebsbereit“ (leer = Standard) */
+  operationalLabel: Localized;
   status: ComponentStatus;
   latencyMs: number | null;
   checkedAt: string;
-  /** Verfügbarkeit der letzten 30 Tage in Prozent (null = noch keine Daten) */
-  uptime30d: number | null;
+  /** Verfügbarkeit im angezeigten Zeitraum in Prozent (null = noch keine Daten) */
+  uptime: number | null;
+  /** Ein Eintrag je Tag, ältester zuerst, letzter = heute */
+  days: StatusDayDTO[];
 }
 
 export type IncidentKind = 'incident' | 'maintenance' | 'notice';
@@ -119,6 +188,8 @@ export interface StatusIncidentDTO {
 
 export interface StatusDTO {
   overall: ComponentStatus;
+  page: StatusPageSettings;
+  groups: StatusGroupSetting[];
   components: StatusComponentDTO[];
   incidents: StatusIncidentDTO[];
   provider: string;
@@ -320,6 +391,14 @@ export interface SiteSettings {
   status: {
     /** Manueller Status je Komponente (auto = automatische Prüfung) */
     overrides: Record<string, IncidentImpact | 'auto'>;
+    /** Darstellung der Statusseite */
+    page: StatusPageSettings;
+    groups: StatusGroupSetting[];
+    components: StatusComponentSetting[];
+    /** Nodes direkt anpingen (Wings), nicht nur den Wartungsmodus aus dem Panel lesen */
+    pingNodes: boolean;
+    /** Nachträgliche Korrekturen am Verlauf: Komponente → Tag (YYYY-MM-DD) → Zustand */
+    history: Record<string, Record<string, StatusCategory>>;
   };
 }
 
