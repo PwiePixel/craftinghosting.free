@@ -1,0 +1,9 @@
+[Unit]
+Description=CraftingHosting.free – beobachtet die Tunnel-Konfiguration (neue Domains im Admin-Bereich)
+
+[Path]
+PathChanged=/var/lib/chfree/.cloudflared/config.yml
+Unit=chfree-tunnel-reload.service
+
+[Install]
+WantedBy=multi-user.target

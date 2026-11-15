@@ -118,7 +118,9 @@ Modi:
   reconfigure    Fragen erneut stellen, .env neu schreiben (Secrets bleiben), neu bauen
   status         Zustand der Dienste, Health-Check, Datenbank, letztes Backup
   backup         Datenbank + .env als tar.gz nach ${BACKUP_DIR} sichern
-  logs [dienst]  Logs live anzeigen (api | worker | web – ohne Angabe: alle)
+  tunnel         Cloudflare Tunnel vorbereiten (installiert cloudflared + Dienst). Danach im Admin-Bereich unter
+                 „Domains“ die Domain per Link freigeben – Tunnel, DNS und HTTPS entstehen automatisch.
+  logs [dienst]  Logs live anzeigen (api | worker | web | tunnel | caddy – ohne Angabe: api, worker, web)
   cli <befehl>   API-CLI ausführen, z. B.  cli mail-test du@example.com  ·  cli make-admin du@example.com
   uninstall      Dienste und Caddy-Seite entfernen (Daten und .env bleiben – Löschen nur mit --purge + Bestätigung)
 
@@ -140,6 +142,7 @@ Variablen für die Installation ohne Rückfragen:
   CHF_ACME_EMAIL        E-Mail für Let's Encrypt (Standard: erste Admin-E-Mail)
   CHF_WWW               yes | no | auto – auch www.<domain> bedienen (auto: nur bei Hauptdomains)
   CHF_PROXY             caddy (Standard) | none
+  CHF_TUNNEL            yes = Cloudflare Tunnel gleich mit vorbereiten (wie 'install.sh tunnel')
   CHF_SKIP_PANEL_CHECK  1 = Verbindung zum Panel nicht prüfen
   CHF_PTERO_LOCATION_IDS  optionale Fallback-Locations (normalerweise leer – Zuordnung im Admin-Bereich)
   CHF_REPO_URL, CHF_BRANCH   Quelle, falls das Skript nicht aus einem Checkout gestartet wird
@@ -154,7 +157,7 @@ parse_args() {
   local mode_set=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      install | update | reconfigure | status | uninstall | backup | logs | cli | help)
+      install | update | reconfigure | status | uninstall | backup | logs | cli | tunnel | help)
         if [ "$mode_set" -eq 0 ]; then MODE=$1; mode_set=1; else EXTRA_ARGS+=("$1"); fi ;;
       -y | --yes) ASSUME_YES=1 ;;
       --no-caddy) PROXY="none" ;;
@@ -632,6 +635,16 @@ collect_config() {
   if [ "$keep_q" -eq 1 ]; then ok "Vorhandene Angaben übernommen"; else ok "Angaben vollständig"; fi
 }
 
+# Öffentliche IP-Adressen (kommagetrennt): die Absenderadressen der Standardroute, ohne private Bereiche
+detect_public_ips() {
+  local out="" a
+  a="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true)"
+  case "$a" in "" | 10.* | 192.168.* | 127.* | 169.254.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[01][0-9].* | 100.12[0-7].*) ;; *) out="$a" ;; esac
+  a="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null | sed -n 's/.* src \([0-9a-fA-F:]*\).*/\1/p' | head -n1 || true)"
+  case "$a" in "" | fe80:* | fc* | fd* | ::1) ;; *) out="${out:+$out,}$a" ;; esac
+  printf '%s' "$out"
+}
+
 db_path() {
   local p
   p="$(get_env DATABASE_PATH)"
@@ -705,6 +718,9 @@ EOF
   v="${CHF_PTERO_LOCATION_IDS:-$(get_env PTERODACTYL_LOCATION_IDS)}"
   set_env PTERODACTYL_LOCATION_IDS "$v"
   set_env PTERODACTYL_MOCK_STATE_FILE "$DATA_DIR/pterodactyl-mock.json"
+  # Öffentliche Adressen dieses Servers – der Admin-Bereich zeigt sie als Ziel für DNS-Einträge (Admin → Domains)
+  v="$(detect_public_ips)"
+  if [ -n "$v" ]; then set_env SERVER_PUBLIC_IPS "$v"; fi
 
   # Mail
   set_env SMTP_HOST "$CFG_SMTP_HOST"
@@ -956,12 +972,73 @@ restart_services() {
   ok "Dienste gestartet"
 }
 
+# ----------------------------------------------------------------- Cloudflare Tunnel
+install_cloudflared() {
+  if command -v cloudflared >/dev/null 2>&1; then
+    ok "cloudflared ist bereits installiert ($(cloudflared --version 2>/dev/null | head -n1))"
+    return 0
+  fi
+  if is_dry; then info "[dry-run] cloudflared aus dem Paketarchiv von Cloudflare installieren (pkg.cloudflare.com)"; return 0; fi
+  install -d -m 0755 /usr/share/keyrings
+  if curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg; then
+    printf 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main\n' >/etc/apt/sources.list.d/cloudflared.list
+    try apt-get update || true
+    try env DEBIAN_FRONTEND=noninteractive apt-get install -y cloudflared || true
+  fi
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    # Rückfall: Paket direkt von GitHub
+    local arch deb="$TMP_DIR/cloudflared.deb"
+    arch="$(dpkg --print-architecture)"
+    info "Paketarchiv nicht erreichbar – lade cloudflared-linux-$arch.deb von GitHub …"
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$arch.deb" -o "$deb" || die "cloudflared konnte nicht heruntergeladen werden."
+    run dpkg -i "$deb"
+  fi
+  ok "cloudflared installiert ($(cloudflared --version 2>/dev/null | head -n1))"
+}
+
+# Units für den Tunnel: Der Dienst startet von selbst, sobald der Admin-Bereich die Konfiguration geschrieben hat,
+# und startet neu, wenn sie sich ändert (neue Domain).
+install_tunnel_units() {
+  local f src bin
+  bin="$(command -v cloudflared 2>/dev/null || echo /usr/bin/cloudflared)"
+  for f in chfree-tunnel.service chfree-tunnel.path chfree-tunnel-reload.service chfree-tunnel-reload.path; do
+    src="$INSTALL_DIR/deploy/systemd/$f"
+    if is_dry; then info "[dry-run] $src → $UNIT_DIR/$f"; continue; fi
+    [ -f "$src" ] || die "Unit-Vorlage fehlt: $src"
+    sed -e "s#$DEFAULT_INSTALL_DIR#$INSTALL_DIR#g" \
+      -e "s#$DEFAULT_DATA_DIR#$DATA_DIR#g" \
+      -e "s#^User=chfree#User=$SERVICE_USER#" \
+      -e "s#^Group=chfree#Group=$SERVICE_USER#" \
+      -e "s#/usr/bin/cloudflared#$bin#g" \
+      "$src" >"$UNIT_DIR/$f"
+    chmod 0644 "$UNIT_DIR/$f"
+  done
+  run systemctl daemon-reload
+  run systemctl enable --now chfree-tunnel.path chfree-tunnel-reload.path
+}
+
+flow_tunnel() {
+  detect_os
+  [ -d "$INSTALL_DIR" ] || is_dry || die "Keine Installation gefunden ($INSTALL_DIR). Zuerst installieren: bash install.sh"
+  step "Cloudflare Tunnel vorbereiten"
+  install_cloudflared
+  install_tunnel_units
+  if ! is_dry; then try systemctl restart chfree-api || true; fi
+  ok "Tunnel-Dienst eingerichtet"
+  printf '\n  %sSo geht es weiter (im Browser):%s\n' "$C_BOLD" "$C_RESET"
+  printf '    1. Admin-Bereich → Domains → „Cloudflare Tunnel“\n'
+  printf '    2. „Link zum Freigeben erzeugen“ anklicken, den Link öffnen und die Domain bei Cloudflare auswählen\n'
+  printf '    3. „Tunnel einrichten“ – Tunnel, DNS-Einträge und HTTPS entstehen automatisch\n\n'
+  printf '  Die Domain muss dafür bei Cloudflare liegen (Nameserver von Cloudflare). Offene Ports braucht der Tunnel nicht.\n'
+  printf '  Logs:  chfree logs tunnel\n'
+}
+
 install_wrapper() {
   if is_dry; then info "[dry-run] $WRAPPER_PATH schreiben (chfree update|status|logs|backup|reconfigure)"; return 0; fi
   cat >"$WRAPPER_PATH" <<EOF
 #!/usr/bin/env bash
 # CraftingHosting.free – Verwaltung (erzeugt von install.sh)
-#   chfree status | update | reconfigure | backup | logs [api|worker|web] | cli <befehl> | uninstall
+#   chfree status | update | reconfigure | backup | tunnel | logs [api|worker|web|tunnel] | cli <befehl> | uninstall
 export CHF_INSTALL_DIR="\${CHF_INSTALL_DIR:-$INSTALL_DIR}"
 export CHF_DATA_DIR="\${CHF_DATA_DIR:-$DATA_DIR}"
 export CHF_BACKUP_DIR="\${CHF_BACKUP_DIR:-$BACKUP_DIR}"
@@ -995,7 +1072,36 @@ write_caddy_site() { # write_caddy_site ZIELDATEI
     printf '\theader {\n\t\t-Server\n\t}\n\n'
     printf '\t# Bewusst keine Zugriffsprotokolle (Datenschutz) – Caddy schreibt nur Fehler ins Log.\n'
     printf '}\n'
+    if [ "${2:-yes}" = "yes" ]; then
+      # Weitere Domains aus dem Admin-Bereich (Admin → Domains): Das Zertifikat wird beim ersten Aufruf geholt.
+      # Caddy fragt vorher bei der API nach, ob die Domain eingetragen ist (siehe on_demand_tls im Caddyfile).
+      printf '\n# Weitere Domains aus dem Admin-Bereich – Zertifikat automatisch beim ersten Aufruf\n'
+      printf 'https:// {\n'
+      printf '\ttls {\n\t\ton_demand\n\t}\n'
+      printf '\tencode zstd gzip\n\n'
+      printf '\thandle /api/* {\n\t\treverse_proxy 127.0.0.1:%s\n\t}\n\n' "$API_PORT"
+      printf '\thandle {\n\t\treverse_proxy 127.0.0.1:%s\n\t}\n\n' "$WEB_PORT"
+      printf '\theader {\n\t\t-Server\n\t}\n'
+      printf '}\n'
+    fi
   } >"$1"
+}
+
+# Hauptdatei von Caddy, wenn sie uns gehört: globale Option „on_demand_tls“ (Rückfrage bei der API) + import
+write_caddy_main() { # write_caddy_main ZIELDATEI
+  {
+    printf '%s\n' "$CADDY_MARKER"
+    printf '{\n\ton_demand_tls {\n\t\task http://127.0.0.1:%s/api/v1/internal/tls-check\n\t}\n}\n\n' "$API_PORT"
+    printf '%s\n' "$CADDY_IMPORT"
+  } >"$1"
+}
+
+# 0 = Die Hauptdatei enthält (außer Kommentaren) nur unsere Zeilen – wir dürfen sie neu schreiben
+caddy_main_is_ours() {
+  local normalized ours
+  normalized="$(grep -vE '^[[:space:]]*(#|$)' "$1" | tr -d '[:space:]' || true)"
+  ours="$(printf '%s' "$CADDY_IMPORT" | tr -d '[:space:]')"
+  [ "$normalized" = "$ours" ] || [ "$normalized" = "{on_demand_tls{askhttp://127.0.0.1:${API_PORT}/api/v1/internal/tls-check}}$ours" ]
 }
 
 configure_caddy() {
@@ -1005,33 +1111,54 @@ configure_caddy() {
   site="$(caddy_site_file)"
   if is_dry; then
     info "[dry-run] $site schreiben:"
-    write_caddy_site "$TMP_DIR/chfree.caddy"
+    write_caddy_site "$TMP_DIR/chfree.caddy" yes
     sed 's/^/      /' "$TMP_DIR/chfree.caddy"
+    info "[dry-run] $main (wenn noch nicht vorhanden bzw. nur von uns verwaltet):"
+    write_caddy_main "$TMP_DIR/Caddyfile.main"
+    sed 's/^/      /' "$TMP_DIR/Caddyfile.main"
     info "[dry-run] '$CADDY_IMPORT' in $main sicherstellen, caddy validate, systemctl reload caddy"
     return 0
   fi
   install -d -m 0755 "$CADDY_DIR/sites"
   [ -f "$site" ] && cp -p "$site" "$TMP_DIR/chfree.caddy.prev"
-  write_caddy_site "$site"
-  chmod 0644 "$site"
+  # Automatische Zertifikate für weitere Domains brauchen eine globale Option in der Hauptdatei –
+  # die setzen wir nur, wenn die Hauptdatei uns gehört (sonst bleiben fremde Seiten unangetastet).
+  local on_demand="yes"
 
   if [ ! -f "$main" ]; then
-    printf '%s\n%s\n' "$CADDY_MARKER" "$CADDY_IMPORT" >"$main"
+    write_caddy_main "$main"
+  elif caddy_main_is_ours "$main"; then
+    backup="$main.chfree-backup-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$main" "$backup"
+    write_caddy_main "$main"
   elif grep -qF "$CADDY_IMPORT" "$main"; then
-    :
+    grep -q 'on_demand_tls' "$main" || on_demand="no"
   else
     backup="$main.chfree-backup-$(date +%Y%m%d-%H%M%S)"
     cp -p "$main" "$backup"
     normalized="$(grep -vE '^[[:space:]]*(#|$)' "$main" | tr -d '[:space:]' || true)"
     if [ "$normalized" = ":80{root*/usr/share/caddyfile_server}" ] || [ -z "$normalized" ]; then
       # Unveränderte Standarddatei des Pakets (Willkommensseite) → ersetzen
-      printf '%s\n%s\n' "$CADDY_MARKER" "$CADDY_IMPORT" >"$main"
+      write_caddy_main "$main"
       info "Standard-Caddyfile ersetzt (Sicherung: $backup)"
     else
       # Vorhandene Seiten bleiben unangetastet – nur die import-Zeile wird angehängt
       printf '\n%s\n%s\n' "$CADDY_MARKER" "$CADDY_IMPORT" >>"$main"
       info "Vorhandenes Caddyfile behalten, import-Zeile ergänzt (Sicherung: $backup)"
+      on_demand="no"
     fi
+  fi
+  write_caddy_site "$site" "$on_demand"
+  chmod 0644 "$site"
+  if [ "$on_demand" = "yes" ] && ! try caddy validate --adapter caddyfile --config "$main"; then
+    # Sicherheitsnetz: ohne den Zusatz für weitere Domains erneut versuchen
+    warn "Automatische Zertifikate für weitere Domains ließen sich nicht einrichten – weitere Domains dann bitte über den Tunnel verbinden."
+    on_demand="no"
+    write_caddy_site "$site" "$on_demand"
+  fi
+  if [ "$on_demand" = "no" ]; then
+    warn "Zertifikate für weitere Domains (Admin → Domains) werden von Caddy hier nicht automatisch geholt."
+    info "Abhilfe: Domains über den Cloudflare Tunnel verbinden (bash install.sh tunnel) oder im Caddyfile selbst eintragen."
   fi
 
   if ! try caddy validate --adapter caddyfile --config "$main"; then
@@ -1132,7 +1259,8 @@ print_summary() {
   ${C_BOLD}Nächste Schritte im Admin-Bereich${C_RESET}
     • Admin → Pterodactyl: Nodes und Eggs zuweisen – Minecraft-Node(s), Discord-Bot-Node,
       Python- und Node.js-Egg (werden automatisch aus dem Panel erkannt)
-    • Admin → Einstellungen: Pakete, Kapazität, Standorte/Hardware, Spendenlink (SumUp)
+    • Admin → Einstellungen: Pakete, Kapazität, Regeln, Standorte/Hardware, Newsletter, Spendenlink (SumUp)
+    • Admin → Domains: weitere Domains eintragen – HTTPS kommt automatisch (DNS-Eintrag oder Cloudflare Tunnel)
     • Admin → E-Mails: Testmail senden
 
   ${C_BOLD}Datenbank und Schlüssel – BEIDES sichern${C_RESET}
@@ -1258,9 +1386,9 @@ do_logs() {
   else
     for a in "${EXTRA_ARGS[@]}"; do
       case "$a" in
-        api | worker | web) units+=(-u "chfree-$a") ;;
+        api | worker | web | tunnel) units+=(-u "chfree-$a") ;;
         caddy) units+=(-u caddy) ;;
-        *) die "Unbekannter Dienst: $a (möglich: api, worker, web, caddy)" ;;
+        *) die "Unbekannter Dienst: $a (möglich: api, worker, web, tunnel, caddy)" ;;
       esac
     done
   fi
@@ -1287,6 +1415,9 @@ do_uninstall() {
   try systemctl disable --now "${SERVICES[@]}" || true
   local unit
   for unit in "${SERVICES[@]}"; do run rm -f "$UNIT_DIR/$unit.service"; done
+  # Tunnel-Dienst und seine Auslöser
+  try systemctl disable --now chfree-tunnel.path chfree-tunnel-reload.path chfree-tunnel.service || true
+  for unit in chfree-tunnel.service chfree-tunnel.path chfree-tunnel-reload.service chfree-tunnel-reload.path; do run rm -f "$UNIT_DIR/$unit"; done
   try systemctl daemon-reload || true
   site="$(caddy_site_file)"
   if [ -f "$site" ]; then
@@ -1348,6 +1479,8 @@ flow_install() { # install + reconfigure
   if [ "$MODE" = "reconfigure" ] && ! is_dry && [ -f "$(db_path)" ] && [ "${CHF_SKIP_BACKUP:-0}" != "1" ]; then do_backup; fi
   migrate_db
   install_units
+  install_tunnel_units
+  if [ "${CHF_TUNNEL:-no}" = "yes" ]; then install_cloudflared; fi
   install_wrapper
   restart_services
   configure_caddy
@@ -1391,6 +1524,7 @@ flow_update() {
   if ! is_dry && [ -f "$(db_path)" ] && [ "${CHF_SKIP_BACKUP:-0}" != "1" ]; then do_backup; fi
   migrate_db
   install_units
+  install_tunnel_units
   install_wrapper
   restart_services
   if [ "$PROXY" = "caddy" ] && [ -f "$(caddy_site_file)" ]; then configure_caddy; fi
@@ -1411,6 +1545,7 @@ main() {
       if is_dry; then printf '  %s(Dry-Run: am System wird nichts geändert)%s\n' "$C_YELLOW" "$C_RESET"; fi
       flow_install ;;
     update) flow_update ;;
+    tunnel) flow_tunnel ;;
     status) do_status ;;
     backup) do_backup ;;
     logs) do_logs ;;

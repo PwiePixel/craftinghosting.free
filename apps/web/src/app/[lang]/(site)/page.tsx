@@ -10,7 +10,7 @@ import { formatters, getDict, resolveLang } from '@/i18n';
 import { alternates } from '@/lib/seo';
 import { panelHost, site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
-import { siteTexts } from '@/lib/site-texts';
+import { siteSummary, siteTexts } from '@/lib/site-texts';
 import { cn } from '@/lib/utils';
 
 type Props = { params: Promise<{ lang: string }> };
@@ -18,25 +18,64 @@ type Props = { params: Promise<{ lang: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const lang = await resolveLang(params);
-  return { alternates: alternates(lang, 'home') };
+  const { seo } = await getSite();
+  // Eigener Titel / eigene Beschreibung aus dem Admin-Bereich (Einstellungen → Suchmaschinen & KI)
+  const title = seo.title[lang];
+  const description = seo.description[lang];
+  return {
+    alternates: alternates(lang, 'home'),
+    ...(title ? { title: { absolute: title }, openGraph: { title }, twitter: { title } } : {}),
+    ...(description ? { description } : {}),
+  };
 }
 
-function JsonLd({ lang, plans }: { lang: Locale; plans: PublicPlanDTO[] }) {
-  const t = getDict(lang).home;
+/**
+ * Strukturierte Daten (schema.org) – dieselben Fakten wie auf der Seite und in /llms.txt:
+ * Anbieter, Website, je Produkt ein Dienst mit allen Paketen (0 €), Standort und Kontakt.
+ */
+function JsonLd({ lang, plans, settings }: { lang: Locale; plans: PublicPlanDTO[]; settings: PublicSiteDTO }) {
+  const f = formatters(lang);
+  const summary = siteSummary(settings, lang);
+  const areaServed = settings.hardware.locations.map((l) => ({ '@type': 'Country', name: l.name[lang] }));
+  const offer = (p: PublicPlanDTO) => ({
+    '@type': 'Offer',
+    name: p.name,
+    description: `${f.mb(p.memoryMb)} RAM · ${f.mb(p.diskMb)} NVMe · ${p.cpuPercent} % CPU`,
+    price: '0',
+    priceCurrency: 'EUR',
+    availability: p.available ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
+    url: `${site.url}${localePath(lang, 'start', { plan: p.id })}`,
+  });
+  const service = (kind: 'minecraft' | 'discord', name: string, serviceType: string) => {
+    const list = plans.filter((p) => p.kind === kind);
+    return list.length
+      ? [{ '@type': 'Service', name, serviceType, description: summary, provider: { '@id': `${site.parentUrl}#organization` }, areaServed, isAccessibleForFree: true, url: `${site.url}${localePath(lang, 'home')}`, offers: list.map(offer) }]
+      : [];
+  };
   const data = {
     '@context': 'https://schema.org',
     '@graph': [
-      { '@type': 'Organization', '@id': `${site.parentUrl}#organization`, name: 'Crafting Hosting', url: site.parentUrl },
-      { '@type': 'WebSite', name: site.name, url: site.url, inLanguage: ['de-DE', 'en-GB'], publisher: { '@id': `${site.parentUrl}#organization` } },
       {
-        '@type': 'Service',
-        name: t.jsonLdService,
-        serviceType: 'Minecraft Server Hosting, Discord Bot Hosting',
-        provider: { '@id': `${site.parentUrl}#organization` },
-        areaServed: 'EU',
-        url: `${site.url}${localePath(lang, 'home')}`,
-        offers: plans.map((p) => ({ '@type': 'Offer', name: p.name, price: '0', priceCurrency: 'EUR', url: `${site.url}${localePath(lang, 'start', { plan: p.id })}` })),
+        '@type': 'Organization',
+        '@id': `${site.parentUrl}#organization`,
+        name: 'Crafting Hosting',
+        alternateName: ['CraftingHosting', 'crafting.host'],
+        url: site.parentUrl,
+        sameAs: [site.discordUrl],
+        contactPoint: { '@type': 'ContactPoint', contactType: 'customer support', email: site.supportEmail, availableLanguage: ['de', 'en'] },
       },
+      {
+        '@type': 'WebSite',
+        '@id': `${site.url}#website`,
+        name: site.name,
+        alternateName: ['Crafting Hosting Free', 'CraftingHosting Free'],
+        description: summary,
+        url: site.url,
+        inLanguage: ['de-DE', 'en-GB'],
+        publisher: { '@id': `${site.parentUrl}#organization` },
+      },
+      ...service('minecraft', lang === 'de' ? 'Kostenloses Minecraft-Server-Hosting' : 'Free Minecraft server hosting', 'Minecraft Server Hosting'),
+      ...service('discord', lang === 'de' ? 'Kostenloses Discord-Bot-Hosting' : 'Free Discord bot hosting', 'Discord Bot Hosting'),
     ],
   };
   return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;
@@ -191,7 +230,7 @@ export default async function HomePage({ params }: Props) {
   const faqItems = [...(early ? [t.faq.earlyItem(x.twoTiers)] : []), ...t.faq.items(settings.registration.maxServersPerUser, x.faq)];
   return (
     <>
-      <JsonLd lang={lang} plans={[...minecraftPlans, ...discordPlans]} />
+      <JsonLd lang={lang} plans={[...minecraftPlans, ...discordPlans]} settings={settings} />
 
       {/* ------------------------------------------------------------ Hero */}
       <section className="relative overflow-hidden">

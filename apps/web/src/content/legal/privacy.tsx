@@ -100,6 +100,19 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
           Warteliste, bevorstehendes Ende der {cycle.days} Tage, bevorstehende Löschung). Die E-Mails werden über den eigenen Mailserver von CraftingHosting versendet; ein externer
           Versanddienstleister wird nicht eingesetzt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO. Werbe-E-Mails versenden wir nicht.
         </p>
+        <p>
+          <strong>Newsletter:</strong> Wenn du den Newsletter abonnierst (Formular auf der Website oder Häkchen beim Erstellen eines Servers), verwenden wir deine
+          E-Mail-Adresse, um dir Neuigkeiten und Angebote von CraftingHosting.free und Crafting Hosting zu schicken. Die Anmeldung wird erst wirksam, wenn du sie über
+          einen Bestätigungslink bestätigst (Double-Opt-in) bzw. – beim Häkchen im Bestellformular – deine E-Mail-Adresse bestätigst. Als Nachweis speichern wir Zeitpunkt
+          der Anmeldung und der Bestätigung, die gewählte Sprache und die IP-Adresse bei der Anmeldung (verschlüsselt). Rechtsgrundlage ist deine Einwilligung (Art. 6
+          Abs. 1 lit. a DSGVO, § 7 Abs. 2 Nr. 2 UWG). Du kannst sie jederzeit widerrufen – über den Abmeldelink am Ende jeder Ausgabe oder per Nachricht an uns. Nach der
+          Abmeldung erhältst du keinen Newsletter mehr; mit dem Löschen deines Kontos wird auch der Newsletter-Eintrag gelöscht. Der Versand erfolgt über unseren eigenen
+          Mailserver, ohne Öffnungs- oder Klick-Tracking.
+        </p>
+        <p>
+          Betriebliche Hinweise (z. B. zu Wartungen, Umzügen oder geänderten Bedingungen) schicken wir unabhängig vom Newsletter an die E-Mail-Adresse deines Kontos,
+          soweit das für die Bereitstellung des Dienstes erforderlich ist (Art. 6 Abs. 1 lit. b DSGVO).
+        </p>
       </section>
 
       <section>
@@ -245,6 +258,18 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
           We send emails to confirm your address, with sign-in links and about important events of your server (e.g. server ready, unlocked from the waitlist, end of the{' '}
           {cycle.days} days approaching, upcoming deletion). The emails are sent via CraftingHosting’s own mail server; no external email service provider is used. The legal
           basis is Art. 6 (1) (b) GDPR. We do not send advertising emails.
+        </p>
+        <p>
+          <strong>Newsletter:</strong> if you subscribe to the newsletter (form on the website or checkbox when creating a server), we use your email address to send
+          you news and offers from CraftingHosting.free and Crafting Hosting. The subscription only becomes effective once you confirm it via a confirmation link
+          (double opt-in) or – for the checkbox in the order form – confirm your email address. As proof we store the time of the subscription and of the confirmation,
+          the chosen language and the IP address at the time of subscription (encrypted). The legal basis is your consent (Art. 6(1)(a) GDPR). You can withdraw it at any
+          time – via the unsubscribe link at the end of every issue or by sending us a message. After unsubscribing you will no longer receive the newsletter; when you
+          delete your account, the newsletter entry is deleted as well. Emails are sent via our own mail server, without open or click tracking.
+        </p>
+        <p>
+          Operational notices (e.g. about maintenance, migrations or changed terms) are sent to your account’s email address independently of the newsletter, as far as
+          this is necessary to provide the service (Art. 6(1)(b) GDPR).
         </p>
       </section>
 

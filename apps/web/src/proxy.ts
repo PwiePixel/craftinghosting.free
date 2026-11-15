@@ -12,23 +12,46 @@ const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\
  * Status und Rechtstexte. Gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (/start) –
  * Startseite und FAQ zeigen die Wartungsseite.
  */
-const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate']);
+const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate', 'newsletter']);
 
 /* ------------------------------------------------------------ Wartungsmodus */
 
-let siteCache: { at: number; maintenance: boolean } | null = null;
+let siteCache: { at: number; maintenance: boolean; redirectHosts: string[] } | null = null;
+
+/** Hauptdomain (kanonische Adresse) – dorthin leiten weitere Domains mit „Weiterleiten“ aus dem Admin-Bereich */
+const PRIMARY = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_SITE_URL ?? '');
+  } catch {
+    return null;
+  }
+})();
 
 /** Wartungsmodus aus der API (10 s Cache, bei Fehlern: letzter bekannter Stand bzw. „keine Wartung“) */
 async function maintenanceEnabled(): Promise<boolean> {
   if (siteCache && Date.now() - siteCache.at < 10_000) return siteCache.maintenance;
   try {
     const res = await fetch(`${API}/api/v1/site`, { cache: 'no-store', signal: AbortSignal.timeout(2000) });
-    const data = (await res.json()) as { site?: { maintenance?: { enabled?: boolean } } };
-    siteCache = { at: Date.now(), maintenance: !!data.site?.maintenance?.enabled };
+    const data = (await res.json()) as { site?: { maintenance?: { enabled?: boolean }; domains?: { host: string; redirect: boolean }[] } };
+    siteCache = {
+      at: Date.now(),
+      maintenance: !!data.site?.maintenance?.enabled,
+      redirectHosts: (data.site?.domains ?? []).filter((d) => d.redirect).map((d) => d.host),
+    };
   } catch {
-    siteCache = { at: Date.now(), maintenance: siteCache?.maintenance ?? false };
+    siteCache = { at: Date.now(), maintenance: siteCache?.maintenance ?? false, redirectHosts: siteCache?.redirectHosts ?? [] };
   }
   return siteCache.maintenance;
+}
+
+/** Aufruf über eine weitere Domain, die auf die Hauptdomain weiterleiten soll? → Zieladresse */
+async function canonicalRedirect(request: NextRequest): Promise<URL | null> {
+  if (!PRIMARY) return null;
+  const host = (request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? '').split(',')[0]!.trim().toLowerCase().replace(/:\d+$/, '');
+  if (!host || host === PRIMARY.hostname) return null;
+  await maintenanceEnabled(); // füllt den Zwischenspeicher mit den Domains
+  if (!siteCache?.redirectHosts.includes(host)) return null;
+  return new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, PRIMARY);
 }
 
 /** Admins sehen die Website auch während der Wartung (Prüfung über die API, 30 s Cache je Session) */
@@ -93,6 +116,10 @@ const NOINDEX = { 'X-Robots-Tag': 'noindex, nofollow, noarchive' };
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Weitere Domains (Admin → Domains) mit „Weiterleiten“: dauerhaft auf die Hauptdomain
+  const canonical = await canonicalRedirect(request);
+  if (canonical) return NextResponse.redirect(canonical, 308);
 
   // Interne Vorschaubilder (/en/opengraph-image, /de/opengraph-image) unverändert
   if (/^\/(de|en)\/opengraph-image/.test(pathname)) return NextResponse.next();

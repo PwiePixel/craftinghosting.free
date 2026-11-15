@@ -106,6 +106,7 @@ export default async function StartPage({ params, searchParams }: Props) {
         blockedKinds={early ? [] : blockedKinds}
         userEmail={me?.user.email}
         early={early}
+        newsletterOption={settings.newsletter.signupCheckbox}
       />
     );
   }

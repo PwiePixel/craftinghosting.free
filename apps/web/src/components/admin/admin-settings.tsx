@@ -11,6 +11,7 @@ import { Plus, Save, Wrench } from 'lucide-react';
 import { productKinds, type ProductKind, type RegistrationMode, type SiteSettings } from '@chfree/shared';
 import { ActionButton } from '@/components/admin/admin-actions';
 import { ProductEditor } from '@/components/admin/admin-plans';
+import { MoreSettings } from '@/components/admin/admin-settings-more';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -166,6 +167,12 @@ export function SettingsForm({
   function patch<K extends keyof SiteSettings>(key: K, value: Partial<SiteSettings[K]>) {
     setMessage(null);
     setS((prev) => ({ ...prev, [key]: { ...prev[key], ...value } }));
+  }
+
+  /** Für verschachtelte Einstellungen (Regeln, Versionen …): beliebige Änderung am ganzen Objekt */
+  function update(fn: (prev: SiteSettings) => SiteSettings) {
+    setMessage(null);
+    setS(fn);
   }
 
   async function onSave() {
@@ -482,6 +489,8 @@ export function SettingsForm({
           </div>
         </div>
       </Section>
+
+      <MoreSettings s={s} update={update} />
 
       <SaveBar pending={pending} message={message} onSave={onSave} dirty={dirty} />
     </div>

@@ -1,0 +1,6 @@
+[Unit]
+Description=CraftingHosting.free – Cloudflare Tunnel nach geänderter Konfiguration neu starten
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl try-restart chfree-tunnel.service

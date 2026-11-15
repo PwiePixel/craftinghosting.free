@@ -44,6 +44,7 @@ export function StartForm({
   blockedKinds = [],
   userEmail,
   early = false,
+  newsletterOption = false,
 }: {
   /** Produkte mit Paketen und Verfügbarkeit – kommen aus dem Admin-Bereich */
   products: PublicSiteDTO['products'];
@@ -52,6 +53,8 @@ export function StartForm({
   /** Produkte, bei denen der Nutzer sein Limit schon erreicht hat */
   blockedKinds?: ProductKind[];
   userEmail?: string;
+  /** Häkchen „Newsletter abonnieren“ anbieten (Admin-Einstellung; nur ohne Anmeldung) */
+  newsletterOption?: boolean;
   /** Vorregistrierung (Early Access): Platz auf der Warteliste statt sofortiger Erstellung */
   early?: boolean;
 }) {
@@ -87,18 +90,33 @@ export function StartForm({
   const firstType = defaultType(startKind);
   const [planId, setPlanId] = useState(initialPlan && planOk(initialPlan, startKind) ? initialPlan : defaultPlan(startKind));
   const [typeId, setTypeId] = useState(firstType.id);
-  const [version, setVersion] = useState(firstType.defaultVersion);
+  const [version, setVersion] = useState(() => {
+    // Versionsliste aus dem Admin-Bereich – die Standardversion nur, wenn sie darin vorkommt
+    const list = products[startKind].serverTypes.find((x) => x.id === firstType.id)?.versions ?? firstType.versions;
+    return list.includes(firstType.defaultVersion) ? firstType.defaultVersion : (list[0] ?? firstType.defaultVersion);
+  });
   function switchKind(k: ProductKind) {
     if (k === kind) return;
     const type = defaultType(k);
     setKind(k);
     setPlanId(defaultPlan(k));
     setTypeId(type.id);
-    setVersion(type.defaultVersion);
+    setVersion(firstVersion(type.id, k));
   }
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [accept, setAccept] = useState(false);
+  const [newsletter, setNewsletter] = useState(false);
+  // Wählbare Versionen kommen aus dem Admin-Bereich (Einstellungen → Minecraft-Versionen)
+  const versionsOf = (id: string, k: ProductKind = kind) => {
+    const list = products[k].serverTypes.find((a) => a.id === id)?.versions;
+    return list?.length ? list : (serverTypesOf(k).find((t) => t.id === id)?.versions ?? ['latest']);
+  };
+  const firstVersion = (id: string, k: ProductKind = kind) => {
+    const list = versionsOf(id, k);
+    const preferred = serverTypesOf(k).find((t) => t.id === id)?.defaultVersion;
+    return preferred && list.includes(preferred) ? preferred : list[0]!;
+  };
   const [sentTo, setSentTo] = useState<string | null>(null);
 
   const loggedIn = !!userEmail;
@@ -108,10 +126,10 @@ export function StartForm({
   // Schrittnummern: Die Produktwahl erscheint nur, wenn es beide Angebote gibt
   const offset = kinds.length > 1 ? 1 : 0;
 
-  const values = { planId, serverType: typeId, version, name, email, acceptTerms: accept || undefined };
+  const values = { planId, serverType: typeId, version, name, email, acceptTerms: accept || undefined, ...(newsletterOption && newsletter ? { newsletter: true } : {}) };
 
   function submit() {
-    void form.submit(loggedIn ? { ...values, email: undefined } : values, async (data) => {
+    void form.submit(loggedIn ? { ...values, email: undefined, newsletter: undefined } : values, async (data) => {
       if (loggedIn) {
         await api('/servers', { body: data });
         router.push(localePath(lang, 'myServers', { neu: early ? 'waitlist' : '1' }));
@@ -254,7 +272,7 @@ export function StartForm({
                   disabled={!ok}
                   onChange={() => {
                     setTypeId(type_.id);
-                    setVersion(type_.defaultVersion);
+                    setVersion(firstVersion(type_.id));
                   }}
                 />
                 {type_.name}
@@ -271,7 +289,7 @@ export function StartForm({
           <div className="mt-4 max-w-xs">
             <Field label={s.version} htmlFor="version" error={form.fieldErrors.version}>
               <select id="version" value={version} onChange={(e) => setVersion(e.target.value)} className="input">
-                {type.versions.map((v) => (
+                {versionsOf(type.id).map((v) => (
                   <option key={v} value={v}>
                     {v === 'latest' ? t.common.latestVersion : v}
                   </option>
@@ -320,6 +338,12 @@ export function StartForm({
           </span>
         </label>
         {form.fieldErrors.acceptTerms && <p className="mt-2 text-sm text-red-400">{form.fieldErrors.acceptTerms}</p>}
+        {newsletterOption && !loggedIn && (
+          <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm leading-relaxed text-muted">
+            <input type="checkbox" checked={newsletter} onChange={(e) => setNewsletter(e.target.checked)} className="mt-1 size-4 shrink-0 accent-blue-600" />
+            <span>{t.newsletter.checkbox}</span>
+          </label>
+        )}
 
         <Button type="submit" size="lg" loading={form.pending} disabled={!plan} className="mt-6 w-full sm:w-auto">
           {early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}

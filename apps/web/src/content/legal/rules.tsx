@@ -18,7 +18,7 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>1. Kostenlose Server</h2>
         <p>
-          Pro Person {max === 1 ? 'ist derzeit ein kostenloser Server' : `sind derzeit ${max} kostenlose Server`} erlaubt. Verfügbare Pakete:{' '}
+          Pro Person {max === 1 ? 'ist derzeit ein kostenloser Server' : `sind derzeit ${max} kostenlose Server`} erlaubt (das Limit gilt je Angebot – Minecraft-Server und Discord-Bots zählen getrennt). Verfügbare Pakete:{' '}
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'de')} RAM, ${formatMb(p.diskMb, 'de')} NVMe)`).join(', ')}. Alle Ressourcen werden fair geteilt; die Angaben sind
           Obergrenzen und keine garantierte Dauerleistung.
         </p>
@@ -106,7 +106,7 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>1. Free servers</h2>
         <p>
-          {max === 1 ? 'One free server is' : `${max} free servers are`} currently allowed per person. Available plans:{' '}
+          {max === 1 ? 'One free server is' : `${max} free servers are`} currently allowed per person (the limit applies per offer – Minecraft servers and Discord bots count separately). Available plans:{' '}
           {plans.map((p) => `${p.name} (${formatMb(p.memoryMb, 'en')} RAM, ${formatMb(p.diskMb, 'en')} NVMe)`).join(', ')}. All resources are shared fairly; the values stated
           are upper limits, not guaranteed sustained performance.
         </p>

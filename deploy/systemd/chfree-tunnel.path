@@ -1,0 +1,9 @@
+[Unit]
+Description=CraftingHosting.free – startet den Cloudflare Tunnel, sobald er im Admin-Bereich eingerichtet ist
+
+[Path]
+PathExists=/var/lib/chfree/.cloudflared/config.yml
+Unit=chfree-tunnel.service
+
+[Install]
+WantedBy=multi-user.target

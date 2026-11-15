@@ -1,0 +1,32 @@
+[Unit]
+Description=CraftingHosting.free Cloudflare Tunnel
+Documentation=https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+After=network-online.target
+Wants=network-online.target
+# Startet erst, wenn der Admin-Bereich (Admin → Domains → Tunnel) die Konfiguration geschrieben hat
+ConditionPathExists=/var/lib/chfree/.cloudflared/config.yml
+
+[Service]
+Type=simple
+User=chfree
+Group=chfree
+Environment=HOME=/var/lib/chfree
+ExecStart=/usr/bin/cloudflared tunnel --config /var/lib/chfree/.cloudflared/config.yml --pidfile /var/lib/chfree/.cloudflared/tunnel.pid run
+Restart=always
+RestartSec=5
+
+# Absicherung: der Tunnel darf nur in das Datenverzeichnis schreiben
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/chfree
+
+[Install]
+WantedBy=multi-user.target

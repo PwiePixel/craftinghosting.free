@@ -7,6 +7,7 @@ import { LangProvider } from '@/i18n/client';
 import { getDict, resolveLang } from '@/i18n';
 import { alternates } from '@/lib/seo';
 import { site } from '@/lib/site';
+import { getSite } from '@/lib/site-settings';
 
 export const dynamicParams = false;
 
@@ -17,6 +18,8 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ lang: string }> }): Promise<Metadata> {
   const lang = await resolveLang(params);
   const t = getDict(lang).meta;
+  // Im Admin-Bereich abschaltbar: Einstellungen → Suchmaschinen & KI
+  const indexing = (await getSite()).seo.indexing;
   return {
     metadataBase: new URL(site.url),
     title: { default: t.title, template: '%s | CraftingHosting.free' },
@@ -29,7 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ lang: str
     alternates: alternates(lang, 'home'),
     openGraph: { type: 'website', locale: t.ogLocale, url: `${site.url}${localePath(lang, 'home')}`, siteName: site.name, title: t.shortTitle, description: t.description },
     twitter: { card: 'summary_large_image', title: t.shortTitle, description: t.description },
-    robots: { index: true, follow: true },
+    robots: indexing ? { index: true, follow: true } : { index: false, follow: false },
     formatDetection: { telephone: false },
   };
 }

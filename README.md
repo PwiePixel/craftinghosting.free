@@ -18,6 +18,29 @@ git clone https://github.com/PwiePixel/craftinghosting.free.git && cd craftingho
 
 Das Skript fragt nur Domain, Panel-Adresse, die zwei Pterodactyl-API-Keys und die Admin-E-Mail ab – Details in [`docs/DEBIAN-13.md`](docs/DEBIAN-13.md). Die Website läuft auf einem eigenen Server und spricht per API mit dem Panel-Server.
 
+## Auf `main` veröffentlichen
+
+Die Entwicklung liegt auf dem Branch `claude/adoring-mendel-nrzvan`. So wird daraus `main`:
+
+```bash
+git fetch origin
+```
+
+```bash
+git push origin origin/claude/adoring-mendel-nrzvan:refs/heads/main
+```
+
+Danach auf GitHub unter *Settings → General → Default branch* `main` auswählen. Der Installer und `chfree update` nutzen dann automatisch `main`. Gibt es `main` schon mit eigenem Inhalt, stattdessen auf GitHub einen Pull Request vom Branch nach `main` öffnen und zusammenführen.
+
+## Domains und HTTPS
+
+| Weg | Wann | Was du tust |
+| --- | --- | --- |
+| **Direkt (DNS)** | Domain bei beliebigem Anbieter | Admin → *Domains* → Domain hinzufügen, beim Anbieter einen A-Eintrag auf die Server-IP setzen (wird dort angezeigt). Caddy holt das Zertifikat beim ersten Aufruf und verlängert es selbst. Caddy fragt vorher die API, ob die Domain eingetragen ist (`/api/v1/internal/tls-check`) – fremde Domains bekommen kein Zertifikat. |
+| **Cloudflare Tunnel** | Domain liegt bei Cloudflare, keine offenen Ports gewünscht | Einmal `sudo bash install.sh tunnel` (installiert `cloudflared` + Dienst). Dann Admin → *Domains* → „Link zum Freigeben erzeugen“, Link öffnen, Domain auswählen, „Tunnel einrichten“. Tunnel, DNS-Eintrag und Zertifikat entstehen automatisch. |
+
+Weitere Domains leiten standardmäßig auf die Hauptdomain weiter (gut für Suchmaschinen). Die Hauptdomain selbst änderst du mit `chfree reconfigure`. Der Tunnel-Weg gilt für die Installation mit `install.sh` (nicht für Docker).
+
 ## Was neu ist
 
 | Bereich | Kurz erklärt |
@@ -32,6 +55,11 @@ Das Skript fragt nur Domain, Panel-Adresse, die zwei Pterodactyl-API-Keys und di
 | **Spenden** | Admin → Einstellungen → *Spenden*: SumUp-Zahlungslink eintragen → Seite `/donate` · `/de/spenden` und Link „Spenden“ im Header. |
 | **Verschlüsselung** | Datenbank ist eine verschlüsselte SQLite-Datei; IP-Adressen und Browser-Kennungen sind darin zusätzlich einzeln verschlüsselt (AES-256-GCM). |
 | **Cookie-Hinweis** | Kurzer Hinweis mit „Verstanden“; die Bestätigung wird mit Zeitpunkt und verschlüsselter IP protokolliert (90 Tage). |
+| **Domains** | Admin → *Domains*: weitere Domains eintragen (mit Weiterleitung auf die Hauptdomain oder als eigene Adresse). HTTPS kommt automatisch – per DNS-Eintrag (Caddy holt das Zertifikat beim ersten Aufruf) oder per **Cloudflare Tunnel** (Link zum Freigeben der Domain, Tunnel + DNS entstehen von selbst). |
+| **Newsletter** | Anmeldung mit Bestätigungslink (Formular im Footer, Seite `/newsletter`, Häkchen im Bestellformular), Abmeldung per Link. Admin → *Newsletter*: Ausgaben schreiben (DE/EN), Testmail, Versand mit Fortschritt, Abonnenten verwalten, CSV-Export. Auch betriebliche Hinweise an alle Konten. |
+| **Alles einstellbar** | Admin → *Einstellungen*: Fair-Use-Werte und Laufzeit (früher fest im Code), Minecraft-Versionen, Links & Kontakt, Hinweisleiste, Sperrliste für E-Mail-Adressen/-Domains (inkl. Wegwerf-Anbieter), Titel/Beschreibung für Suchmaschinen. Texte, Nutzungsbedingungen, E-Mails und Jobs übernehmen die Werte sofort. |
+| **Suchmaschinen & KI** | `/llms.txt` beschreibt das Angebot sachlich für KI-Assistenten – erzeugt aus denselben Einstellungen wie die Website (Pakete, Plätze, Regeln, Standorte), dazu strukturierte Daten (schema.org) und eine `robots.txt`, die KI-Crawler ausdrücklich zulässt. So gibt es keine widersprüchlichen Angaben. |
+| **CSV-Export** | Nutzer, Server und Newsletter-Abonnenten als CSV (Admin → *Nutzer* / *Server* / *Newsletter*). |
 
 ### Fair-Use-System für Discord-Bots
 
@@ -199,6 +227,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |
 | `notification-emails` | 30 s | E-Mail-Outbox mit Wiederholungen |
+| `newsletter-send` | 30 s | Newsletter-Ausgaben in Portionen versenden (Höchstzahl pro Minute im Admin einstellbar) |
 | `cleanup` | 1 h | abgelaufene Sessions/Links, nie bestätigte Anfragen (nach 3 Tagen), offene Anfragen ohne Panel-Zugang (14 Tage), alte Protokolle und Status-Verlauf (90 Tage) |
 
 **Idempotenz:** Lease-Locks pro Job (mehrere Worker möglich), bedingte UPDATEs für jeden Zustandswechsel, Dedupe-Keys für E-Mails und Chat-Hinweise (jeder Hinweis genau einmal), Laufzeiten werden aus Fakten berechnet statt hochgezählt, `external_id` bei Pterodactyl. Die Datenbank ist die Quelle der Wahrheit – Abweichungen im Panel (z. B. manuelles Entsperren) werden automatisch korrigiert.
@@ -225,6 +254,12 @@ Basis `/api/v1`. Zustandsändernde Anfragen brauchen den Header `X-CHF-Client: w
 | GET | `/admin/panel` | Pterodactyl: Verbindung, Nodes mit freien Ports, alle Eggs, Vorschläge je Servertyp |
 | POST | `/admin/servers/bulk` | Alle Server sperren / entsperren / löschen (in Runden, mit `dryRun`-Vorschau und Ausnahmen) |
 | POST | `/consent` | Bestätigung des Cookie-Hinweises protokollieren |
+| POST | `/newsletter/subscribe` · `/newsletter/confirm` · `/newsletter/unsubscribe` | Newsletter: anmelden (Double-Opt-in), bestätigen, abmelden |
+| GET/POST | `/admin/newsletter` · `/admin/newsletter/subscribers` · `/admin/newsletter/campaigns[/:id[/{test,send,cancel,delete}]]` | Newsletter im Admin: Übersicht, Abonnenten, Ausgaben |
+| GET/POST | `/admin/domains` · `/admin/domains/{update,remove}` | Weitere Domains mit DNS-/HTTPS-Prüfung |
+| GET/POST | `/admin/tunnel` · `/admin/tunnel/{login,setup,restart,disconnect}` | Cloudflare Tunnel: Freigabe-Link, Einrichten, Neustart, Trennen |
+| GET | `/admin/export/{users,servers,subscribers}` | CSV-Export |
+| GET | `/internal/tls-check?domain=…` | Für Caddy: darf für diese Domain ein Zertifikat geholt werden? |
 | GET/POST | `/admin/waitlist` · `/admin/waitlist/release` · `/admin/waitlist/:id/remove` | Warteliste |
 | GET/POST | `/admin/incidents` · `/admin/incidents/:id` · `/admin/incidents/:id/{resolve,delete}` | Meldungen der Statusseite |
 

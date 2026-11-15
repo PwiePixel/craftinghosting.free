@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import { localePath, type Locale } from '@chfree/shared';
 import { Logo } from '@/components/brand/logo';
+import { NewsletterForm } from '@/components/newsletter/newsletter-form';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 
-export function SiteFooter({ lang, donate = false }: { lang: Locale; donate?: boolean }) {
+export function SiteFooter({ lang, donate = false, newsletter = false }: { lang: Locale; donate?: boolean; newsletter?: boolean }) {
   const t = getDict(lang);
   const links = [
     { href: localePath(lang, 'faq'), label: t.nav.faq },
@@ -19,6 +20,7 @@ export function SiteFooter({ lang, donate = false }: { lang: Locale; donate?: bo
     { href: localePath(lang, 'rules'), label: t.footer.rules },
     { href: localePath(lang, 'discordTerms'), label: t.footer.discordTerms },
     { href: localePath(lang, 'cookies'), label: t.footer.cookies },
+    ...(newsletter ? [{ href: localePath(lang, 'newsletter'), label: t.footer.newsletter }] : []),
   ];
 
   return (
@@ -49,6 +51,15 @@ export function SiteFooter({ lang, donate = false }: { lang: Locale; donate?: bo
             )}
           </nav>
         </div>
+        {newsletter && (
+          <div className="mt-10 flex flex-col gap-4 border-t border-line pt-8 md:flex-row md:items-start md:justify-between">
+            <div className="max-w-sm">
+              <p className="text-sm font-semibold text-white">{t.newsletter.footerTitle}</p>
+              <p className="mt-1 text-sm text-muted">{t.newsletter.footerText}</p>
+            </div>
+            <NewsletterForm compact id="footer-newsletter" />
+          </div>
+        )}
         <div className="mt-10 flex flex-col gap-2 border-t border-line pt-6 text-[13px] text-subtle sm:flex-row sm:justify-between">
           <p>© 2024 – {new Date().getFullYear()} Crafting Hosting</p>
           <p>craftinghosting.free · A CraftingHosting Service</p>

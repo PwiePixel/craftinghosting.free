@@ -23,6 +23,8 @@ import {
 } from '@chfree/shared';
 import { MailTestForm, RunJobButton, ServerActions } from '@/components/admin/admin-actions';
 import { ServerBulkActions } from '@/components/admin/admin-bulk';
+import { DomainManager } from '@/components/admin/admin-domains';
+import { NewsletterManager } from '@/components/admin/admin-newsletter';
 import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm, StatusOverrides } from '@/components/admin/admin-settings';
@@ -58,6 +60,8 @@ const TABS = [
   { id: 'overview', label: 'Übersicht' },
   { id: 'settings', label: 'Einstellungen' },
   { id: 'panel', label: 'Pterodactyl' },
+  { id: 'domains', label: 'Domains' },
+  { id: 'newsletter', label: 'Newsletter' },
   { id: 'waitlist', label: 'Warteliste' },
   { id: 'status', label: 'Statusseite' },
   { id: 'servers', label: 'Server' },
@@ -237,6 +241,15 @@ function SearchBar({ tab, q, status, kind }: { tab: Tab; q?: string; status?: st
       <button type="submit" className="rounded-lg border border-line-strong px-4 py-2 text-sm text-gray-200 hover:bg-white/5">
         Filtern
       </button>
+      {(tab === 'servers' || tab === 'users') && (
+        <a
+          href={`/api/v1/admin/export/${tab}`}
+          className="inline-flex items-center justify-center rounded-lg border border-line-strong px-4 py-2 text-sm text-gray-200 hover:bg-white/5 sm:ml-auto"
+          title="Alle Einträge als CSV-Datei herunterladen"
+        >
+          CSV-Export
+        </a>
+      )}
     </form>
   );
 }
@@ -718,7 +731,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
 
   let content: React.ReactNode = null;
   let failed = overview ? !overview.ok : false;
-  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist';
+  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist' || tab === 'newsletter';
   const settingsRes = needsSettings ? await apiServer<{ settings: SiteSettings }>('/admin/settings', lang) : null;
   const settings = settingsRes?.ok ? settingsRes.data.settings : null;
 
@@ -730,6 +743,8 @@ export default async function AdminPage({ params, searchParams }: Props) {
   }
   // Nodes und Eggs lädt die Komponente selbst – das Einlesen des Panels kann ein paar Sekunden dauern
   if (tab === 'panel') content = <PanelManager />;
+  if (tab === 'domains') content = <DomainManager />;
+  if (tab === 'newsletter') content = <NewsletterManager enabled={settings?.newsletter.enabled ?? true} />;
   if (tab === 'waitlist') {
     const [res, pub] = await Promise.all([
       apiServer<{ entries: AdminWaitlistDTO[]; blocks?: AdminWaitlistBlockDTO[] } & PageInfo>(`/admin/waitlist?page=${page}`, lang),

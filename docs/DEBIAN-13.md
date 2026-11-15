@@ -43,6 +43,24 @@ sudo CHF_DOMAIN=craftinghosting.free CHF_PANEL_URL=https://panel.craftinghosting
 
 Alle Optionen: `bash install.sh --help` · Probelauf ohne Änderungen: `bash install.sh --dry-run`
 
+## Weitere Domains und Cloudflare Tunnel
+
+Weitere Domains trägst du im Admin-Bereich unter **Domains** ein – ohne Neustart:
+
+- **Direkt:** A-Eintrag der Domain auf die IP dieses Servers setzen (die Seite zeigt sie an). Das Zertifikat holt Caddy
+  beim ersten Aufruf automatisch.
+- **Cloudflare Tunnel** (Domain liegt bei Cloudflare, keine offenen Ports nötig):
+
+```bash
+sudo bash install.sh tunnel
+```
+
+  Danach im Admin unter *Domains → Cloudflare Tunnel*: „Link zum Freigeben erzeugen“, Link öffnen, Domain auswählen,
+  „Tunnel einrichten“. Logs: `chfree logs tunnel`.
+
+Nutzt du ein eigenes Caddyfile mit anderen Seiten, richtet der Installer die automatischen Zertifikate für weitere
+Domains nicht ein (er fasst fremde Einstellungen nicht an) – nimm dann den Tunnel oder trage die Domain selbst ein.
+
 ## Betrieb
 
 ```bash
