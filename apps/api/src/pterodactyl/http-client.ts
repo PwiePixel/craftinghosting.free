@@ -230,6 +230,10 @@ export class PterodactylHttpClient implements PterodactylGateway {
       locationId: n.attributes.location_id,
       memoryMb: n.attributes.memory ?? 0,
       diskMb: n.attributes.disk ?? 0,
+      allocatedMemoryMb: typeof n.attributes.allocated_resources?.memory === 'number' ? n.attributes.allocated_resources.memory : undefined,
+      allocatedDiskMb: typeof n.attributes.allocated_resources?.disk === 'number' ? n.attributes.allocated_resources.disk : undefined,
+      memoryOverallocate: typeof n.attributes.memory_overallocate === 'number' ? n.attributes.memory_overallocate : undefined,
+      diskOverallocate: typeof n.attributes.disk_overallocate === 'number' ? n.attributes.disk_overallocate : undefined,
     }));
   }
 

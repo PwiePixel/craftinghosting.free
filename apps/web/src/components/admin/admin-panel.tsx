@@ -3,7 +3,8 @@
 /**
  * Tab „Pterodactyl“ im Admin-Bereich: Verbindung zum Panel, erkannte Nodes und Eggs.
  * Hier wird festgelegt, auf welchen Nodes Minecraft-Server bzw. Discord-Bots erstellt werden und
- * welches Egg zu welchem Servertyp gehört. Gespeichert wird in den Einstellungen (products.*.nodeIds / eggs).
+ * welches Egg zu welchem Servertyp gehört – und welche Nodes privat sind (nie für kostenlose Server).
+ * Gespeichert wird in den Einstellungen (products.*.nodeIds / eggs, privateNodeIds).
  */
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -53,6 +54,9 @@ export function PanelManager() {
   /** Gespeicherter Stand (Vergleich für „ungespeicherte Änderungen“) */
   const [saved, setSaved] = useState<Selection | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
+  /** Private Nodes: nie für kostenlose Server – auch nicht, wenn alle anderen voll sind */
+  const [priv, setPriv] = useState<number[]>([]);
+  const [savedPriv, setSavedPriv] = useState<number[]>([]);
   const [discordEnabled, setDiscordEnabled] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -77,6 +81,8 @@ export function PanelManager() {
       const res = await api<{ settings: SiteSettings }>('/admin/settings');
       setSaved(pick(res.settings));
       setSel(pick(res.settings));
+      setPriv(res.settings.privateNodeIds);
+      setSavedPriv(res.settings.privateNodeIds);
       setDiscordEnabled(res.settings.products.discord.enabled);
     } catch (err) {
       setSettingsError(errorText(err, 'Die Einstellungen konnten nicht geladen werden.'));
@@ -88,7 +94,8 @@ export function PanelManager() {
     void loadSettings();
   }, [loadPanel, loadSettings]);
 
-  const dirty = !!sel && !!saved && canonical(sel) !== canonical(saved);
+  const sameIds = (a: number[], b: number[]) => a.length === b.length && a.every((id) => b.includes(id));
+  const dirty = !!sel && !!saved && (canonical(sel) !== canonical(saved) || !sameIds(priv, savedPriv));
   const nodes = panel?.nodes ?? [];
   const eggs = panel?.eggs ?? [];
   /** Nur wenn das Panel eingelesen wurde, lässt sich sagen, ob eine Node / ein Egg noch existiert */
@@ -103,6 +110,15 @@ export function PanelManager() {
     if (!sel) return;
     const ids = sel[kind].nodeIds.filter((n) => n !== id);
     patchKind(kind, { nodeIds: on ? [...ids, id] : ids });
+    // Eine Node ist entweder einem Angebot zugewiesen oder privat
+    if (on) setPriv((prev) => prev.filter((n) => n !== id));
+  }
+
+  /** Privat = nie für kostenlose Server. Die Node wird dabei aus beiden Angeboten herausgenommen. */
+  function togglePrivate(id: number, on: boolean) {
+    setMessage(null);
+    setPriv((prev) => (on ? [...prev.filter((n) => n !== id), id] : prev.filter((n) => n !== id)));
+    if (on) setSel((prev) => (prev ? { minecraft: { ...prev.minecraft, nodeIds: prev.minecraft.nodeIds.filter((n) => n !== id) }, discord: { ...prev.discord, nodeIds: prev.discord.nodeIds.filter((n) => n !== id) } } : prev));
   }
 
   function setEgg(kind: ProductKind, typeId: string, egg: AdminPanelEggDTO | EggRef | null) {
@@ -143,10 +159,13 @@ export function PanelManager() {
           minecraft: { ...current.products.minecraft, nodeIds: sel.minecraft.nodeIds, eggs: sel.minecraft.eggs },
           discord: { ...current.products.discord, nodeIds: sel.discord.nodeIds, eggs: sel.discord.eggs },
         },
+        privateNodeIds: priv,
       };
       const res = await api<{ settings: SiteSettings }>('/admin/settings', { body: next });
       setSaved(pick(res.settings));
       setSel(pick(res.settings));
+      setPriv(res.settings.privateNodeIds);
+      setSavedPriv(res.settings.privateNodeIds);
       setDiscordEnabled(res.settings.products.discord.enabled);
       setMessage({ ok: true, text: 'Gespeichert – neue Server werden ab sofort mit dieser Auswahl erstellt.' });
       router.refresh();
@@ -172,6 +191,10 @@ export function PanelManager() {
         if (!eggs.some((e) => eggValue(e) === eggValue(egg))) warnings.push(`${PRODUCT_LABEL[kind]}: Das Egg „${egg.name || eggValue(egg)}“ für ${typeId} gibt es im Panel nicht mehr.`);
       }
     }
+  }
+  // Ohne feste Minecraft-Nodes verteilt das System automatisch – dafür muss mindestens eine Node übrig sein
+  if (sel && panelKnown && nodes.length > 0 && sel.minecraft.nodeIds.length === 0 && nodes.every((n) => priv.includes(n.id) || sel.discord.nodeIds.includes(n.id))) {
+    warnings.push('Minecraft: Alle Nodes sind privat oder für Discord-Bots reserviert – es kann kein Minecraft-Server mehr erstellt werden.');
   }
   const missingNodes = (kind: ProductKind) => (sel && panelKnown ? sel[kind].nodeIds.filter((id) => !nodes.some((n) => n.id === id)) : []);
 
@@ -266,13 +289,13 @@ export function PanelManager() {
 
           <Section
             title="Nodes"
-            description="Auf welchen Nodes neue Server erstellt werden. Bestehende Server bleiben, wo sie sind. Auf jeder ausgewählten Node müssen freie Ports (Allokationen) vorhanden sein."
+            description="Auf welchen Nodes neue Server erstellt werden. Bestehende Server bleiben, wo sie sind. Auf jeder ausgewählten Node müssen freie Ports (Allokationen) vorhanden sein. Eine Node mit „Privat“ wird nie für kostenlose Server verwendet."
           >
             <div className="overflow-x-auto rounded-xl border border-line">
-              <table className="w-full min-w-[860px] text-left text-[13px]">
+              <table className="w-full min-w-[940px] text-left text-[13px]">
                 <thead className="bg-surface-2 text-gray-300">
                   <tr>
-                    {['Name', 'FQDN', 'Location', 'RAM', 'Disk', 'Freie Ports', 'Wartung', 'Minecraft', 'Discord-Bots'].map((h) => (
+                    {['Name', 'FQDN', 'Location', 'RAM', 'Disk', 'Freie Ports', 'Wartung', 'Minecraft', 'Discord-Bots', 'Privat'].map((h) => (
                       <th key={h} className="px-3 py-2.5 font-medium whitespace-nowrap">
                         {h}
                       </th>
@@ -282,10 +305,14 @@ export function PanelManager() {
                 <tbody className="divide-y divide-line bg-surface align-top">
                   {nodes.map((n) => {
                     const selected = productKinds.some((kind) => sel[kind].nodeIds.includes(n.id));
+                    const isPrivate = priv.includes(n.id);
                     return (
-                      <tr key={n.id}>
+                      <tr key={n.id} className={isPrivate ? 'bg-white/[0.02]' : undefined}>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-white">{n.name}</p>
+                          <p className="font-medium text-white">
+                            {n.name}
+                            {isPrivate && <span className="ml-2 rounded bg-amber-400/15 px-1.5 py-0.5 text-[11px] font-normal text-amber-200">privat</span>}
+                          </p>
                           <p className="font-mono text-[11px] text-subtle">#{n.id}</p>
                         </td>
                         <td className="px-3 py-2.5 font-mono text-[12px] text-muted">{n.fqdn}</td>
@@ -310,12 +337,21 @@ export function PanelManager() {
                             />
                           </td>
                         ))}
+                        <td className="px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-amber-500"
+                            aria-label={`${n.name} als privat markieren – nie für kostenlose Server verwenden`}
+                            checked={isPrivate}
+                            onChange={(e) => togglePrivate(n.id, e.target.checked)}
+                          />
+                        </td>
                       </tr>
                     );
                   })}
                   {nodes.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-3 py-8 text-center text-muted">
+                      <td colSpan={10} className="px-3 py-8 text-center text-muted">
                         {loading ? 'Nodes werden eingelesen …' : 'Keine Nodes gefunden.'}
                       </td>
                     </tr>
@@ -348,9 +384,34 @@ export function PanelManager() {
               );
             })}
 
+            {priv.some((id) => panelKnown && !nodes.some((n) => n.id === id)) || (!panelKnown && priv.length > 0) ? (
+              <div className="flex flex-wrap items-center gap-2 text-[13px] text-amber-300">
+                <span>Privat – {panelKnown ? 'gespeichert, aber nicht mehr im Panel' : 'gespeicherte Nodes (Panel nicht eingelesen)'}:</span>
+                {priv
+                  .filter((id) => !panelKnown || !nodes.some((n) => n.id === id))
+                  .map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      title="Aus der Auswahl entfernen"
+                      onClick={() => togglePrivate(id, false)}
+                      className="rounded-md border border-amber-400/40 px-2 py-0.5 font-mono text-[12px] text-amber-200 hover:bg-amber-400/10"
+                    >
+                      #{id} ✕
+                    </button>
+                  ))}
+              </div>
+            ) : null}
+
             <ul className="space-y-1.5 text-[13px] leading-relaxed text-muted">
               <li>
-                <span className="text-gray-200">Minecraft:</span> keine Node ausgewählt = automatische Verteilung über die Locations aus der .env.
+                <span className="text-gray-200">Privat:</span> Auf dieser Node wird nie ein kostenloser Server erstellt – weder Minecraft noch Discord-Bot, auch nicht ersatzweise.
+                Sind die übrigen Nodes voll, schlägt die Erstellung fehl (sichtbar unter „Server“), statt auf eine private Node auszuweichen. Bestehende Server auf der Node
+                bleiben unberührt. Im Sammelstatus „Server-Nodes“ der Statusseite zählen private Nodes nicht mit.
+                {priv.length > 0 && <span className="text-amber-200"> Aktuell privat: {priv.length}.</span>}
+              </li>
+              <li>
+                <span className="text-gray-200">Minecraft:</span> keine Node ausgewählt = automatische Verteilung über die Locations aus der .env{priv.length > 0 ? ' – private Nodes und die Nodes für Discord-Bots ausgenommen' : ''}.
                 {sel.minecraft.nodeIds.length === 0 && <span className="text-subtle"> (aktuell aktiv)</span>}
               </li>
               <li className={sel.discord.nodeIds.length === 0 && discordEnabled ? 'text-amber-300' : undefined}>

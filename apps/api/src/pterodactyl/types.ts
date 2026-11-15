@@ -50,6 +50,12 @@ export interface PteroNode {
   locationId: number;
   memoryMb: number;
   diskMb: number;
+  /** Bereits an Server vergebener Arbeitsspeicher/Speicherplatz (fehlt, wenn das Panel es nicht meldet) */
+  allocatedMemoryMb?: number;
+  allocatedDiskMb?: number;
+  /** Erlaubte Überbuchung in Prozent laut Panel (-1 = unbegrenzt) */
+  memoryOverallocate?: number;
+  diskOverallocate?: number;
 }
 
 export interface PteroLocation {

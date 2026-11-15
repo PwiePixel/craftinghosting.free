@@ -390,6 +390,11 @@ export interface SiteSettings {
   };
   /** Produkte: Minecraft-Server und Discord-Bots – jeweils mit eigenen Paketen, Kapazität, Nodes und Eggs */
   products: Record<ProductKind, ProductSettings>;
+  /**
+   * Private Pterodactyl-Nodes: Auf ihnen wird nie ein kostenloser Server erstellt – auch nicht ersatzweise,
+   * wenn alle anderen Nodes voll sind. Eine private Node kann keinem Produkt zugewiesen sein.
+   */
+  privateNodeIds: number[];
   /** Angaben zur Hardware auf der Website */
   hardware: {
     /** Rechenzentrums-Standorte (Ländercode + Name) */

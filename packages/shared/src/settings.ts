@@ -146,6 +146,7 @@ export function defaultSiteSettings(): SiteSettings {
     // EPYC-Plätze: 0 = es gibt nur eine Hardware-Stufe (aktuell Intel Xeon)
     waitlist: { epycSlots: 0, showCounter: true, externalCount: 0, epycReserved: 0, blocks: [] },
     products: { minecraft: defaultProduct('minecraft'), discord: defaultProduct('discord') },
+    privateNodeIds: [],
     hardware: { locations: freeHostingConfig.hardware.locations.map((l) => ({ ...l })), cpus: [...freeHostingConfig.hardware.cpus] },
     donate: { enabled: false, url: '' },
     // Links: leer = Standard aus Konfiguration bzw. .env
@@ -277,6 +278,13 @@ function normalizeEggs(raw: unknown): Record<string, EggRef> {
   return out;
 }
 
+/** Liste von Node-IDs aus dem Panel: positive ganze Zahlen, ohne Doppelte */
+function normalizeNodeIds(raw: unknown): number[] {
+  return Array.isArray(raw) ? [...new Set(raw.map((n) => int(n, 0, 0, 1_000_000)).filter((n) => n > 0))].slice(0, 50) : [];
+}
+
+const withoutNodes = (product: ProductSettings, excluded: number[]): ProductSettings => ({ ...product, nodeIds: product.nodeIds.filter((id) => !excluded.includes(id)) });
+
 function normalizeProduct(raw: unknown, kind: ProductKind, usedIds: Set<string>): ProductSettings {
   const d = defaultProduct(kind);
   const v = obj(raw);
@@ -296,9 +304,7 @@ function normalizeProduct(raw: unknown, kind: ProductKind, usedIds: Set<string>)
     reserved: int(v.reserved, 0, 0, 1_000_000),
     fairUse: bool(v.fairUse, d.fairUse),
     plans,
-    nodeIds: Array.isArray(v.nodeIds)
-      ? [...new Set(v.nodeIds.map((n) => int(n, 0, 0, 1_000_000)).filter((n) => n > 0))].slice(0, 50)
-      : [],
+    nodeIds: normalizeNodeIds(v.nodeIds),
     eggs: normalizeEggs(v.eggs),
   };
 }
@@ -441,6 +447,7 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
   }
   const inactiveDays = int(bf.inactiveDays, d.botFairUse.inactiveDays, 0, 365);
   const usedIds = new Set<string>();
+  const privateNodeIds = normalizeNodeIds(i.privateNodeIds);
   const cpus = Array.isArray(hw.cpus)
     ? hw.cpus
         .map((c) => str(c, '', 80).trim())
@@ -471,10 +478,12 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
         blocks,
       };
     })(),
+    // Private Nodes gewinnen: Sie werden aus der Zuweisung der Produkte entfernt
     products: {
-      minecraft: normalizeProduct(products.minecraft, 'minecraft', usedIds),
-      discord: normalizeProduct(products.discord, 'discord', usedIds),
+      minecraft: withoutNodes(normalizeProduct(products.minecraft, 'minecraft', usedIds), privateNodeIds),
+      discord: withoutNodes(normalizeProduct(products.discord, 'discord', usedIds), privateNodeIds),
     },
+    privateNodeIds,
     hardware: { locations: normalizeLocations(hw.locations, d.hardware.locations), cpus },
     // Ohne gültigen Zahlungslink bleibt die Spenden-Seite aus
     donate: { enabled: bool(dn.enabled, false) && donateUrl !== '', url: donateUrl },

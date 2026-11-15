@@ -68,7 +68,7 @@ async function reachable(url: string, method: 'HEAD' | 'GET', failOn5xx: boolean
 type NodeState = 'up' | 'maintenance' | 'down';
 
 /** Führt genau die Prüfungen aus, die von den eingerichteten Komponenten gebraucht werden. */
-async function runChecks(settings: SiteSettings['status']): Promise<Record<string, CheckResult>> {
+async function runChecks(settings: SiteSettings['status'], privateNodeIds: number[]): Promise<Record<string, CheckResult>> {
   const used = new Set(settings.components.map((c) => c.source));
   const needs = (...sources: StatusComponentSetting['source'][]) => sources.some((s) => used.has(s));
   const ptero = pterodactyl();
@@ -92,8 +92,10 @@ async function runChecks(settings: SiteSettings['status']): Promise<Record<strin
   ]);
 
   // Nodes: Wartungsmodus aus dem Panel, dazu (wenn eingeschaltet) ein direkter Ping auf Wings
-  const nodes: PteroNode[] = nodesCheck?.ok ? nodesCheck.value : [];
-  const wanted = used.has('nodes') ? nodes : nodes.filter((n) => settings.components.some((c) => c.source === 'node' && c.target === String(n.id)));
+  // Private Nodes gehören nicht zum Angebot – sie zählen nicht in den Sammelstatus „Server-Nodes“ (einzeln beobachten geht weiter)
+  const allNodes: PteroNode[] = nodesCheck?.ok ? nodesCheck.value : [];
+  const nodes = allNodes.filter((n) => !privateNodeIds.includes(n.id));
+  const wanted = allNodes.filter((n) => (used.has('nodes') && !privateNodeIds.includes(n.id)) || settings.components.some((c) => c.source === 'node' && c.target === String(n.id)));
   const nodeStates = new Map<number, { state: NodeState; ms: number | null }>();
   await Promise.all(
     wanted.map(async (n) => {
@@ -152,7 +154,7 @@ async function runChecks(settings: SiteSettings['status']): Promise<Record<strin
         return { status, latencyMs: null };
       }
       case 'node': {
-        const node = nodes.find((n) => String(n.id) === c.target);
+        const node = allNodes.find((n) => String(n.id) === c.target);
         const state = node ? nodeStates.get(node.id) : undefined;
         if (!node || !state) return { status: 'unknown', latencyMs: null };
         return { status: state.state === 'up' ? 'operational' : state.state === 'maintenance' ? 'maintenance' : 'major_outage', latencyMs: state.ms };
@@ -170,16 +172,16 @@ let rawCache: { at: number; key: string; value: RawStatus } | null = null;
 let inflight: { key: string; promise: Promise<RawStatus> } | null = null;
 
 /** Automatische Prüfungen mit 30 Sekunden Cache (verhindert Last durch viele Besucher). */
-async function getRawStatus(settings: SiteSettings['status'], fresh = false): Promise<RawStatus> {
+async function getRawStatus(settings: SiteSettings['status'], privateNodeIds: number[], fresh = false): Promise<RawStatus> {
   // Ändert der Admin die Komponenten, gilt der alte Stand nicht mehr
-  const key = JSON.stringify([settings.pingNodes, settings.components.map((c) => [c.id, c.source, c.target])]);
+  const key = JSON.stringify([settings.pingNodes, privateNodeIds, settings.components.map((c) => [c.id, c.source, c.target])]);
   if (!fresh && rawCache && rawCache.key === key && Date.now() - rawCache.at < 30_000) return rawCache.value;
   if (!inflight || inflight.key !== key) {
     const isStatic = env.STATUS_PROVIDER === 'static';
     const promise = (
       isStatic
         ? Promise.resolve(Object.fromEntries(settings.components.map((c) => [c.id, { status: 'operational', latencyMs: null } as CheckResult])))
-        : runChecks(settings)
+        : runChecks(settings, privateNodeIds)
     )
       .then((results) => {
         const value: RawStatus = { results, provider: isStatic ? 'static' : 'internal', checkedAt: new Date().toISOString() };
@@ -361,7 +363,7 @@ async function compose(fresh: boolean, withHistory: boolean): Promise<Composed> 
   const now = new Date();
   const settings = await getSettings();
   const cfg = settings.status;
-  const [raw, incidents] = await Promise.all([getRawStatus(cfg, fresh), relevantIncidents(now).catch(() => [] as StatusIncidentDTO[])]);
+  const [raw, incidents] = await Promise.all([getRawStatus(cfg, settings.privateNodeIds, fresh), relevantIncidents(now).catch(() => [] as StatusIncidentDTO[])]);
   const active = incidents.filter((i) => i.state === 'active');
 
   const offset = getTimeZoneOffset(now, freeHostingConfig.fairUse.timezone);

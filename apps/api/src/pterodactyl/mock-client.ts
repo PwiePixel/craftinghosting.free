@@ -41,6 +41,8 @@ interface MockServer {
   schedules: number;
   description: string;
   console: string[];
+  /** Node, auf der der Server liegt (0 = automatisch über die Location platziert) */
+  nodeId?: number;
   /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
   files?: Record<string, string>;
 }
@@ -163,6 +165,8 @@ export class PterodactylMockClient implements PterodactylGateway {
       schedules: 0,
       description: spec.description,
       console: [],
+      // Die „Allokations-ID“ des Mocks kodiert die Node (siehe freeAllocations)
+      nodeId: spec.allocationId ? Math.floor(spec.allocationId / 100_000) : 0,
     };
     state.servers.push(s);
     this.save(state);

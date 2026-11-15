@@ -15,6 +15,7 @@ import { affectedRows, db } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
 import { ApiError, L } from '../lib/errors';
 import { pterodactyl, PterodactylError, type PteroEgg, type PteroServer } from '../pterodactyl';
+import type { PteroNode } from '../pterodactyl/types';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { getUserLocale } from './locale.service';
@@ -31,36 +32,59 @@ function locationsFor(tier: Server['nodeTier']): number[] {
   return ids(env.PTERODACTYL_LOCATION_IDS);
 }
 
+/** Hat die Node laut Panel noch Platz für diesen Server? Ohne Angaben des Panels gilt: ja. */
+function nodeHasRoom(node: PteroNode, server: Pick<Server, 'memoryMb' | 'diskMb'>): boolean {
+  const fits = (total: number, allocated: number | undefined, over: number | undefined, need: number) => {
+    if (allocated === undefined || over === undefined || over < 0) return true; // -1 = im Panel unbegrenzt
+    return allocated + need <= total * (1 + over / 100);
+  };
+  return fits(node.memoryMb, node.allocatedMemoryMb, node.memoryOverallocate, server.memoryMb) && fits(node.diskMb, node.allocatedDiskMb, node.diskOverallocate, server.diskMb);
+}
+
 /**
  * Feste Node für ein Produkt (Admin → Pterodactyl): sucht auf den zugewiesenen Nodes eine freie Allokation.
  * Die Node mit den meisten freien Ports gewinnt – so verteilen sich die Server gleichmäßig.
  * Rückgabe null = keine Node zugewiesen → automatische Platzierung über die Locations.
+ *
+ * Private Nodes (Admin → Pterodactyl → „Privat“) werden nie verwendet – auch nicht, wenn alle anderen voll sind.
+ * Dann schlägt die Erstellung fehl, statt auf eine private Node auszuweichen.
  */
 async function pickAllocation(server: Server, settings: SiteSettings): Promise<number | null> {
   const ptero = pterodactyl();
-  let nodeIds = settings.products[server.kind].nodeIds;
-  let nodes: Awaited<ReturnType<typeof ptero.listNodes>> | null = null;
+  const privateNodes = settings.privateNodeIds;
+  let nodeIds = settings.products[server.kind].nodeIds.filter((id) => !privateNodes.includes(id));
+  let nodes: PteroNode[] | null = null;
+  // Automatisch verteilte Server: Hier prüfte bisher das Panel, ob die Node noch Platz hat – das übernehmen wir
+  let checkRoom = false;
   if (nodeIds.length === 0) {
     if (server.kind === 'discord') {
       if (env.PTERODACTYL_MODE === 'live') throw new Error('Für Discord-Bots ist noch keine Node zugewiesen (Admin → Pterodactyl)');
       return null;
     }
-    // Minecraft ohne feste Nodes: automatische Platzierung – aber nie auf den Nodes, die für Discord-Bots reserviert sind
-    const botNodes = settings.products.discord.nodeIds;
-    if (botNodes.length === 0) return null;
+    // Minecraft ohne feste Nodes: automatische Platzierung – aber nie auf privaten Nodes und nie auf denen für Discord-Bots
+    const excluded = [...new Set([...settings.products.discord.nodeIds, ...privateNodes])];
+    if (excluded.length === 0) return null;
     nodes = await ptero.listNodes();
-    nodeIds = nodes.map((n) => n.id).filter((id) => !botNodes.includes(id));
-    if (nodeIds.length === 0) throw new Error('Alle Nodes sind für Discord-Bots reserviert – bitte eine Node für Minecraft zuweisen (Admin → Pterodactyl)');
+    // Wie bei der automatischen Platzierung: nur Nodes in den Locations dieser Hardware-Stufe
+    const locations = locationsFor(server.nodeTier);
+    nodeIds = nodes.filter((n) => !excluded.includes(n.id) && (locations.length === 0 || locations.includes(n.locationId))).map((n) => n.id);
+    if (nodeIds.length === 0) throw new Error('Keine Node für Minecraft-Server übrig: Alle Nodes sind privat oder für Discord-Bots reserviert (Admin → Pterodactyl)');
+    checkRoom = true;
   }
   nodes ??= await ptero.listNodes();
   let best: { id: number; count: number } | null = null;
   for (const nodeId of nodeIds) {
     const node = nodes.find((n) => n.id === nodeId);
     if (!node || node.maintenanceMode) continue;
+    if (checkRoom && !nodeHasRoom(node, server)) continue;
     const free = await ptero.freeAllocations(nodeId);
     if (free.firstId !== null && (!best || free.count > best.count)) best = { id: free.firstId, count: free.count };
   }
-  if (!best) throw new Error(`Keine freie Allokation (Port) auf den zugewiesenen Nodes (${nodeIds.join(', ')}) – bitte im Panel Allokationen anlegen`);
+  if (!best) {
+    throw new Error(
+      `Kein Platz auf den Nodes für ${server.kind === 'discord' ? 'Discord-Bots' : 'Minecraft-Server'} (${nodeIds.join(', ')}): keine freie Allokation (Port), Node voll oder im Wartungsmodus. Private Nodes werden nicht verwendet.`,
+    );
+  }
   return best.id;
 }
 
