@@ -95,7 +95,7 @@ Schutz vor Mehrfach-Anmeldungen und Bindung an den eigenen Discord-Server. Alles
 | **Pflicht-Mitgliedschaft** | Eingeschaltet werden Server erst erstellt bzw. reaktiviert, wenn das Konto verknüpft und der Nutzer Mitglied ist. Offene Anfragen warten so lange. Startseite, „Server erstellen“, FAQ, Regeln und `/llms.txt` weisen darauf hin. |
 | **Einladungslink** | Der Bot erstellt eine dauerhafte Einladung und ersetzt sie, falls sie gelöscht wird. Die Website verwendet sie überall als Discord-Link. |
 | **Customer-Rolle** | Wer einen Server oder Bot hat, bekommt die Rolle (Rollen-ID im Admin); wer keinen mehr hat, verliert sie. Abgleich alle 2 Minuten (Job `discord-sync`) und auf Knopfdruck. |
-| **Auto-Rollen** | Rollen, die jedes neue Mitglied beim Betreten bekommt. |
+| **Auto-Rollen** | Bis zu 20 Rollen, die jedes neue Mitglied beim Betreten bekommt. |
 | **Willkommensnachricht** | Embed mit Profilbild und Profil-Banner, Einlader, Beitrittsdatum und Mitgliederzahl. Texte, Farbe, Kanal und Ersatzbild sind einstellbar. |
 | **Rollen-Panels** | Nachrichten mit Buttons zum Selbst-Zuweisen von Rollen (z. B. News/Giveaway/Status oder Free Hosting/Paid Hosting). Senden aus dem Admin-Bereich oder mit `/rollenpanel`. |
 | **Tickets** | Ticket-Panel (`/ticketpanel` oder aus dem Admin). Der Bot erkennt die Server des Nutzers, lässt das Produkt auswählen und schreibt Account-ID und Server-ID ins Ticket. Schließen durch Ersteller oder Team, Löschen durch das Team. |

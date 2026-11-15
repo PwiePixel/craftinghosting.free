@@ -27,6 +27,13 @@ type Message = { ok: boolean; text: string } | null;
 
 const onlyDigits = (v: string) => v.replace(/\D/g, '').slice(0, 22);
 
+/** Liest mehrere Rollen-IDs aus einem Textfeld: getrennt durch Komma, Semikolon, Leerzeichen oder Zeilenumbruch */
+function parseRoleIds(text: string): { ids: string[]; invalid: string[]; tooMany: boolean } {
+  const parts = [...new Set(text.split(/[,;\s]+/).filter(Boolean))];
+  const valid = parts.filter((p) => /^\d{15,22}$/.test(p));
+  return { ids: valid.slice(0, discordLimits.autoRoles), invalid: parts.filter((p) => !/^\d{15,22}$/.test(p)), tooMany: valid.length > discordLimits.autoRoles };
+}
+
 function Text({ value, onChange, placeholder, maxLength = 200, type = 'text', mono }: { value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; type?: string; mono?: boolean }) {
   return (
     <input
@@ -140,6 +147,8 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
   const [botToken, setBotToken] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [steps, setSteps] = useState<DiscordSetupStep[] | null>(null);
+  const [autoRolesText, setAutoRolesText] = useState(() => settings.discord.autoRoleIds.join(', '));
+  const autoRoles = parseRoleIds(autoRolesText);
   const [pending, setPending] = useState<'save' | 'setup' | 'roles' | null>(null);
   const [message, setMessage] = useState<Message>(null);
 
@@ -164,6 +173,7 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
       const saved = (await api<{ settings: SiteSettings }>('/admin/settings', { body: { ...current, discord: d } })).settings.discord;
       setD(saved);
       setBaseline(JSON.stringify(saved));
+      setAutoRolesText(saved.autoRoleIds.join(', '));
       setStatus((await api<{ discord: AdminDiscordDTO }>('/admin/discord')).discord);
       setMessage({ ok: true, text: 'Gespeichert. Der Bot übernimmt Änderungen innerhalb von etwa 20 Sekunden.' });
       router.refresh();
@@ -327,13 +337,30 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
             <IdInput value={d.supportRoleId} onChange={(supportRoleId) => set({ supportRoleId })} />
           </Labeled>
         </div>
-        <Labeled label="Rollen beim Betreten des Servers" hint={`Jedes neue Mitglied bekommt diese Rollen automatisch. Mehrere IDs mit Komma oder Leerzeichen trennen (höchstens ${discordLimits.autoRoles}).`}>
-          <input
-            type="text"
-            className="input font-mono text-[13px]"
-            value={d.autoRoleIds.join(', ')}
+        <Labeled
+          label="Rollen beim Betreten des Servers"
+          hint={
+            <>
+              Jedes neue Mitglied bekommt diese Rollen automatisch. Mehrere Rollen-IDs mit Komma, Leerzeichen oder Zeilenumbruch trennen (höchstens {discordLimits.autoRoles}).{' '}
+              <span className={autoRoles.invalid.length || autoRoles.tooMany ? 'text-amber-300' : 'text-gray-300'}>
+                {autoRoles.ids.length} von {discordLimits.autoRoles} Rollen erkannt
+                {autoRoles.invalid.length > 0 && ` · keine gültige ID: ${autoRoles.invalid.join(', ')}`}
+                {autoRoles.tooMany && ` · mehr als ${discordLimits.autoRoles} – die übrigen werden nicht gespeichert`}
+              </span>
+            </>
+          }
+        >
+          {/* Eigener Text-Zustand: Das Feld zeigt genau, was getippt wurde (auch ein Komma am Ende) */}
+          <textarea
+            className="input min-h-[72px] py-2.5 font-mono text-[13px] leading-relaxed"
+            rows={3}
+            value={autoRolesText}
             placeholder="z. B. 123456789012345678, 234567890123456789"
-            onChange={(e) => set({ autoRoleIds: e.target.value.split(/[^\d]+/).filter(Boolean).slice(0, discordLimits.autoRoles) })}
+            onChange={(e) => {
+              const text = e.target.value.replace(/[^\d,;\s]/g, '');
+              setAutoRolesText(text);
+              set({ autoRoleIds: parseRoleIds(text).ids });
+            }}
           />
         </Labeled>
         <div className="flex flex-wrap items-center gap-3">

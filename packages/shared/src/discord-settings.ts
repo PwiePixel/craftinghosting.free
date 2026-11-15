@@ -71,7 +71,7 @@ export interface DiscordSettings {
   rolePanels: DiscordRolePanel[];
 }
 
-export const discordLimits = { autoRoles: 10, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5 } as const;
+export const discordLimits = { autoRoles: 20, rolePanels: 8, buttonsPerPanel: 20, maxOpenTickets: 5 } as const;
 
 /** Platzhalter für die Willkommensnachricht */
 export const discordWelcomePlaceholders: [string, string][] = [

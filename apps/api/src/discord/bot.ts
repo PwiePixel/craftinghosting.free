@@ -156,6 +156,31 @@ async function findInviter(guildId: string, userId: string, botId: string | null
 
 /* ------------------------------------------------------------ Beitritt */
 
+/**
+ * Gibt einem neuen Mitglied mehrere Rollen. Ab vier Rollen in EINER Anfrage (sonst bräuchte jeder Beitritt
+ * bis zu 20 Anfragen und liefe ins Anfrage-Limit). Scheitert die Sammel-Anfrage – etwa weil eine Rolle gelöscht
+ * wurde oder über der Bot-Rolle steht –, werden die Rollen einzeln vergeben, damit die gültigen trotzdem ankommen.
+ */
+async function giveJoinRoles(guildId: string, userId: string, roles: string[], log: BotLogger): Promise<void> {
+  if (roles.length === 0) return;
+  const reason = 'Automatische Rolle beim Beitritt';
+  if (roles.length > 3) {
+    try {
+      // Aktuelle Rollen frisch lesen, damit Rollen anderer Bots erhalten bleiben
+      const member = await botRequest<DiscordMember>('GET', `/guilds/${guildId}/members/${userId}`);
+      await botRequest('PATCH', `/guilds/${guildId}/members/${userId}`, { json: { roles: [...new Set([...member.roles, ...roles])] }, reason });
+      return;
+    } catch (err) {
+      log.warn({ err: discordErrorText(err) }, 'Discord: Auto-Rollen ließen sich nicht gesammelt vergeben – versuche sie einzeln');
+    }
+  }
+  for (const roleId of roles) {
+    await botRequest('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, { reason }).catch((err) =>
+      log.warn({ err: discordErrorText(err), roleId }, 'Discord: Auto-Rolle konnte nicht vergeben werden'),
+    );
+  }
+}
+
 async function onMemberAdd(member: DiscordMember & { guild_id: string }, log: BotLogger): Promise<void> {
   const cfg = await discordConfig();
   const user = member.user;
@@ -167,14 +192,11 @@ async function onMemberAdd(member: DiscordMember & { guild_id: string }, log: Bo
   // Auto-Rollen – und während einer Wartung auch die Rolle „Wartung“
   const maintenance = await getDiscordMaintenance();
   const roles = [...cfg.settings.autoRoleIds, ...(maintenance?.roleId ? [maintenance.roleId] : [])];
-  for (const roleId of roles) {
-    await botRequest('PUT', `/guilds/${guildId}/members/${user.id}/roles/${roleId}`, { reason: 'Automatische Rolle beim Beitritt' }).catch((err) =>
-      log.warn({ err: discordErrorText(err), roleId }, 'Discord: Auto-Rolle konnte nicht vergeben werden'),
-    );
-  }
+  // Läuft neben der Willkommensnachricht her – viele Rollen sollen die Begrüßung nicht verzögern
+  const rolesGiven = giveJoinRoles(guildId, user.id, roles, log);
 
   const w = cfg.settings.welcome;
-  if (!w.enabled || !w.channelId) return;
+  if (!w.enabled || !w.channelId) return void (await rolesGiven);
   try {
     const state = await getDiscordState();
     const [origin, full] = await Promise.all([
@@ -193,6 +215,7 @@ async function onMemberAdd(member: DiscordMember & { guild_id: string }, log: Bo
   } catch (err) {
     log.warn({ err: discordErrorText(err) }, 'Discord: Willkommensnachricht konnte nicht gesendet werden');
   }
+  await rolesGiven;
 }
 
 /* ------------------------------------------------------------ /rolle */
