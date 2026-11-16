@@ -20,6 +20,7 @@ import {
 } from '@chfree/shared';
 import { PRODUCT_LABEL, formatMb } from '@/components/admin/admin-labels';
 import { Section } from '@/components/admin/admin-settings';
+import { PanelLoginSection } from '@/components/admin/admin-panel-login';
 import { Button } from '@/components/ui/button';
 import { Alert, StatusDot } from '@/components/ui/primitives';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -274,6 +275,8 @@ export function PanelManager() {
           {loading && panel && <span className="text-[13px] text-muted">Panel wird eingelesen …</span>}
         </div>
       </Section>
+
+      <PanelLoginSection />
 
       {sel && (
         <>

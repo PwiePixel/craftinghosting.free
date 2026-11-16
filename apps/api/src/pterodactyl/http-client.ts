@@ -7,6 +7,7 @@ import {
   PterodactylError,
   type BackupScheduleSpec,
   type CreateServerSpec,
+  type PteroAllocation,
   type PteroEgg,
   type PteroEggSummary,
   type PteroLocation,
@@ -89,6 +90,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
   private mapServer(a: Json): PteroServer {
     const allocations: Json[] = a.relationships?.allocations?.data ?? [];
     const primary = allocations.find((x) => x.attributes?.id === a.allocation) ?? allocations[0];
+    const toAllocation = (x: Json): PteroAllocation => ({ id: x.attributes.id, ip: x.attributes.ip, alias: x.attributes.alias ?? null, port: x.attributes.port });
     return {
       id: a.id,
       uuid: a.uuid,
@@ -103,6 +105,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
         ? { ip: primary.attributes.ip, alias: primary.attributes.alias ?? null, port: primary.attributes.port }
         : null,
       nodeId: typeof a.node === 'number' ? a.node : null,
+      allocations: primary ? [toAllocation(primary), ...allocations.filter((x) => x !== primary).map(toAllocation)] : [],
     };
   }
 
@@ -210,9 +213,9 @@ export class PterodactylHttpClient implements PterodactylGateway {
     });
   }
 
-  async transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'> {
+  async transferServer(id: number, nodeId: number, allocationId: number, additionalAllocationIds: number[] = []): Promise<'started' | 'unsupported'> {
     try {
-      await this.request('application', 'POST', `/servers/${id}/transfer`, { node_id: nodeId, allocation_id: allocationId });
+      await this.request('application', 'POST', `/servers/${id}/transfer`, { node_id: nodeId, allocation_id: allocationId, allocation_additional: additionalAllocationIds });
       return 'started';
     } catch (err) {
       // Das klassische Pterodactyl kennt diese Adresse nicht – der Umzug geht dort nur im Admin-Bereich des Panels
@@ -330,6 +333,19 @@ export class PterodactylHttpClient implements PterodactylGateway {
       if (!pagination || pagination.current_page >= pagination.total_pages) break;
     }
     return { count, firstId };
+  }
+
+  async listFreeAllocations(nodeId: number): Promise<PteroAllocation[]> {
+    const free: PteroAllocation[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const res = await this.request('application', 'GET', `/nodes/${nodeId}/allocations?per_page=500&page=${page}`);
+      for (const a of res.data as Json[]) {
+        if (!a.attributes.assigned) free.push({ id: a.attributes.id, ip: a.attributes.ip, alias: a.attributes.alias ?? null, port: a.attributes.port });
+      }
+      const pagination = res.meta?.pagination;
+      if (!pagination || pagination.current_page >= pagination.total_pages) break;
+    }
+    return free;
   }
 
   async pingClient(): Promise<void> {

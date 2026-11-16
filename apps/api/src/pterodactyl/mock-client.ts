@@ -17,6 +17,7 @@ import {
   type PteroNode,
   type PteroResources,
   type PteroServer,
+  type PteroAllocation,
   type PteroUser,
   type PterodactylGateway,
 } from './types';
@@ -48,7 +49,9 @@ interface MockServer {
   /** Im Test von Hand verschoben (wie im Panel): Die Adresse folgt dann der Node */
   movedManually?: boolean;
   /** Laufender Umzug: Ziel-Node, Port und Zeitpunkt, ab dem er als abgeschlossen gilt */
-  transfer?: { nodeId: number; port: number; doneAt: number };
+  transfer?: { nodeId: number; port: number; extraPorts?: number[]; doneAt: number };
+  /** Zusätzliche Ports neben dem Hauptport */
+  extraPorts?: number[];
   /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
   files?: Record<string, string>;
 }
@@ -105,6 +108,9 @@ export class PterodactylMockClient implements PterodactylGateway {
     const moved = s.transfer && Date.now() >= s.transfer.doneAt ? s.transfer : null;
     const nodeId = moved ? moved.nodeId : (s.nodeId ?? 0);
     const host = nodeId === 2 ? 'free-de-2' : nodeId === 3 ? 'bots-de-1' : 'free-de-1';
+    const alias = s.transfer || s.movedManually ? `${host}.craftinghosting.free` : 'free-de-1.craftinghosting.free';
+    const port = moved ? moved.port : s.port;
+    const extra = moved ? (moved.extraPorts ?? []) : (s.extraPorts ?? []);
     return {
       id: s.id,
       uuid: s.uuid,
@@ -115,8 +121,9 @@ export class PterodactylMockClient implements PterodactylGateway {
       userId: s.userId,
       suspended: s.suspended,
       status: s.suspended ? 'suspended' : installing ? 'installing' : null,
-      allocation: { ip: '203.0.113.10', alias: s.transfer || s.movedManually ? `${host}.craftinghosting.free` : 'free-de-1.craftinghosting.free', port: moved ? moved.port : s.port },
+      allocation: { ip: '203.0.113.10', alias, port },
       nodeId,
+      allocations: [port, ...extra].map((p): PteroAllocation => ({ id: nodeId * 100_000 + p, ip: '203.0.113.10', alias, port: p })),
     };
   }
 
@@ -225,13 +232,38 @@ export class PterodactylMockClient implements PterodactylGateway {
     });
   }
 
-  async transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'> {
+  async transferServer(id: number, nodeId: number, allocationId: number, additionalAllocationIds: number[] = []): Promise<'started' | 'unsupported'> {
     // PTERODACTYL_MOCK_TRANSFER=none stellt das klassische Pterodactyl nach (kein Umzug per Schnittstelle)
     if (process.env.PTERODACTYL_MOCK_TRANSFER === 'none') return 'unsupported';
+    // Die „Allokations-ID“ des Mocks kodiert Node und Port
+    const portOf = (allocation: number) => allocation % 100_000;
     this.mutate(id, (s) => {
-      s.transfer = { nodeId, port: 25_000 + (allocationId % 1000), doneAt: Date.now() + 4_000 };
+      // Ein früherer, abgeschlossener Umzug wird zum neuen Ausgangszustand
+      if (s.transfer && Date.now() >= s.transfer.doneAt) {
+        s.nodeId = s.transfer.nodeId;
+        s.port = s.transfer.port;
+        s.extraPorts = s.transfer.extraPorts ?? [];
+        s.movedManually = true;
+      }
+      s.transfer = { nodeId, port: portOf(allocationId), extraPorts: additionalAllocationIds.map(portOf), doneAt: Date.now() + 4_000 };
     });
     return 'started';
+  }
+
+  async listFreeAllocations(nodeId: number): Promise<PteroAllocation[]> {
+    // Je Node die Ports 25565–25814; belegt ist, was ein Server auf dieser Node gerade nutzt
+    const used = new Set<number>();
+    for (const s of this.load().servers) {
+      const p = this.toServer(s);
+      if (p.nodeId === nodeId) for (const a of p.allocations) used.add(a.port);
+      if (s.transfer?.nodeId === nodeId) for (const port of [s.transfer.port, ...(s.transfer.extraPorts ?? [])]) used.add(port);
+    }
+    const host = nodeId === 2 ? 'free-de-2' : nodeId === 3 ? 'bots-de-1' : 'free-de-1';
+    const free: PteroAllocation[] = [];
+    for (let port = 25_565; port < 25_815; port++) {
+      if (!used.has(port)) free.push({ id: nodeId * 100_000 + port, ip: '203.0.113.10', alias: `${host}.craftinghosting.free`, port });
+    }
+    return free;
   }
 
   async cancelServerTransfer(id: number): Promise<boolean> {

@@ -22,6 +22,16 @@ export interface PteroServer {
   allocation: { ip: string; alias: string | null; port: number } | null;
   /** Node, auf der der Server liegt (null = vom Panel nicht gemeldet) */
   nodeId: number | null;
+  /** Alle Ports des Servers (der Hauptport zuerst) */
+  allocations: PteroAllocation[];
+}
+
+/** Port (Allokation) im Panel */
+export interface PteroAllocation {
+  id: number;
+  ip: string;
+  alias: string | null;
+  port: number;
 }
 
 export interface PteroResources {
@@ -141,7 +151,7 @@ export interface PterodactylGateway {
    * Server auf eine andere Node umziehen (Daten werden mitgenommen). Das bietet nicht jedes Panel per Schnittstelle an
    * (Pelican ja, das klassische Pterodactyl nicht) – dann „unsupported“: Der Umzug muss im Panel gestartet werden.
    */
-  transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'>;
+  transferServer(id: number, nodeId: number, allocationId: number, additionalAllocationIds?: number[]): Promise<'started' | 'unsupported'>;
   /** Laufenden Umzug abbrechen (false = nicht möglich bzw. vom Panel nicht angeboten) */
   cancelServerTransfer(id: number): Promise<boolean>;
 
@@ -152,6 +162,8 @@ export interface PterodactylGateway {
   listEggs(): Promise<PteroEggSummary[]>;
   /** Freie Allokationen (Ports) einer Node: Anzahl und die erste freie ID */
   freeAllocations(nodeId: number): Promise<{ count: number; firstId: number | null }>;
+  /** Alle freien Ports einer Node (höchstens 10 000) */
+  listFreeAllocations(nodeId: number): Promise<PteroAllocation[]>;
   /** Prüft den Client-API-Key */
   pingClient(): Promise<void>;
 

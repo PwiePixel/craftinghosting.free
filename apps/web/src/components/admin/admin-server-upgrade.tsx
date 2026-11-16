@@ -39,6 +39,7 @@ function UpgradeDialog({ server, close }: { server: AdminServerDTO; close: () =>
   const [loadError, setLoadError] = useState<string | null>(null);
   const [planId, setPlanId] = useState(server.planId);
   const [nodeId, setNodeId] = useState<number | null>(null);
+  const [keepPorts, setKeepPorts] = useState(true);
   const [mark, setMark] = useState(true);
   const [note, setNote] = useState('');
   const [notify, setNotify] = useState(true);
@@ -77,7 +78,7 @@ function UpgradeDialog({ server, close }: { server: AdminServerDTO; close: () =>
     setResult(null);
     try {
       const { result: r } = await api<{ result: AdminUpgradeResultDTO }>(`/admin/servers/${server.id}/upgrade`, {
-        body: { planId: planChanged ? planId : null, nodeId: nodeChanged ? nodeId : null, markUpgrade: mark, note, notify },
+        body: { planId: planChanged ? planId : null, nodeId: nodeChanged ? nodeId : null, keepPorts, markUpgrade: mark, note, notify },
       });
       setResult({ ok: !r.transferError, text: r.message });
       await load();
@@ -137,7 +138,7 @@ function UpgradeDialog({ server, close }: { server: AdminServerDTO; close: () =>
                 <p className="mt-1 text-amber-100/85">
                   {transfer.mode === 'api'
                     ? 'Das Panel verschiebt den Server im Hintergrund. Sobald er angekommen ist, wird die neue Adresse übernommen und der Kunde informiert.'
-                    : 'Dieses Panel bietet den Umzug nicht per Schnittstelle an. Verschiebe den Server im Panel (Admin → Servers → Server öffnen → Manage → Transfer Server). Danach wird die neue Adresse automatisch übernommen und der Kunde informiert.'}
+                    : 'Der Umzug konnte nicht automatisch gestartet werden (kein Panel-Zugang unter Admin → Pterodactyl → „Automatischer Umzug“). Verschiebe den Server im Panel (Admin → Servers → Server öffnen → Manage → Transfer Server). Danach wird die neue Adresse automatisch übernommen und der Kunde informiert.'}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {server.panelAdminUrl && (
@@ -191,10 +192,30 @@ function UpgradeDialog({ server, close }: { server: AdminServerDTO; close: () =>
                 {transfer
                   ? 'Solange ein Umzug läuft, lässt sich keine andere Node wählen.'
                   : nodeChanged && target
-                    ? `Der Server zieht mit allen Daten auf „${target.name}“ um${target.private ? ' (private Node)' : ''}. Währenddessen ist er nicht erreichbar, die Adresse kann sich ändern.`
+                    ? `Der Umzug startet sofort: Der Server zieht mit allen Daten auf „${target.name}“ um${target.private ? ' (private Node)' : ''}. Währenddessen ist er nicht erreichbar, die Adresse kann sich ändern.`
                     : 'Private Nodes werden für neue kostenlose Server nie verwendet – hierhin kommen Server nur, wenn du sie von Hand verschiebst.'}
               </span>
+              {nodeChanged && !options.webLogin && (
+                <span className="mt-1.5 block text-[13px] leading-relaxed text-amber-200">
+                  Hinweis: Es ist kein Panel-Zugang für den automatischen Umzug hinterlegt (Admin → Pterodactyl → „Automatischer Umzug“). Bei Pelican startet der Umzug trotzdem sofort; beim klassischen
+                  Pterodactyl müsstest du den Server dann im Panel selbst verschieben.
+                </span>
+              )}
             </label>
+
+            {nodeChanged && (
+              <label className="flex items-start gap-3 rounded-lg border border-line p-4 text-sm text-gray-200">
+                <input type="checkbox" className="mt-0.5 size-4 accent-emerald-500" checked={keepPorts} onChange={(e) => setKeepPorts(e.target.checked)} />
+                <span>
+                  Alle Ports mitnehmen
+                  <span className="block text-[13px] leading-relaxed text-subtle">
+                    {current.ports.length ? `Der Server hat ${current.ports.length === 1 ? 'den Port' : 'die Ports'} ${current.ports.join(', ')}. ` : ''}
+                    Portnummern, die auf der Ziel-Node frei sind, bleiben gleich. Für belegte bekommt der Server gleich viele andere freie Ports. Ohne Haken bekommt er nur einen neuen Hauptport – zusätzliche
+                    Ports entfallen.
+                  </span>
+                </span>
+              </label>
+            )}
 
             <div className="space-y-3 rounded-lg border border-line p-4">
               <label className="flex items-start gap-3 text-sm text-gray-200">

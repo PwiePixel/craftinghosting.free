@@ -353,9 +353,13 @@ export interface AdminUpgradeOptionsDTO {
     status: string;
     planId: string;
     nodeId: number | null;
+    /** Ports des Servers laut Panel (Hauptport zuerst) */
+    ports: number[];
     upgrade: { at: string; note: string | null } | null;
     transfer: AdminTransferDTO | null;
   };
+  /** Ist ein Panel-Admin-Zugang für den automatischen Umzug hinterlegt? (nötig beim klassischen Pterodactyl) */
+  webLogin: boolean;
   plans: { id: string; name: string; memoryMb: number; cpuPercent: number; diskMb: number; enabled: boolean }[];
   nodes: {
     id: number;
@@ -368,6 +372,14 @@ export interface AdminUpgradeOptionsDTO {
     /** Für welches Angebot die Node vorgesehen ist (null = keine feste Zuweisung) */
     use: ProductKind | null;
   }[];
+}
+
+/** Panel-Admin-Zugang für automatische Umzüge (Passwort und Zwei-Faktor-Schlüssel werden nie ausgegeben) */
+export interface AdminPanelLoginDTO {
+  configured: boolean;
+  username: string;
+  hasTotp: boolean;
+  lastCheck: { at: string; ok: boolean; message: string } | null;
 }
 
 export interface AdminUpgradeResultDTO {

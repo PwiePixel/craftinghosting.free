@@ -3,9 +3,13 @@
  * auch auf eine private Node, die für neue kostenlose Server nie verwendet wird.
  *
  * Paketwechsel: Ressourcen und Slots werden sofort im Panel gesetzt, der Port bleibt.
- * Umzug: Nicht jedes Panel bietet ihn per Schnittstelle an (Pelican ja, das klassische Pterodactyl nicht).
- *  – „api“: Das Panel hat den Umzug gestartet; er läuft im Hintergrund.
- *  – „manual“: Das Team verschiebt den Server im Panel (Admin → Servers → Manage → Transfer).
+ * Umzug: Er startet automatisch –
+ *  – bei Pelican über die Schnittstelle des Panels,
+ *  – beim klassischen Pterodactyl (das dafür keine Schnittstelle hat) über den Admin-Bereich des Panels, sofern
+ *    unter Admin → Pterodactyl ein Panel-Admin-Zugang hinterlegt ist (siehe pterodactyl/web-transfer).
+ *  – Ohne diesen Zugang bleibt nur „manual“: Das Team verschiebt den Server im Panel.
+ * Ports: Auf Wunsch behält der Server alle seine Portnummern, soweit sie auf der Ziel-Node frei sind; für belegte
+ * bekommt er gleich viele andere freie Ports.
  * In beiden Fällen prüft ein Job jede Minute, ob der Server auf der neuen Node angekommen ist, übernimmt die
  * neue Adresse und informiert den Kunden.
  */
@@ -17,7 +21,9 @@ import { sendDm } from '../discord/invite-rewards';
 import { mapLimit } from '../jobs/types';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
-import { PterodactylError, type PteroNode, type PteroServer } from '../pterodactyl/types';
+import { PterodactylError, type PteroAllocation, type PteroNode, type PteroServer } from '../pterodactyl/types';
+import { PanelWebError, panelWebTransfer } from '../pterodactyl/web-transfer';
+import { getPanelWebLogin, notePanelWebCheck } from './panel-web.store';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { trySyncPanelDescription } from './panel';
@@ -30,7 +36,7 @@ const gb = (mb: number) => (mb < 1024 ? `${mb} MB` : `${mb % 1024 === 0 ? mb / 1
 const planLine = (p: Pick<PlanSetting, 'name' | 'memoryMb' | 'cpuPercent' | 'diskMb'>, l: 'de' | 'en') =>
   l === 'en' ? `${p.name} (${gb(p.memoryMb)} RAM, ${p.cpuPercent} % CPU, ${gb(p.diskMb)} storage)` : `${p.name} (${gb(p.memoryMb)} RAM, ${p.cpuPercent} % CPU, ${gb(p.diskMb)} Speicher)`;
 const address = (p: PteroServer) => (p.allocation ? `${p.allocation.alias || p.allocation.ip}:${p.allocation.port}` : null);
-const panelError = (err: unknown) => (err instanceof PterodactylError ? `${err.message}${err.status ? ` (Fehler ${err.status})` : ''}` : (err as Error).message).slice(0, 220);
+const panelError = (err: unknown) => (err instanceof PanelWebError ? err.message : err instanceof PterodactylError ? `${err.message}${err.status ? ` (Fehler ${err.status})` : ''}` : (err as Error).message).slice(0, 220);
 
 async function loadServer(id: string): Promise<Server> {
   const [server] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);
@@ -55,6 +61,51 @@ async function currentNodeId(server: Server): Promise<number | null> {
   return p.nodeId;
 }
 
+export interface PortPlan {
+  primary: PteroAllocation;
+  additional: PteroAllocation[];
+  /** Ports, deren Nummer gleich bleibt */
+  kept: number[];
+  /** Ports, die auf der Ziel-Node belegt sind und deshalb eine neue Nummer bekommen */
+  changed: { from: number; to: number }[];
+}
+
+/**
+ * Verteilt die Ports eines Servers auf die freien Ports der Ziel-Node: gleiche Portnummer, wenn sie dort frei ist –
+ * sonst ein anderer freier Port (bevorzugt mit derselben IP wie der Hauptport). keepAll = false: nur der Hauptport.
+ * Rückgabe { missing } = auf der Ziel-Node sind zu wenige Ports frei.
+ */
+export function planPorts(current: Pick<PteroAllocation, 'port'>[], free: PteroAllocation[], keepAll: boolean): PortPlan | { missing: number } {
+  const wanted = (keepAll ? current : current.slice(0, 1)).map((a) => a.port);
+  if (wanted.length === 0) wanted.push(-1);
+  if (free.length < wanted.length) return { missing: wanted.length - free.length };
+  const pool = [...free];
+  const chosen: (PteroAllocation | null)[] = wanted.map(() => null);
+  const take = (index: number) => pool.splice(index, 1)[0]!;
+  // 1) Gleiche Portnummern zuerst – der Hauptport bestimmt die bevorzugte IP
+  wanted.forEach((port, i) => {
+    const ip = chosen[0]?.ip;
+    let index = pool.findIndex((a) => a.port === port && (!ip || a.ip === ip));
+    if (index === -1) index = pool.findIndex((a) => a.port === port);
+    if (index !== -1) chosen[i] = take(index);
+  });
+  // 2) Für belegte Ports: irgendein freier Port
+  const kept: number[] = [];
+  const changed: { from: number; to: number }[] = [];
+  wanted.forEach((port, i) => {
+    if (chosen[i]) {
+      kept.push(port);
+      return;
+    }
+    const ip = (chosen[0] ?? pool[0])?.ip;
+    let index = pool.findIndex((a) => a.ip === ip);
+    if (index === -1) index = 0;
+    chosen[i] = take(index);
+    if (port > 0) changed.push({ from: port, to: chosen[i]!.port });
+  });
+  return { primary: chosen[0]!, additional: chosen.slice(1) as PteroAllocation[], kept, changed };
+}
+
 /** Auswahl für den Dialog „Upgrade / Umzug“: Pakete dieses Angebots und alle Nodes mit freien Ports */
 export async function upgradeOptions(id: string): Promise<AdminUpgradeOptionsDTO> {
   const server = await loadServer(id);
@@ -63,6 +114,7 @@ export async function upgradeOptions(id: string): Promise<AdminUpgradeOptionsDTO
   const nodes = await ptero.listNodes().catch(() => [] as PteroNode[]);
   const free = new Map<number, number | null>();
   await mapLimit(nodes, 4, async (n) => void free.set(n.id, await ptero.freeAllocations(n.id).then((f) => f.count, () => null)));
+  const panelServer = server.pteroServerId ? await ptero.getServer(server.pteroServerId).catch(() => null) : null;
   return {
     server: {
       id: server.id,
@@ -70,10 +122,13 @@ export async function upgradeOptions(id: string): Promise<AdminUpgradeOptionsDTO
       kind: server.kind,
       status: server.status,
       planId: server.planId,
-      nodeId: await currentNodeId(server),
+      nodeId: panelServer?.nodeId ?? (await currentNodeId(server)),
+      ports: panelServer?.allocations.map((a) => a.port) ?? [],
       upgrade: server.upgradedAt ? { at: server.upgradedAt.toISOString(), note: server.upgradeNote } : null,
       transfer: server.transferNodeId !== null ? { nodeId: server.transferNodeId, mode: server.transferMode ?? 'manual', startedAt: (server.transferStartedAt ?? new Date()).toISOString() } : null,
     },
+    // Ohne Panel-Zugang startet der Umzug nur bei Panels, die ihn über die Schnittstelle anbieten
+    webLogin: !!(await getPanelWebLogin()),
     plans: allPlans(settings)
       .filter((p) => p.kind === server.kind)
       .sort((a, b) => a.memoryMb - b.memoryMb)
@@ -94,6 +149,8 @@ export interface AdminUpgradeInput {
   planId?: string | null;
   /** Ziel-Node (null/gleich = unverändert) */
   nodeId?: number | null;
+  /** Beim Umzug alle Ports mitnehmen: gleiche Nummern, wenn frei – sonst gleich viele andere (false = nur ein neuer Hauptport) */
+  keepPorts: boolean;
   /** Server beim Kunden als „Upgrade“ kennzeichnen (false = Kennzeichnung entfernen) */
   markUpgrade: boolean;
   /** Hinweis für den Kunden (erscheint an der Kennzeichnung und in der Benachrichtigung) */
@@ -127,19 +184,30 @@ export async function adminUpgradeServer(admin: { email: string }, id: string, i
   }
   // Ziel-Node prüfen, bevor irgendetwas geändert wird
   let target: PteroNode | undefined;
-  let allocationId: number | null = null;
+  let ports: PortPlan | null = null;
   if (toNode) {
+    let planned: PortPlan | { missing: number };
+    let needed = 1;
     try {
       target = (await ptero.listNodes()).find((n) => n.id === toNode);
       if (!target) throw Errors.conflict('node_unknown', L('Diese Node gibt es im Panel nicht (mehr).', 'This node does not exist in the panel.'));
-      allocationId = (await ptero.freeAllocations(toNode)).firstId;
+      const current = (await ptero.getServer(pteroId))?.allocations ?? [];
+      needed = input.keepPorts ? Math.max(1, current.length) : 1;
+      planned = planPorts(current, await ptero.listFreeAllocations(toNode), input.keepPorts);
     } catch (err) {
       if (err instanceof ApiError) throw err;
       throw new ApiError(502, 'panel_error', L(`Das Panel antwortet nicht wie erwartet: ${panelError(err)}`, `The panel did not answer as expected: ${panelError(err)}`));
     }
-    if (allocationId === null) {
-      throw Errors.conflict('node_full', L(`Auf der Node „${target.name}“ ist kein freier Port (Allokation). Bitte im Panel weitere Ports anlegen.`, `There is no free port (allocation) on node “${target.name}”.`));
+    if ('missing' in planned) {
+      throw Errors.conflict(
+        'node_full',
+        L(
+          `Auf der Node „${target.name}“ sind zu wenige Ports frei: Der Server braucht ${needed}, es fehlen ${planned.missing}. Bitte im Panel weitere Ports (Allokationen) anlegen.`,
+          `Not enough free ports on node “${target.name}”: the server needs ${needed}, ${planned.missing} are missing.`,
+        ),
+      );
     }
+    ports = planned;
   }
 
   // 1) Paket
@@ -159,9 +227,23 @@ export async function adminUpgradeServer(admin: { email: string }, id: string, i
   // 2) Umzug
   let transfer: AdminUpgradeResultDTO['transfer'] = 'none';
   let transferError: string | null = null;
-  if (toNode && target && allocationId !== null) {
+  if (toNode && target && ports) {
+    const extra = ports.additional.map((a) => a.id);
     try {
-      transfer = (await ptero.transferServer(pteroId, toNode, allocationId)) === 'started' ? 'started' : 'manual';
+      transfer = (await ptero.transferServer(pteroId, toNode, ports.primary.id, extra)) === 'started' ? 'started' : 'manual';
+      // Kein Umzug über die Schnittstelle (klassisches Pterodactyl): über den Admin-Bereich des Panels starten
+      const login = transfer === 'manual' ? await getPanelWebLogin() : null;
+      if (login) {
+        try {
+          await panelWebTransfer(login, pteroId, toNode, ports.primary.id, extra);
+          transfer = 'started';
+          await notePanelWebCheck(true, `Umzug von „${server.name}“ gestartet`);
+        } catch (err) {
+          transfer = 'none';
+          await notePanelWebCheck(false, panelError(err));
+          throw err;
+        }
+      }
     } catch (err) {
       // Das Paket ist schon geändert – deshalb kein Abbruch, sondern eine klare Meldung
       transferError = panelError(err);
@@ -185,7 +267,7 @@ export async function adminUpgradeServer(admin: { email: string }, id: string, i
 
   const changes = [
     newPlan ? `Paket ${oldPlan?.name ?? server.planId} → ${newPlan.name}` : null,
-    transfer === 'started' ? `Umzug auf Node „${target!.name}“ gestartet` : transfer === 'manual' ? `Umzug auf Node „${target!.name}“ vorgemerkt (im Panel verschieben)` : null,
+    transfer === 'started' ? `Umzug auf Node „${target!.name}“ gestartet (Ports: ${[ports!.primary, ...ports!.additional].map((a) => a.port).join(', ')})` : transfer === 'manual' ? `Umzug auf Node „${target!.name}“ vorgemerkt (im Panel verschieben)` : null,
     transferError ? `Umzug auf Node „${target?.name}“ fehlgeschlagen: ${transferError}` : null,
     markChanged ? (input.markUpgrade ? 'als Upgrade gekennzeichnet' : 'Upgrade-Kennzeichnung entfernt') : null,
   ].filter(Boolean);
@@ -228,11 +310,21 @@ export async function adminUpgradeServer(admin: { email: string }, id: string, i
     }
   }
 
+  const portsText = ports
+    ? [
+        ports.kept.length ? `Ports übernommen: ${ports.kept.join(', ')}.` : null,
+        ports.changed.length ? `Auf der Ziel-Node belegt, deshalb neu vergeben: ${ports.changed.map((c) => `${c.from} → ${c.to}`).join(', ')}.` : null,
+        !ports.kept.length && !ports.changed.length ? `Neuer Port: ${ports.primary.port}.` : null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : '';
   const message = [
     newPlan ? `Paket auf ${newPlan.name} geändert.` : null,
     transfer === 'started' ? `Der Umzug auf „${target!.name}“ läuft – sobald er fertig ist, wird die neue Adresse übernommen und der Kunde informiert.` : null,
+    transfer === 'started' && ports ? portsText : null,
     transfer === 'manual'
-      ? `Dieses Panel bietet den Umzug nicht per Schnittstelle an. Bitte verschiebe den Server jetzt im Panel (Admin → Servers → Server öffnen → Manage → Transfer Server) auf „${target!.name}“. Sobald er dort liegt, wird die neue Adresse automatisch übernommen und der Kunde informiert.`
+      ? `Dieses Panel bietet den Umzug nicht per Schnittstelle an, und es ist kein Panel-Zugang für den automatischen Umzug hinterlegt (Admin → Pterodactyl → „Automatischer Umzug“). Bitte verschiebe den Server jetzt im Panel (Admin → Servers → Server öffnen → Manage → Transfer Server) auf „${target!.name}“. Sobald er dort liegt, wird die neue Adresse automatisch übernommen und der Kunde informiert.`
       : null,
     transferError ? `Der Umzug konnte nicht gestartet werden: ${transferError}` : null,
     markChanged ? (input.markUpgrade ? 'Als Upgrade gekennzeichnet.' : 'Upgrade-Kennzeichnung entfernt.') : null,

@@ -1,3 +1,5 @@
+import { clearPanelWebLogin, getPanelWebLogin, notePanelWebCheck, panelWebLoginStatus, savePanelWebLogin } from '../services/panel-web.store';
+import { testPanelWebLogin } from '../pterodactyl/web-transfer';
 import { adminUpgradeServer, cancelServerTransfer, checkServerTransfers, upgradeOptions } from '../services/admin-upgrade.service';
 import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
@@ -119,6 +121,40 @@ export async function adminRoutes(app: FastifyInstance) {
   /** Pterodactyl: Verbindung, Nodes und Eggs (automatisch erkannt) */
   app.get('/admin/panel', async () => ({ panel: await getPanelInfo() }));
 
+  /* ------------------------------------------- Panel-Admin-Zugang für automatische Umzüge */
+  app.get('/admin/panel/transfer-login', async () => ({ login: await panelWebLoginStatus() }));
+  app.post('/admin/panel/transfer-login', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (request) => {
+    const body = z
+      .object({
+        username: z.string().trim().min(1).max(191),
+        password: z.string().max(200).optional(),
+        totpSecret: z.string().trim().max(200).optional(),
+        clearTotp: z.boolean().optional(),
+      })
+      .parse(request.body);
+    if (!body.password && !(await panelWebLoginStatus()).configured) throw Errors.badRequest('password_required', L('Bitte ein Passwort angeben.', 'Please enter a password.'));
+    await savePanelWebLogin(body);
+    await audit({ actor: 'admin', action: 'admin.panel_login_saved', message: `Panel-Zugang für automatische Umzüge gespeichert (Konto ${body.username}, durch ${currentUser(request).email})`, ip: request.ip });
+    return { login: await panelWebLoginStatus() };
+  });
+  app.post('/admin/panel/transfer-login/delete', async (request) => {
+    await clearPanelWebLogin();
+    await audit({ actor: 'admin', action: 'admin.panel_login_deleted', message: `Panel-Zugang für automatische Umzüge gelöscht (durch ${currentUser(request).email})`, ip: request.ip });
+    return { login: await panelWebLoginStatus() };
+  });
+  /** Zugang prüfen: Anmeldung am Panel und Admin-Rechte */
+  app.post('/admin/panel/transfer-login/test', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async () => {
+    const login = await getPanelWebLogin();
+    if (!login) throw Errors.badRequest('no_login', L('Es ist noch kein Zugang gespeichert.', 'No login has been saved yet.'));
+    try {
+      await testPanelWebLogin(login);
+      await notePanelWebCheck(true, 'Anmeldung erfolgreich, das Konto ist Admin.');
+    } catch (err) {
+      await notePanelWebCheck(false, (err as Error).message);
+    }
+    return { login: await panelWebLoginStatus() };
+  });
+
   /* ------------------------------------------------- Upgrade und Umzug auf eine andere Node */
   app.get('/admin/servers/:id/upgrade', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });
@@ -130,6 +166,7 @@ export async function adminRoutes(app: FastifyInstance) {
       .object({
         planId: z.string().trim().max(64).nullish(),
         nodeId: z.number().int().positive().nullish(),
+        keepPorts: z.boolean().default(true),
         markUpgrade: z.boolean().default(true),
         note: z.string().trim().max(300).default(''),
         notify: z.boolean().default(true),
