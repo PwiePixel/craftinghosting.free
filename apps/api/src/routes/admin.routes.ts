@@ -1,3 +1,4 @@
+import { adminUpgradeServer, cancelServerTransfer, checkServerTransfers, upgradeOptions } from '../services/admin-upgrade.service';
 import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
@@ -117,6 +118,34 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /** Pterodactyl: Verbindung, Nodes und Eggs (automatisch erkannt) */
   app.get('/admin/panel', async () => ({ panel: await getPanelInfo() }));
+
+  /* ------------------------------------------------- Upgrade und Umzug auf eine andere Node */
+  app.get('/admin/servers/:id/upgrade', async (request) => {
+    const { id } = idParams.parse({ id: (request.params as { id: string }).id });
+    return { options: await upgradeOptions(id) };
+  });
+  app.post('/admin/servers/:id/upgrade', async (request) => {
+    const { id } = idParams.parse({ id: (request.params as { id: string }).id });
+    const body = z
+      .object({
+        planId: z.string().trim().max(64).nullish(),
+        nodeId: z.number().int().positive().nullish(),
+        markUpgrade: z.boolean().default(true),
+        note: z.string().trim().max(300).default(''),
+        notify: z.boolean().default(true),
+      })
+      .parse(request.body);
+    return { result: await adminUpgradeServer(currentUser(request), id, body, request.ip) };
+  });
+  /** Laufenden Umzug sofort abgleichen (sonst prüft der Job jede Minute) */
+  app.post('/admin/servers/:id/transfer-check', async (request) => {
+    const { id } = idParams.parse({ id: (request.params as { id: string }).id });
+    return { result: await checkServerTransfers(id) };
+  });
+  app.post('/admin/servers/:id/transfer-cancel', async (request) => {
+    const { id } = idParams.parse({ id: (request.params as { id: string }).id });
+    return { result: await cancelServerTransfer(currentUser(request), id, request.ip) };
+  });
 
   app.post('/admin/servers/:id/:action', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });

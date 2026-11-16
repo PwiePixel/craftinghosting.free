@@ -102,6 +102,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
       allocation: primary
         ? { ip: primary.attributes.ip, alias: primary.attributes.alias ?? null, port: primary.attributes.port }
         : null,
+      nodeId: typeof a.node === 'number' ? a.node : null,
     };
   }
 
@@ -207,6 +208,26 @@ export class PterodactylHttpClient implements PterodactylGateway {
       ...(typeof a.limits.oom_disabled === 'boolean' ? { oom_disabled: a.limits.oom_disabled } : {}),
       feature_limits: { databases: featureLimits.databases, allocations: featureLimits.allocations, backups: featureLimits.backups },
     });
+  }
+
+  async transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'> {
+    try {
+      await this.request('application', 'POST', `/servers/${id}/transfer`, { node_id: nodeId, allocation_id: allocationId });
+      return 'started';
+    } catch (err) {
+      // Das klassische Pterodactyl kennt diese Adresse nicht – der Umzug geht dort nur im Admin-Bereich des Panels
+      if (err instanceof PterodactylError && (err.status === 404 || err.status === 405)) return 'unsupported';
+      throw err;
+    }
+  }
+
+  async cancelServerTransfer(id: number): Promise<boolean> {
+    try {
+      await this.request('application', 'POST', `/servers/${id}/transfer/cancel`, {});
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {

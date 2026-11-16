@@ -45,6 +45,10 @@ interface MockServer {
   featureLimits?: { databases: number; allocations: number; backups: number };
   /** Node, auf der der Server liegt (0 = automatisch über die Location platziert) */
   nodeId?: number;
+  /** Im Test von Hand verschoben (wie im Panel): Die Adresse folgt dann der Node */
+  movedManually?: boolean;
+  /** Laufender Umzug: Ziel-Node, Port und Zeitpunkt, ab dem er als abgeschlossen gilt */
+  transfer?: { nodeId: number; port: number; doneAt: number };
   /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
   files?: Record<string, string>;
 }
@@ -97,6 +101,10 @@ export class PterodactylMockClient implements PterodactylGateway {
 
   private toServer(s: MockServer): PteroServer {
     const installing = Date.now() < s.installedAt;
+    // Ein Umzug gilt nach kurzer Zeit als abgeschlossen: Node und Adresse wechseln dann
+    const moved = s.transfer && Date.now() >= s.transfer.doneAt ? s.transfer : null;
+    const nodeId = moved ? moved.nodeId : (s.nodeId ?? 0);
+    const host = nodeId === 2 ? 'free-de-2' : nodeId === 3 ? 'bots-de-1' : 'free-de-1';
     return {
       id: s.id,
       uuid: s.uuid,
@@ -107,7 +115,8 @@ export class PterodactylMockClient implements PterodactylGateway {
       userId: s.userId,
       suspended: s.suspended,
       status: s.suspended ? 'suspended' : installing ? 'installing' : null,
-      allocation: { ip: '203.0.113.10', alias: 'free-de-1.craftinghosting.free', port: s.port },
+      allocation: { ip: '203.0.113.10', alias: s.transfer || s.movedManually ? `${host}.craftinghosting.free` : 'free-de-1.craftinghosting.free', port: moved ? moved.port : s.port },
+      nodeId,
     };
   }
 
@@ -214,6 +223,26 @@ export class PterodactylMockClient implements PterodactylGateway {
       s.cpu = limits.cpu;
       s.featureLimits = { ...featureLimits };
     });
+  }
+
+  async transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'> {
+    // PTERODACTYL_MOCK_TRANSFER=none stellt das klassische Pterodactyl nach (kein Umzug per Schnittstelle)
+    if (process.env.PTERODACTYL_MOCK_TRANSFER === 'none') return 'unsupported';
+    this.mutate(id, (s) => {
+      s.transfer = { nodeId, port: 25_000 + (allocationId % 1000), doneAt: Date.now() + 4_000 };
+    });
+    return 'started';
+  }
+
+  async cancelServerTransfer(id: number): Promise<boolean> {
+    let cancelled = false;
+    this.mutate(id, (s) => {
+      if (s.transfer && Date.now() < s.transfer.doneAt) {
+        delete s.transfer;
+        cancelled = true;
+      }
+    });
+    return cancelled;
   }
 
   async updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }) {

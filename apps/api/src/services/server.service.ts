@@ -87,6 +87,8 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
       server.status === 'suspended' && server.suspensionReason === 'cycle_expired' && server.suspendedAt
         ? (deleteAtFor(server.suspendedAt, cycleRules.reactivationCooldownMinutes, cycleRules.deleteAfterRestHours)?.toISOString() ?? null)
         : null,
+    upgrade: server.upgradedAt ? { at: server.upgradedAt.toISOString(), note: server.upgradeNote } : null,
+    moving: server.transferNodeId !== null,
     createdAt: server.createdAt.toISOString(),
   };
 }
@@ -377,7 +379,8 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
   }
   // Server aus einer Boost-Belohnung lassen sich nur verlängern, solange sie in die geltenden Grenzen passen
   // (also solange der Boost läuft). Accounts ohne Boost-Belohnungen sind davon nicht betroffen.
-  if (await hadBoostRewards(user.discordId)) {
+  // Vom Team aufgewertete Server sind ausgenommen – das Upgrade soll nicht an einer Boost-Grenze scheitern.
+  if (!server.upgradedAt && (await hadBoostRewards(user.discordId))) {
     const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
     if (serverLimitBlock((await getSettings()).registration.limits, others, server.kind, server.planId, await bonusSlotsFor(user)) !== null) {
       throw Errors.conflict(

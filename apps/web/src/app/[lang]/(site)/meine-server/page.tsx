@@ -124,6 +124,18 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
           )}
         </div>
       )}
+      {(s.upgrade || s.moving) && (
+        <div className="border-b border-emerald-400/25 bg-emerald-400/[0.07] px-6 py-3.5">
+          {s.upgrade && (
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-emerald-100">
+              <span className="rounded bg-emerald-500 px-1.5 py-0.5 text-[11px] tracking-[0.08em] text-white uppercase">{t.upgradeBadge}</span>
+              {t.upgradeText(fmt.date(s.upgrade.at), s.planName)}
+            </p>
+          )}
+          {s.upgrade?.note && <p className="mt-1 max-w-2xl text-sm leading-relaxed text-emerald-100/85">{t.upgradeNote(s.upgrade.note)}</p>}
+          {s.moving && <p className={cn('max-w-2xl text-sm leading-relaxed text-amber-200', s.upgrade && 'mt-1.5')}>{t.movingText}</p>}
+        </div>
+      )}
       <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

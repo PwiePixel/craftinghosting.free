@@ -107,6 +107,10 @@ export interface ServerDTO {
   waitlist: WaitlistInfo | null;
   /** Nach Ablauf + Ruhetag: Zeitpunkt der automatischen Löschung ohne Reaktivierung */
   deleteAt: string | null;
+  /** Vom Team als Upgrade gekennzeichnet: Zeitpunkt und optionaler Hinweis (null = kein Upgrade) */
+  upgrade: { at: string; note: string | null } | null;
+  /** Der Server zieht gerade auf eine andere Node um */
+  moving: boolean;
 }
 
 export interface NotificationDTO {
@@ -324,7 +328,56 @@ export interface AdminServerDTO {
   panelDescription: string | null;
   pteroServerId: number | null;
   panelAdminUrl: string | null;
+  /** Node im Panel (null = noch nicht bekannt) */
+  nodeId: number | null;
+  /** Als Upgrade gekennzeichnet seit … (null = nein) */
+  upgradedAt: string | null;
+  /** Laufender Umzug auf eine andere Node (null = keiner) */
+  transfer: AdminTransferDTO | null;
   createdAt: string;
+}
+
+/** Laufender Umzug: api = vom Panel gestartet, manual = das Team verschiebt den Server im Panel */
+export interface AdminTransferDTO {
+  nodeId: number;
+  mode: 'api' | 'manual';
+  startedAt: string;
+}
+
+/** Auswahl für „Upgrade / Umzug“ eines Servers im Admin-Bereich */
+export interface AdminUpgradeOptionsDTO {
+  server: {
+    id: string;
+    name: string;
+    kind: ProductKind;
+    status: string;
+    planId: string;
+    nodeId: number | null;
+    upgrade: { at: string; note: string | null } | null;
+    transfer: AdminTransferDTO | null;
+  };
+  plans: { id: string; name: string; memoryMb: number; cpuPercent: number; diskMb: number; enabled: boolean }[];
+  nodes: {
+    id: number;
+    name: string;
+    /** Private Node: wird für neue kostenlose Server nie verwendet */
+    private: boolean;
+    maintenance: boolean;
+    /** Freie Ports (null = ließ sich nicht ermitteln) */
+    freePorts: number | null;
+    /** Für welches Angebot die Node vorgesehen ist (null = keine feste Zuweisung) */
+    use: ProductKind | null;
+  }[];
+}
+
+export interface AdminUpgradeResultDTO {
+  planChanged: boolean;
+  /** started = Umzug läuft, manual = bitte im Panel verschieben */
+  transfer: 'none' | 'started' | 'manual';
+  transferError: string | null;
+  notified: boolean;
+  /** Zusammenfassung für den Admin-Bereich */
+  message: string;
 }
 
 export interface AdminUserDTO {

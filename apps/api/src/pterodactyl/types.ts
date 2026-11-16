@@ -20,6 +20,8 @@ export interface PteroServer {
   /** "installing" | "install_failed" | "suspended" | "restoring_backup" | null */
   status: string | null;
   allocation: { ip: string; alias: string | null; port: number } | null;
+  /** Node, auf der der Server liegt (null = vom Panel nicht gemeldet) */
+  nodeId: number | null;
 }
 
 export interface PteroResources {
@@ -134,6 +136,14 @@ export interface PterodactylGateway {
   updateServerBuild(id: number, limits: { memory: number; disk: number; cpu: number; swap: number; io: number }, featureLimits: { databases: number; allocations: number; backups: number }): Promise<void>;
   /** Slots eines bestehenden Servers ändern (Datenbanken, Ports, Backups) – Ressourcen und Port bleiben unverändert */
   updateServerFeatureLimits(id: number, limits: { databases: number; allocations: number; backups: number }): Promise<void>;
+
+  /**
+   * Server auf eine andere Node umziehen (Daten werden mitgenommen). Das bietet nicht jedes Panel per Schnittstelle an
+   * (Pelican ja, das klassische Pterodactyl nicht) – dann „unsupported“: Der Umzug muss im Panel gestartet werden.
+   */
+  transferServer(id: number, nodeId: number, allocationId: number): Promise<'started' | 'unsupported'>;
+  /** Laufenden Umzug abbrechen (false = nicht möglich bzw. vom Panel nicht angeboten) */
+  cancelServerTransfer(id: number): Promise<boolean>;
 
   getEgg(nestId: number, eggId: number): Promise<PteroEgg>;
   listNodes(): Promise<PteroNode[]>;

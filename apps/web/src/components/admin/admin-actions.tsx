@@ -7,6 +7,7 @@ import type { AdminServerDTO, AdminUserDTO } from '@chfree/shared';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
+import { ServerUpgradeButton } from '@/components/admin/admin-server-upgrade';
 
 /** Kleiner Aktions-Button mit optionaler Zwei-Klick-Bestätigung (ohne Browser-Dialoge). */
 export function ActionButton({
@@ -81,6 +82,8 @@ export function ServerActions({ server }: { server: AdminServerDTO }) {
       {(s === 'active' || s === 'expiring' || (s === 'suspended' && server.suspensionReason === 'cycle_expired')) && (
         <ActionButton label="+30 Tage" run={act('extend')} />
       )}
+      {/* Paket ändern, auf eine andere (auch private) Node umziehen, als Upgrade kennzeichnen */}
+      {server.pteroServerId !== null && (s === 'active' || s === 'expiring' || s === 'suspended') && <ServerUpgradeButton server={server} />}
       {paused && s === 'active' && <ActionButton label="Pause aufheben" run={act('clear-pause')} />}
       {s === 'provisioning_failed' && <ActionButton label="Erneut versuchen" run={act('retry')} />}
       {/* Offene Anfrage mit Panel-Konto: Voraussetzungen jetzt prüfen und den Server erstellen */}

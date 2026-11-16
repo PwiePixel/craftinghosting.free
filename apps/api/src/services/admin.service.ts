@@ -233,6 +233,9 @@ export async function listServersAdmin(
     panelDescription: s.panelDescription,
     pteroServerId: s.pteroServerId,
     panelAdminUrl: panelServerAdminUrl(s.pteroServerId),
+    nodeId: s.nodeId,
+    upgradedAt: iso(s.upgradedAt),
+    transfer: s.transferNodeId !== null ? { nodeId: s.transferNodeId, mode: s.transferMode ?? ('manual' as const), startedAt: (s.transferStartedAt ?? s.updatedAt).toISOString() } : null,
     createdAt: s.createdAt.toISOString(),
   }));
   return { servers: list, ...info };

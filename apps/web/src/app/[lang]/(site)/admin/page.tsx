@@ -481,6 +481,17 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
                     {s.abuse.reason}
                   </p>
                 )}
+                {s.upgradedAt && (
+                  <p className="mt-0.5 text-[11px] text-emerald-300">
+                    <span className="mr-1 rounded bg-emerald-500/80 px-1 py-px font-semibold text-white">Upgrade</span>
+                    seit {fmt.date(s.upgradedAt)}
+                  </p>
+                )}
+                {s.transfer && (
+                  <p className="mt-0.5 max-w-[240px] text-[11px] text-amber-300">
+                    Umzug auf Node {s.transfer.nodeId}: {s.transfer.mode === 'api' ? 'läuft' : 'bitte im Panel verschieben'}
+                  </p>
+                )}
                 {s.suspensionReason && <p className="text-[11px] text-subtle">Grund: {s.suspensionReason === 'cycle_expired' ? '30 Tage abgelaufen' : s.suspensionReason === 'admin' ? 'vom Team' : s.suspensionReason}</p>}
                 <p className="text-[11px] text-subtle">Power: {s.powerState}</p>
                 {paused && (
@@ -502,6 +513,7 @@ function ServersTab({ list, fmt }: { list: AdminServerDTO[]; fmt: ReturnType<typ
                 <p className="text-[11px] text-subtle">
                   {s.serverType} {s.version}
                 </p>
+                {s.nodeId !== null && <p className="text-[11px] text-subtle">Node {s.nodeId}</p>}
               </td>
               <td className="px-3 py-2.5 font-mono text-[12px] text-muted">{s.address ?? '–'}</td>
               <td className="px-3 py-2.5">

@@ -159,6 +159,15 @@ export const servers = sqliteTable(
     /** Abuse-Markierung: Zeitpunkt und Grund (ID aus services/abuse-reasons) – gesetzt mit einer Abuse-Mail, aufgehoben im Admin-Bereich */
     abuseAt: ts('abuse_at'),
     abuseReason: text('abuse_reason'),
+    /** Node im Panel, auf der der Server liegt (null = noch nicht bekannt) */
+    nodeId: integer('node_id'),
+    /** Vom Team als Upgrade markiert: Zeitpunkt und optionaler Hinweis für den Kunden */
+    upgradedAt: ts('upgraded_at'),
+    upgradeNote: text('upgrade_note'),
+    /** Laufender Umzug auf eine andere Node: Ziel, Beginn und Weg (api = vom Panel gestartet, manual = Team verschiebt im Panel) */
+    transferNodeId: integer('transfer_node_id'),
+    transferStartedAt: ts('transfer_started_at'),
+    transferMode: text('transfer_mode', { enum: ['api', 'manual'] }),
     /** Frist für eine offene Anfrage, die auf die Discord-Verbindung wartet – danach wird sie gelöscht (gesetzt mit der Erinnerungsmail) */
     pendingDeadlineAt: ts('pending_deadline_at'),
     /** Warteliste (Early Access): Platz wird bei der E-Mail-Bestätigung vergeben */
