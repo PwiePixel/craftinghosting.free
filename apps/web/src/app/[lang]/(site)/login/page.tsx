@@ -40,9 +40,9 @@ export default async function LoginPage({ params, searchParams }: Props) {
         />
         <div className="mt-8 space-y-1.5 border-t border-line pt-5 text-[13px] text-subtle">
           <p>
-            {t.noServer}{' '}
-            <Link href={localePath(lang, 'start')} className="text-gray-300 hover:text-white">
-              {t.createFree}
+            {t.noAccount}{' '}
+            <Link href={localePath(lang, 'register')} className="text-gray-300 hover:text-white">
+              {t.registerLink}
             </Link>
           </p>
           <p>

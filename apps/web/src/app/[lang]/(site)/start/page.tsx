@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
 import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, serverLimitBlock, takenPlanIds, type BonusSlot, type ServerDTO } from '@chfree/shared';
@@ -112,6 +113,14 @@ export default async function StartPage({ params, searchParams }: Props) {
       </InfoCard>
     );
   } else {
+    // „Server erstellen“ ist für angemeldete Nutzer. Ohne Anmeldung geht es zuerst zur Registrierung – und von dort
+    // automatisch hierher zurück, samt gewähltem Paket.
+    if (!me) {
+      const back: Record<string, string> = {};
+      if (initialPlan) back.plan = initialPlan;
+      if (initialKind) back.type = initialKind;
+      redirect(localePath(lang, 'register', { next: localePath(lang, 'start', Object.keys(back).length ? back : undefined) }));
+    }
     content = (
       <StartForm
         products={settings.products}
@@ -125,11 +134,14 @@ export default async function StartPage({ params, searchParams }: Props) {
         early={early}
         newsletterOption={settings.newsletter.signupCheckbox}
         discordSignup={settings.discord.signup}
+        needsDiscord={settings.discord.available && !!me && !me.user.discord}
       />
     );
   }
   // Zurück von Discord (Registrierung/Anmeldung): mit dem nächsten Schritt weitermachen – Panel-Zugang, Beitritt, fertig
-  if (me && query.resume === '1') {
+  // Ebenso, wenn schon eine Anfrage wartet und noch Schritte fehlen (Discord verbinden, Panel-Zugang festlegen)
+  const openSteps = !!me && !me.user.panelLinked && servers.some((srv) => srv.status === 'pending');
+  if (me && (query.resume === '1' || openSteps)) {
     content = (
       <div className="surface p-8 sm:p-10">
         <VerifyFlow embedded resume />

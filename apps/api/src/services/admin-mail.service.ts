@@ -29,13 +29,13 @@ const date = (d: Date, l: Locale) => formatDateTime(d, freeHostingConfig.fairUse
 
 type Waiting = { user: User; servers: { id: string; name: string; deadline: Date | null }[]; reason: 'discord_not_linked' | 'discord_not_member' };
 
-/** Accounts mit Panel-Konto, deren offene Anfrage nur noch an der Discord-Verbindung hängt */
+/** Accounts, deren offene Anfrage an der Discord-Verbindung hängt (Konto nicht verknüpft oder kein Mitglied) */
 async function discordWaiting(): Promise<Waiting[]> {
   const rows = await db
     .select({ s: servers, u: users })
     .from(servers)
     .innerJoin(users, eq(users.id, servers.userId))
-    .where(and(eq(servers.status, 'pending'), identityConfirmedSql(), isNotNull(users.pteroUserId), eq(users.status, 'active')))
+    .where(and(eq(servers.status, 'pending'), eq(users.status, 'active')))
     .limit(2000);
   const byUser = new Map<string, Waiting>();
   for (const { s, u } of rows) {

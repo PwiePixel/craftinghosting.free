@@ -50,6 +50,8 @@ export const routes = {
   start: { en: '/start', de: '/de/start', internal: 'start' },
   verify: { en: '/verify', de: '/de/verify', internal: 'verify' },
   login: { en: '/login', de: '/de/login', internal: 'login' },
+  /** Konto anlegen (E-Mail-Adresse und Passwort) – danach geht es zu „Server erstellen“ */
+  register: { en: '/register', de: '/de/registrieren', internal: 'registrieren' },
   myServers: { en: '/my-servers', de: '/de/meine-server', internal: 'meine-server' },
   faq: { en: '/faq', de: '/de/faq', internal: 'faq' },
   status: { en: '/status', de: '/de/status', internal: 'status' },

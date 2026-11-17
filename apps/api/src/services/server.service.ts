@@ -27,7 +27,7 @@ import { servers, users, type Server, type User } from '../db/schema';
 import { hadBoostRewards } from '../discord/boost-rewards';
 import { abuseReasonTitle } from './abuse-reasons';
 import { bonusSlotsFor } from '../discord/rewards';
-import { discordGate, syncCustomerRoleSoon } from '../discord/service';
+import { discordConfig, discordGate, syncCustomerRoleSoon } from '../discord/service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
@@ -275,7 +275,9 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
  * wurde aber (noch) nicht erstellt – z. B. weil die Erstellung beim letzten Versuch abgebrochen ist.
  */
 export async function pendingReasonFor(user: Pick<User, 'emailVerifiedAt' | 'pteroUserId' | 'discordId'>, opts: { cached?: boolean } = {}): Promise<PendingReason> {
-  if (!identityConfirmed(user)) return 'email';
+  // Weder Discord verknüpft noch E-Mail bestätigt: Der nächste Schritt ist die Discord-Verbindung
+  // (ohne eingerichtete Discord-Anbindung die Bestätigung der E-Mail-Adresse)
+  if (!identityConfirmed(user)) return (await discordConfig()).linkReady ? 'discord_not_linked' : 'email';
   if (!user.pteroUserId) return 'panel';
   const gate = await discordGate(user, opts);
   if (!gate.ok) return gate.reason === 'not_linked' ? 'discord_not_linked' : gate.reason === 'not_member' ? 'discord_not_member' : 'discord_unavailable';
@@ -340,7 +342,17 @@ export const alreadyOnWaitlist = () =>
 
 /** Weiterer Server für angemeldete Nutzer (z. B. nach dem Löschen des alten). */
 export async function createServerForUser(user: User, input: ServerConfigInput, ip?: string): Promise<ServerDTO> {
-  if (!identityConfirmed(user)) throw Errors.forbidden(L('Bitte melde dich zuerst mit Discord an oder bestätige deine E-Mail-Adresse.', 'Please sign in with Discord or confirm your email address first.'));
+  // Konten ohne verknüpftes Discord-Konto (und ohne bestätigte E-Mail-Adresse) können einen Server anfragen – erstellt
+  // wird er erst nach dem Verbinden. Bis dahin ist eine offene Anfrage möglich.
+  if (!identityConfirmed(user)) {
+    const [open] = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, user.id), inArray(servers.status, ['pending', 'waitlist']))).limit(1);
+    if (open) {
+      throw Errors.conflict(
+        'request_open',
+        L('Du hast schon eine offene Anfrage. Verbinde zuerst dein Discord-Konto – dann wird dein Server erstellt und du kannst weitere anfragen.', 'You already have an open request. Connect your Discord account first – then your server is created and you can request more.'),
+      );
+    }
+  }
   await assertConfigAvailable(input);
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
@@ -358,6 +370,7 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
     return toServerDTO(entry!, user);
   }
   const id = await savePendingServer(user.id, input);
+  await audit({ userId: user.id, serverId: id, actor: 'user', action: 'server.requested', message: `Server „${input.name}“ angefragt`, ip });
   if (user.pteroUserId) await activatePendingServers(user, ip);
   const [server] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);
   if (!server) throw Errors.conflict('server_limit_reached', L('Du hast bereits einen kostenlosen Server.', 'You already have a free server.'));

@@ -32,7 +32,6 @@ const nextConfig: NextConfig = {
   async redirects() {
     // Alte Pfade aus der ersten Version
     return [
-      { source: '/register', destination: '/start', permanent: true },
       { source: '/free-hosting', destination: '/#pakete', permanent: true },
       { source: '/features', destination: '/#ablauf', permanent: true },
       { source: '/dashboard/:path*', destination: '/meine-server', permanent: false },

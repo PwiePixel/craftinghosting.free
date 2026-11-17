@@ -10,6 +10,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ['faq', 0.8, 'monthly'],
     ['status', 0.5, 'daily'],
     ['login', 0.3, 'yearly'],
+    ['register', 0.6, 'monthly'],
     ['imprint', 0.2, 'yearly'],
     ['privacy', 0.2, 'yearly'],
     ['terms', 0.2, 'yearly'],

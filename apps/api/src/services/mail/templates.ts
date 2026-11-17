@@ -186,7 +186,7 @@ export function verifyEmailMail(code: string, locale: Locale, minutes: number = 
       preheader: 'Enter the code on the website to confirm your email address.',
       heading: 'Confirm your email address',
       paragraphs: [
-        'You signed up at CraftingHosting.free with your Discord account. Enter this code under “My servers” to confirm your email address.',
+        'You signed up at CraftingHosting.free. Enter this code under “My servers” to confirm your email address.',
         'Confirming is optional – your server works without it. A confirmed address is required to become a partner.',
       ],
       code,
@@ -198,7 +198,7 @@ export function verifyEmailMail(code: string, locale: Locale, minutes: number = 
     preheader: 'Gib den Code auf der Website ein, um deine E-Mail-Adresse zu bestätigen.',
     heading: 'E-Mail-Adresse bestätigen',
     paragraphs: [
-      'Du hast dich bei CraftingHosting.free mit deinem Discord-Konto registriert. Gib diesen Code unter „Meine Server“ ein, um deine E-Mail-Adresse zu bestätigen.',
+      'Du hast dich bei CraftingHosting.free registriert. Gib diesen Code unter „Meine Server“ ein, um deine E-Mail-Adresse zu bestätigen.',
       'Die Bestätigung ist freiwillig – dein Server funktioniert auch ohne. Eine bestätigte Adresse ist Voraussetzung, um Partner zu werden.',
     ],
     code,

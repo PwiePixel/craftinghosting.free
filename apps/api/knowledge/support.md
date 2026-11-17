@@ -16,18 +16,16 @@ bezahlte Pakete bei Crafting Hosting.
 Die Server werden auf dieser Website angefordert und danach im Pterodactyl-Panel verwaltet. Die Website selbst zeigt
 unter „Meine Server“ nur den Zustand und erlaubt Reaktivieren und Löschen.
 
-## Server oder Bot erstellen
+## Registrieren und Server oder Bot erstellen
 
-1. Auf der Website auf „Server erstellen“ klicken.
-2. Angebot wählen (Minecraft-Server oder Discord-Bot), Paket, Typ bzw. Programmiersprache, Version und einen Namen.
-3. E-Mail-Adresse eingeben, die Nutzungsbedingungen akzeptieren und auf „Weiter mit Discord“ klicken.
-4. Bei Discord anmelden und zustimmen. Dabei tritt das Konto unserem Discord-Server bei. Die Registrierung läuft über
-   das Discord-Konto – kostenlose Server gibt es nur für Mitglieder unseres Discord-Servers.
-5. Benutzername und Passwort für das Pterodactyl-Panel festlegen. Danach wird der Server automatisch erstellt und
+1. Auf der Website auf „Server erstellen“ klicken (oder direkt auf ein Paket). Wer noch kein Konto hat, kommt zuerst
+   zur Seite „Registrieren“: E-Mail-Adresse und Passwort eingeben, AGB akzeptieren, „Konto erstellen“.
+2. Danach geht es automatisch zu „Server erstellen“: Angebot wählen (Minecraft-Server oder Discord-Bot), Paket, Typ
+   bzw. Programmiersprache, Version und einen Namen.
+3. Discord-Konto verbinden. Dabei tritt das Konto unserem Discord-Server bei. Das ist Pflicht: Kostenlose Server gibt
+   es nur für Mitglieder unseres Discord-Servers – ohne diesen Schritt bleibt der Server eine offene Anfrage.
+4. Benutzername und Passwort für das Pterodactyl-Panel festlegen. Danach wird der Server automatisch erstellt und
    installiert (dauert meist ein bis zwei Minuten).
-
-Statt mit Discord lässt sich das Konto auch mit E-Mail-Adresse und Passwort anlegen. Einen Server gibt es aber in jedem
-Fall erst, wenn das Discord-Konto verbunden und Mitglied unseres Discord-Servers ist – das ist dann der nächste Schritt.
 
 Die E-Mail-Adresse muss nicht bestätigt werden. Wir schicken trotzdem einen sechsstelligen Code; wer ihn unter
 „Meine Server“ eingibt, hat eine bestätigte Adresse – das ist die Voraussetzung, um Partner zu werden. Unter
@@ -38,7 +36,8 @@ Warteliste und eine E-Mail, sobald der Server freigeschaltet ist.
 
 ## Anmelden
 
-- Auf der Anmeldeseite „Mit Discord anmelden“ wählen – mit dem Discord-Konto, mit dem man sich registriert hat.
+- Auf der Anmeldeseite mit E-Mail-Adresse und Passwort anmelden. Wer sein Discord-Konto verbunden hat, kann auch
+  „Mit Discord anmelden“ wählen.
 - Wer ein Passwort festgelegt hat, meldet sich mit E-Mail-Adresse und Passwort an. Passwort vergessen: mit Discord oder
   einem Code per E-Mail anmelden und unter „Meine Server“ → Konto ein neues Passwort festlegen.
 - Wer nicht ständig neu angemeldet werden möchte, schaltet unter „Meine Server“ → Konto „Angemeldet bleiben“ ein.

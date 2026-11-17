@@ -28,7 +28,7 @@ import { assertNotMaintenance } from '../lib/maintenance';
 import { clearSessionCookie, currentUser, requireAuth, setSessionCookie } from '../plugins/auth';
 import { audit } from '../services/audit.service';
 import { createBetaTicket, redeemBetaTicket } from '../services/beta.service';
-import { changeEmail, confirmEmail, getUser, loginWithPassword, prepareSignup, registerWithPassword, removeLoginPassword, setLoginPassword, requestLoginCode, requestServer, resumeLogin, sendEmailVerification, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
+import { changeEmail, confirmEmail, getUser, loginWithPassword, prepareSignup, registerAccount, registerWithPassword, removeLoginPassword, setLoginPassword, requestLoginCode, requestServer, resumeLogin, sendEmailVerification, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
 import { newNonce, setSignupCookie } from '../lib/signup-cookie';
 import { rememberUserLocale } from '../services/locale.service';
 import { createPanelAccount } from '../services/provisioning.service';
@@ -39,6 +39,18 @@ import { confirmTotp, disableSecondFactor, enablePasswordFactor, setupTotp, toSe
 const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { max, timeWindow } } });
 
 export async function authRoutes(app: FastifyInstance) {
+  /** Registrieren: Konto mit E-Mail-Adresse und Passwort anlegen und anmelden. Den Server wählt man danach. */
+  app.post('/auth/register', strict(6, '15 minutes'), async (request, reply) => {
+    await assertNotMaintenance(request);
+    const input = z
+      .object({ email: emailSchema, password: accountPasswordSchema.shape.password, acceptTerms: z.literal(true, { message: 'v.accept_terms' }), newsletter: z.boolean().optional() })
+      .parse(request.body);
+    const account = await registerAccount(input, { ip: request.ip, locale: request.lang });
+    const session = await createSession(account.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
+    setSessionCookie(reply, session.token, session.expiresAt, session.persistent);
+    return { ok: true, user: toUserDTO(account) };
+  });
+
   /** Server anfordern (öffentlich) → Bestätigungs-E-Mail */
   app.post('/start', strict(6, '15 minutes'), async (request, reply) => {
     await assertNotMaintenance(request);

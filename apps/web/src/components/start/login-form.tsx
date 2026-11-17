@@ -34,7 +34,10 @@ export function LoginForm({ discord = false, twoFactor, error }: { /** Anmeldung
       const res = await api<VerifyResponse>('/auth/password-login', { body: { email: email.trim().toLowerCase(), password } });
       if ('twoFactor' in res) return setSecond(res.twoFactor);
       // Offene Schritte (Discord verbinden, Panel-Zugang) zeigt die Startseite, sonst geht es zu „Meine Server“
-      window.location.assign(res.next === 'overview' ? localePath(lang, 'myServers') : `${localePath(lang, 'start')}?resume=1`);
+      // (mit `?next=…` zurück zu der Seite, von der man kam – nur Pfade dieser Website)
+      const wanted = new URLSearchParams(window.location.search).get('next');
+      const target = wanted && /^\/(?![/\\])[^\s\\]*$/.test(wanted) ? wanted : localePath(lang, 'myServers');
+      window.location.assign(res.next === 'overview' ? target : `${localePath(lang, 'start')}?resume=1`);
     } catch (err) {
       setLoginError(err instanceof ApiClientError ? err.message : t.passwordSubmit);
       setBusy(false);
@@ -68,33 +71,32 @@ export function LoginForm({ discord = false, twoFactor, error }: { /** Anmeldung
           {error.text}
         </Alert>
       )}
-      {discord && (
-        <>
-          {/* Normaler Link: Die API leitet zu Discord weiter und danach zurück */}
-          <a href={`/api/v1/discord/login?lang=${lang}`} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#5865f2] px-6 text-base font-medium text-white hover:bg-[#6b76f5]">
-            <DiscordIcon className="size-5" /> {t.discordButton}
-          </a>
-          <div className="flex items-center gap-3 text-[13px] text-subtle">
-            <span className="h-px flex-1 bg-line" />
-            {t.orEmail}
-            <span className="h-px flex-1 bg-line" />
-          </div>
-          <p className="text-sm leading-relaxed text-muted">{t.passwordIntro}</p>
-        </>
-      )}
       {(loginError ?? form.error) && <Alert tone="error">{loginError ?? form.error}</Alert>}
       <Field label={t.email} htmlFor="email" error={form.fieldErrors.email}>
-        <input id="email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus={!discord} />
+        <input id="email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
       </Field>
       <Field label={t.password} htmlFor="login-password">
         <input id="login-password" type="password" autoComplete="current-password" className="input" value={password} maxLength={200} onChange={(e) => setPassword(e.target.value)} />
       </Field>
-      <Button type="submit" size="lg" variant={discord ? 'secondary' : 'primary'} loading={busy || (form.pending && !!password)} disabled={!email.trim() || !password} className="w-full">
+      <Button type="submit" size="lg" loading={busy || (form.pending && !!password)} disabled={!email.trim() || !password} className="w-full">
         {t.passwordSubmit}
       </Button>
       <button type="button" className="block w-full text-center text-sm text-blue-400 hover:text-blue-300 disabled:text-subtle" disabled={form.pending || busy} onClick={() => void sendCode()}>
         {t.codeInstead}
       </button>
+      {discord && (
+        <>
+          <div className="flex items-center gap-3 text-[13px] text-subtle">
+            <span className="h-px flex-1 bg-line" />
+            {t.orEmail}
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          {/* Für Konten mit verbundenem Discord-Konto. Normaler Link: Die API leitet zu Discord weiter und danach zurück */}
+          <a href={`/api/v1/discord/login?lang=${lang}`} className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-[#5865f2]/60 px-6 text-base font-medium text-white hover:bg-[#5865f2]/15">
+            <DiscordIcon className="size-5" /> {t.discordButton}
+          </a>
+        </>
+      )}
     </form>
   );
 }

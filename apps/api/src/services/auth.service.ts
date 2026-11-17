@@ -1,8 +1,11 @@
 /**
- * Anmeldung ohne Pflicht-Passwort:
- *  – Registrieren und anmelden über Discord (sobald die Discord-Anbindung eingerichtet ist): Das Discord-Konto ist
- *    die Identität. Die E-Mail-Adresse wird angegeben, ihre Bestätigung per Code ist freiwillig
- *    (Voraussetzung, um Partner zu werden).
+ * Registrierung und Anmeldung:
+ *  – Registrieren auf der Seite „Registrieren“ mit E-Mail-Adresse und Passwort (registerAccount). Die Bestätigung der
+ *    E-Mail-Adresse per Code ist freiwillig (Voraussetzung, um Partner zu werden).
+ *  – Discord ist der zweite Schritt: Erst mit verknüpftem Discord-Konto (und Mitgliedschaft auf unserem
+ *    Discord-Server) lässt sich der Panel-Zugang anlegen und wird ein angefragter Server wirklich erstellt.
+ *  – Anmelden mit E-Mail-Adresse und Passwort, über ein verknüpftes Discord-Konto oder mit Code per E-Mail.
+ *  – Älterer Weg (bleibt für bestehende Konten und die Schnittstelle erhalten): Registrieren über Discord.
  *  – Ohne eingerichtete Discord-Anbindung wie früher: Server anfordern → Code per E-Mail → Bestätigung + Anmeldung
  *  – Alternativ: Registrieren und anmelden mit E-Mail-Adresse und Passwort. Einen Server gibt es auch dann erst,
  *    wenn das Discord-Konto verknüpft und Mitglied unseres Discord-Servers ist.
@@ -10,7 +13,7 @@
  *  – Freiwillige zweite Stufe: eigenes Passwort oder Authenticator-App (two-factor.service.ts)
  * Das Passwort des Pterodactyl-Panels wird nur an Pterodactyl übergeben und nie von uns gespeichert.
  */
-import { discordGate } from '../discord/service';
+import { discordConfig, discordGate } from '../discord/service';
 import { and, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { findPlan, isEmailBlocked, serverLimitBlock, type Locale, type StartInput, type TwoFactorMethod, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
 import { affectedRows, db, isUniqueViolation } from '../db/client';
@@ -273,6 +276,29 @@ const LOGIN_LOCK_MS = 15 * 60_000;
  */
 export async function registerWithPassword(input: StartInput, password: string, meta: { ip?: string; locale: Locale }): Promise<User> {
   await prepareSignup(input);
+  const user = await createPasswordAccount(input.email, password, meta);
+  await finishDiscordSignup(user, input, meta);
+  return user;
+}
+
+/**
+ * Registrierung auf der Seite „Registrieren“: nur das Konto (E-Mail-Adresse und Passwort), noch kein Server.
+ * Den Server wählt man danach angemeldet auf der Seite „Server erstellen“.
+ */
+export async function registerAccount(input: { email: string; password: string; newsletter?: boolean }, meta: { ip?: string; locale: Locale }): Promise<User> {
+  const settings = await getSettings();
+  if (settings.registration.mode === 'closed') throw registrationClosed();
+  if (isEmailBlocked(input.email, settings.blocklist)) throw emailBlocked();
+  const user = await createPasswordAccount(input.email, input.password, meta);
+  if (input.newsletter && settings.newsletter.enabled) await subscribe(user.email, meta.locale, { ip: meta.ip, source: 'signup', sendMail: false }).catch(() => {});
+  // Bestätigungsmail – freiwillig; schlägt der Versand fehl, geht es trotzdem weiter
+  if (!user.emailVerifiedAt && !user.emailUndeliverableAt) await sendEmailVerification(user, meta.locale).catch(() => {});
+  return user;
+}
+
+/** Legt das Konto an (oder übernimmt ein leeres, nie benutztes Konto mit dieser Adresse) */
+async function createPasswordAccount(email: string, password: string, meta: { ip?: string; locale: Locale }): Promise<User> {
+  const input = { email };
   const taken = () => {
     const msg = L(
       'Für diese E-Mail-Adresse gibt es schon ein Konto. Melde dich dort an – mit Discord, mit deinem Passwort oder mit einem Code per E-Mail.',
@@ -296,7 +322,6 @@ export async function registerWithPassword(input: StartInput, password: string, 
   const user = await findUserByEmail(input.email);
   if (!user) throw new Error('Benutzer konnte nicht angelegt werden');
   await audit({ userId: user.id, actor: 'user', action: 'account.created', message: 'Mit E-Mail und Passwort registriert', ip: meta.ip });
-  await finishDiscordSignup(user, input, meta);
   return user;
 }
 
@@ -587,7 +612,11 @@ async function completeLogin(userId: string, meta: { ip?: string; locale: Locale
 
   if (pending.length > 0) {
     // Konto mit Passwort, noch ohne Discord und ohne bestätigte E-Mail: zuerst Discord verbinden – erst danach der Panel-Zugang
-    if (!user.pteroUserId && !identityConfirmed(user)) return { user, next: 'done', existingPanelAccount, waitlist: null, discordBlocked: 'not_linked' };
+    // (ohne eingerichtete Discord-Anbindung bleibt nur die E-Mail-Bestätigung unter „Meine Server“)
+    if (!user.pteroUserId && !identityConfirmed(user)) {
+      if (!(await discordConfig()).linkReady) return { user, next: 'overview', existingPanelAccount, waitlist: null };
+      return { user, next: 'done', existingPanelAccount, waitlist: null, discordBlocked: 'not_linked' };
+    }
     if (!user.pteroUserId) return { user, next: 'panel_setup', existingPanelAccount, waitlist: null };
     const activated = await activatePendingServers(user, meta.ip);
     // Nichts erstellt, weil die Discord-Pflicht noch nicht erfüllt ist → die Website zeigt „Mit Discord verbinden“

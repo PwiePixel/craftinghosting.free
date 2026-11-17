@@ -51,6 +51,7 @@ export function StartForm({
   early = false,
   newsletterOption = false,
   discordSignup = false,
+  needsDiscord = false,
 }: {
   /** Produkte mit Paketen und Verfügbarkeit – kommen aus dem Admin-Bereich */
   products: PublicSiteDTO['products'];
@@ -69,6 +70,8 @@ export function StartForm({
   newsletterOption?: boolean;
   /** Registrierung läuft über Discord (Anbindung eingerichtet) */
   discordSignup?: boolean;
+  /** Angemeldet, aber Discord noch nicht verbunden: Der Server wird erst danach erstellt */
+  needsDiscord?: boolean;
   /** Vorregistrierung (Early Access): Platz auf der Warteliste statt sofortiger Erstellung */
   early?: boolean;
 }) {
@@ -152,6 +155,12 @@ export function StartForm({
     void form.submit(loggedIn ? { ...values, email: undefined, newsletter: undefined } : values, async (data) => {
       if (loggedIn) {
         await api('/servers', { body: data });
+        // Fehlt noch etwas, bevor der Server erstellt wird (Discord verbinden, Panel-Zugang)? Dann direkt dorthin.
+        const step = await api<{ next: string }>('/auth/continue', { body: {} }).catch(() => null);
+        if (step && step.next !== 'overview' && step.next !== 'waitlist') {
+          window.location.assign(`${localePath(lang, 'start')}?resume=1`);
+          await new Promise(() => {});
+        }
         router.push(localePath(lang, 'myServers', { neu: early ? 'waitlist' : '1' }));
         router.refresh();
       } else {
@@ -339,7 +348,7 @@ export function StartForm({
       <Step n={4 + offset} title={loggedIn ? s.stepAccount : s.stepEmail}>
         {loggedIn ? (
           <p className="text-sm text-muted">
-            {s.loggedInAs} <span className="text-white">{userEmail}</span>. {early ? e.loggedInHint : s.loggedInHint}
+            {s.loggedInAs} <span className="text-white">{userEmail}</span>. {early ? e.loggedInHint : needsDiscord ? s.loggedInHintDiscord : s.loggedInHint}
           </p>
         ) : (
           <div className="space-y-5">
