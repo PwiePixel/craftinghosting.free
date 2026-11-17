@@ -149,6 +149,17 @@ export class PterodactylMockClient implements PterodactylGateway {
     return user;
   }
 
+  async updateUserEmail(id: number, email: string): Promise<void> {
+    const state = this.load();
+    if (state.users.some((u) => u.id !== id && u.email.toLowerCase() === email.toLowerCase())) {
+      throw new PterodactylError('email has already been taken', 422, [{ detail: 'The email has already been taken.', meta: { source_field: 'email' } }]);
+    }
+    const user = state.users.find((u) => u.id === id);
+    if (!user) throw new PterodactylError('user not found', 404);
+    user.email = email;
+    this.save(state);
+  }
+
   async findServerByExternalId(externalId: string) {
     const s = this.load().servers.find((x) => x.externalId === externalId);
     return s ? this.toServer(s) : null;

@@ -21,6 +21,10 @@ export const users = sqliteTable(
     role: text('role', { enum: ['user', 'admin'] }).notNull().default('user'),
     status: text('status', { enum: ['active', 'locked'] }).notNull().default('active'),
     emailVerifiedAt: ts('email_verified_at'),
+    /** Zustellung: aufeinanderfolgende Fehlversuche, bei denen der Mailserver die Adresse abgelehnt hat */
+    emailFailCount: integer('email_fail_count').notNull().default(0),
+    /** Adresse gilt als nicht erreichbar (nach zwei Fehlversuchen) – es wird nichts mehr dorthin geschickt, bis sie geändert oder bestätigt ist */
+    emailUndeliverableAt: ts('email_undeliverable_at'),
     acceptedTermsAt: ts('accepted_terms_at').notNull(),
     /** Verknüpftes Pterodactyl-Konto (die Website speichert keine Passwörter) */
     pteroUserId: integer('ptero_user_id'),
@@ -237,6 +241,8 @@ export const notifications = sqliteTable(
     emailAttempts: integer('email_attempts').notNull().default(0),
     emailLastError: text('email_last_error'),
     emailSentAt: ts('email_sent_at'),
+    /** Dieselbe Nachricht als Discord-Direktnachricht: Zeitpunkt des Versuchs (null = noch nicht versucht) */
+    dmSentAt: ts('dm_sent_at'),
     readAt: ts('read_at'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
   },

@@ -143,6 +143,15 @@ export async function createPanelAccount(user: User, username: string, password:
       if (err instanceof PterodactylError && err.status === 422) {
         const fields = errorFields(err);
         if (fields.includes('email')) {
+          // Ein bestehendes Panel-Konto wird nur über eine BESTÄTIGTE E-Mail-Adresse verknüpft – sonst könnte sich
+          // jemand mit einer fremden Adresse an ein fremdes Panel-Konto hängen.
+          if (!user.emailVerifiedAt) {
+            const msg = L(
+              'Für diese E-Mail-Adresse gibt es im Panel schon ein Konto. Bestätige zuerst deine E-Mail-Adresse (Code per E-Mail) – dann verknüpfen wir es. Oder ändere deine E-Mail-Adresse.',
+              'A panel account already exists for this email address. Confirm your email address first (code by email) – then we will link it. Or change your email address.',
+            );
+            throw new ApiError(409, 'panel_email_exists', msg);
+          }
           panelUser = await ptero.findUserByEmail(user.email);
           existing = !!panelUser;
         } else if (fields.includes('username')) {

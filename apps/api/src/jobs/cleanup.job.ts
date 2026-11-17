@@ -23,7 +23,7 @@ export const cleanupJob: JobDefinition = {
     const tokens = affectedRows(
       await db.delete(emailTokens).where(or(lt(emailTokens.expiresAt, ago(7)), and(isNotNull(emailTokens.usedAt), lt(emailTokens.usedAt, ago(7))))),
     );
-    // Nie bestätigte Konten (inkl. ihrer Server-Anfragen) nach 3 Tagen entfernen –
+    // Nie bestätigte Konten ohne Discord-Verknüpfung (inkl. ihrer Server-Anfragen) nach 3 Tagen entfernen –
     // außer sie haben einen Wartelisten-Platz (z. B. vom Admin übernommene Vormerkungen)
     const unverified = affectedRows(
       await db
@@ -31,6 +31,7 @@ export const cleanupJob: JobDefinition = {
         .where(
           and(
             isNull(users.emailVerifiedAt),
+            isNull(users.discordId),
             lt(users.createdAt, ago(3)),
             notExists(db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, users.id), isNotNull(servers.waitlistPosition)))),
           ),

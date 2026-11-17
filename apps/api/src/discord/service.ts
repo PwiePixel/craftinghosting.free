@@ -66,27 +66,36 @@ export const discordRedirectUri = () => `${env.APP_URL}/api/v1/discord/callback`
  * Wer die Verbindung gestartet hat: ein angemeldeter Account (`chat` = aus dem Support-Chat heraus)
  * oder – ohne Anmeldung – eine Unterhaltung im Support-Chat.
  */
-export type OAuthSubject = { kind: 'user'; id: string; chat: boolean } | { kind: 'chat'; id: string };
+export type OAuthSubject =
+  | { kind: 'user'; id: string; chat: boolean }
+  | { kind: 'chat'; id: string }
+  /** Registrierung bzw. Anmeldung über Discord – `id` ist eine Zufallszahl, die an ein Cookie dieses Browsers gebunden ist */
+  | { kind: 'signup'; id: string }
+  | { kind: 'login'; id: string };
 
 /** Adresse, auf der Discord nach der Zustimmung fragt. Der Zustand ist an den Account bzw. die Unterhaltung gebunden. */
 export async function discordAuthorizeUrl(subject: OAuthSubject, lang: Locale): Promise<string | null> {
   const cfg = await discordConfig();
   if (!cfg.linkReady) return null;
-  const value = [subject.kind === 'user' ? 'u' : 'c', subject.id, Date.now() + STATE_TTL_MS, lang, subject.kind === 'user' && subject.chat ? 1 : 0].join(':');
+  const kind = subject.kind === 'user' ? 'u' : subject.kind === 'chat' ? 'c' : subject.kind === 'signup' ? 's' : 'l';
+  const value = [kind, subject.id, Date.now() + STATE_TTL_MS, lang, subject.kind === 'user' && subject.chat ? 1 : 0].join(':');
+  // Registrierung: immer mit Beitritt zum Discord-Server. Anmeldung: nur das Konto feststellen.
+  const join = subject.kind === 'signup' || (subject.kind !== 'login' && (cfg.settings.autoJoin || subject.kind === 'chat' || subject.chat));
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: cfg.settings.clientId,
     // guilds.join: Der Bot darf das Konto dem Discord-Server hinzufügen – so ist Verknüpfen = Beitreten.
     // Aus dem Chat heraus immer, weil die Übergabe an das Team die Mitgliedschaft voraussetzt.
-    scope: cfg.settings.autoJoin || subject.kind === 'chat' || subject.chat ? 'identify guilds.join' : 'identify',
+    scope: join ? 'identify guilds.join' : 'identify',
     redirect_uri: discordRedirectUri(),
     state: signToken(value, STATE_PURPOSE),
-    prompt: 'consent',
+    // Bei der Anmeldung fragt Discord nicht jedes Mal erneut nach der Zustimmung
+    prompt: subject.kind === 'login' ? 'none' : 'consent',
   });
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 
-export type LinkResult = 'linked' | 'linked_not_member' | 'state' | 'taken' | 'too_new' | 'bot_account' | 'unavailable' | 'failed';
+export type LinkResult = 'linked' | 'linked_not_member' | 'state' | 'taken' | 'too_new' | 'bot_account' | 'unavailable' | 'failed' | 'email_taken' | 'locked' | 'no_account';
 
 /** Sprache aus dem Zustand – auch wenn die Prüfung fehlschlägt, soll die Meldung in der richtigen Sprache kommen */
 export function langFromState(state: string | undefined): Locale {
@@ -100,6 +109,8 @@ export function parseDiscordState(state: string): (OAuthSubject & { lang: Locale
   const locale: Locale = lang === 'en' ? 'en' : 'de';
   if (kind === 'u') return { kind: 'user', id, chat: chat === '1', lang: locale };
   if (kind === 'c') return { kind: 'chat', id, lang: locale };
+  if (kind === 's') return { kind: 'signup', id, lang: locale };
+  if (kind === 'l') return { kind: 'login', id, lang: locale };
   return null;
 }
 
@@ -109,7 +120,7 @@ type Exchange = { ok: true; discordUser: DiscordUser; member: boolean } | { ok: 
  * Löst den Code von Discord ein, prüft das Konto und lässt es – wenn erlaubt – dem Server beitreten.
  * Das Zugriffstoken wird nur dafür benutzt und nicht gespeichert.
  */
-async function exchangeDiscordCode(code: string, before?: (discordUser: DiscordUser) => Promise<LinkResult | null>): Promise<Exchange | { ok: false; reason: LinkResult }> {
+export async function exchangeDiscordCode(code: string, before?: (discordUser: DiscordUser) => Promise<LinkResult | null>): Promise<Exchange | { ok: false; reason: LinkResult }> {
   const cfg = await discordConfig();
   if (!cfg.linkReady) return { ok: false, reason: 'unavailable' };
   let discordUser: DiscordUser;

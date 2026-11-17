@@ -20,6 +20,7 @@ import {
   discordConfig,
   connectDiscordForChat,
   discordGate,
+  exchangeDiscordCode,
   langFromState,
   linkDiscordAccount,
   parseDiscordState,
@@ -33,7 +34,10 @@ import { attachDiscordToConversation, chatNote, findConversation, startHandoff }
 import { getDiscordState, saveDiscordSecrets } from '../discord/store';
 import { env } from '../env';
 import { ApiError, L } from '../lib/errors';
-import { currentUser, requireAdmin, requireAuth } from '../plugins/auth';
+import { currentUser, requireAdmin, requireAuth, setSessionCookie } from '../plugins/auth';
+import { clearSignupCookies, newNonce, readOAuthCookie, readSignupCookie, setOAuthCookie } from '../lib/signup-cookie';
+import { accountForDiscordLogin, accountForDiscordSignup, completeDiscordLogin, finishDiscordSignup, twoFactorTicket, type DiscordAccount } from '../services/auth.service';
+import { createSession } from '../services/session.service';
 import { audit } from '../services/audit.service';
 import { activatePendingServers } from '../services/server.service';
 import { getSettings, invalidatePublicSite } from '../services/settings.service';
@@ -66,6 +70,17 @@ export async function discordRoutes(app: FastifyInstance) {
     return reply.redirect((await discordAuthorizeUrl({ kind: 'chat', id: conversation.id }, lang)) ?? backToChat(lang));
   });
 
+  /** Anmeldung über Discord: leitet zu Discord weiter. Der Zufallswert bindet die Anmeldung an diesen Browser. */
+  app.get('/discord/login', strict(20, '10 minutes'), async (request, reply) => {
+    const query = request.query as { lang?: string };
+    const lang: Locale = isLocale(query.lang) ? query.lang : request.lang;
+    const nonce = newNonce();
+    const url = await discordAuthorizeUrl({ kind: 'login', id: nonce }, lang);
+    if (!url) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}?discord=unavailable`);
+    setOAuthCookie(reply, nonce);
+    return reply.redirect(url);
+  });
+
   /** Rückweg von Discord */
   app.get('/discord/callback', strict(20, '10 minutes'), async (request, reply) => {
     const query = request.query as { code?: string; state?: string; error?: string };
@@ -89,6 +104,44 @@ export async function discordRoutes(app: FastifyInstance) {
         await chatNote(conversation, 'denied').catch(() => {});
       }
       return reply.redirect(backToChat(lang));
+    }
+
+    // Registrierung bzw. Anmeldung über Discord: Das Discord-Konto ist die Identität
+    if (state?.kind === 'signup' || state?.kind === 'login') {
+      const signup = state.kind === 'signup';
+      const back = (reason: string) => reply.redirect(`${env.APP_URL}${localePath(lang, signup ? 'start' : 'login')}?discord=${reason}`);
+      const intent = signup ? readSignupCookie(request) : null;
+      const nonce = signup ? intent?.nonce : readOAuthCookie(request);
+      // Der Zustand gilt nur in dem Browser, der die Anmeldung gestartet hat
+      if (!nonce || nonce !== state.id) return back('state');
+      if (query.error || !query.code) return back(query.error === 'access_denied' ? 'denied' : 'failed');
+      const meta = { ip: request.ip, locale: lang };
+      const found: { account?: DiscordAccount } = {};
+      const result = await exchangeDiscordCode(query.code, async (discordUser) => {
+        found.account = signup && intent ? await accountForDiscordSignup(discordUser, intent.input.email, meta) : await accountForDiscordLogin(discordUser);
+        return found.account.ok ? null : found.account.reason;
+      });
+      clearSignupCookies(reply);
+      if (!result.ok || !found.account?.ok) return back(result.ok ? 'failed' : result.reason);
+      const account = found.account.user;
+      if (signup && intent) {
+        // Anfrage speichern und die (freiwillige) Bestätigungsmail schicken – ein Fehler hier kippt die Anmeldung nicht
+        await finishDiscordSignup(account, intent.input, meta).catch((err) => request.log.warn({ err }, 'Registrierung über Discord: Anfrage konnte nicht gespeichert werden'));
+      }
+      // Zweite Stufe eingeschaltet: erst nach Passwort bzw. App-Code gibt es eine Sitzung
+      if (account.twoFactorMethod) {
+        return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}?tf=${encodeURIComponent(twoFactorTicket(account.id))}&m=${account.twoFactorMethod}`);
+      }
+      const session = await createSession(account.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
+      setSessionCookie(reply, session.token, session.expiresAt);
+      const done = await completeDiscordLogin(account.id, meta).catch((err) => {
+        request.log.warn({ err }, 'Anmeldung über Discord: nächster Schritt konnte nicht bestimmt werden');
+        return null;
+      });
+      await syncCustomerRole(account.id).catch(() => {});
+      // Offene Schritte (Panel-Zugang, Discord-Beitritt, Warteliste) zeigt die Startseite; sonst geht es zu „Meine Server“
+      const open = signup || !done || done.next !== 'overview';
+      return reply.redirect(`${env.APP_URL}${open ? `${localePath(lang, 'start')}?resume=1` : localePath(lang, 'myServers')}`);
     }
 
     if (!user) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);

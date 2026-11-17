@@ -72,8 +72,12 @@ function Actions({ children }: { children: ReactNode }) {
 export function ServerActions({ server }: { server: AdminServerDTO }) {
   const router = useRouter();
   const act = (action: string) => async () => {
-    await api(`/admin/servers/${server.id}/${action}`, { body: {} });
-    router.refresh();
+    try {
+      await api(`/admin/servers/${server.id}/${action}`, { body: {} });
+    } finally {
+      // Auch nach einem Fehler neu laden: Die Zeile zeigt dann den aktuellen Stand samt neuer Fehlermeldung
+      router.refresh();
+    }
   };
   const s = server.status;
   const paused = !!server.pausedUntil && new Date(server.pausedUntil) > new Date();

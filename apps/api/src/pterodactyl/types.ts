@@ -134,6 +134,9 @@ export interface PterodactylGateway {
     password?: string;
   }): Promise<PteroUser>;
 
+  /** E-Mail-Adresse eines Panel-Benutzers ändern (alle übrigen Angaben bleiben) */
+  updateUserEmail(id: number, email: string): Promise<void>;
+
   findServerByExternalId(externalId: string): Promise<PteroServer | null>;
   getServer(id: number): Promise<PteroServer | null>;
   createServer(spec: CreateServerSpec): Promise<PteroServer>;

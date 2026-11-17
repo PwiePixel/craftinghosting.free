@@ -18,6 +18,7 @@ import {
   type ProductKind,
   type PublicSiteDTO,
 } from '@chfree/shared';
+import { DiscordIcon } from '@/components/discord/discord-note';
 import { Button } from '@/components/ui/button';
 import { Alert, Field } from '@/components/ui/primitives';
 import { useDict, useLang } from '@/i18n/client';
@@ -49,6 +50,7 @@ export function StartForm({
   userEmail,
   early = false,
   newsletterOption = false,
+  discordSignup = false,
 }: {
   /** Produkte mit Paketen und Verfügbarkeit – kommen aus dem Admin-Bereich */
   products: PublicSiteDTO['products'];
@@ -65,6 +67,8 @@ export function StartForm({
   userEmail?: string;
   /** Häkchen „Newsletter abonnieren“ anbieten (Admin-Einstellung; nur ohne Anmeldung) */
   newsletterOption?: boolean;
+  /** Registrierung läuft über Discord (Anbindung eingerichtet) */
+  discordSignup?: boolean;
   /** Vorregistrierung (Early Access): Platz auf der Warteliste statt sofortiger Erstellung */
   early?: boolean;
 }) {
@@ -145,7 +149,13 @@ export function StartForm({
         router.push(localePath(lang, 'myServers', { neu: early ? 'waitlist' : '1' }));
         router.refresh();
       } else {
-        await api('/start', { body: data });
+        const res = await api<{ ok: boolean; redirect?: string | null }>('/start', { body: data });
+        // Registrierung über Discord: weiter zur Anmeldung bei Discord – von dort geht es zurück zum nächsten Schritt
+        if (res.redirect) {
+          window.location.assign(res.redirect);
+          // Das Formular bleibt gesperrt, bis der Browser die Seite verlässt
+          await new Promise(() => {});
+        }
         setSentTo(email.trim().toLowerCase());
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -315,7 +325,7 @@ export function StartForm({
             {s.loggedInAs} <span className="text-white">{userEmail}</span>. {early ? e.loggedInHint : s.loggedInHint}
           </p>
         ) : (
-          <Field label={s.emailLabel} htmlFor="email" error={form.fieldErrors.email} hint={s.emailHint}>
+          <Field label={s.emailLabel} htmlFor="email" error={form.fieldErrors.email} hint={discordSignup ? s.emailHintDiscord : s.emailHint}>
             <input id="email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
         )}
@@ -348,8 +358,9 @@ export function StartForm({
           </label>
         )}
 
-        <Button type="submit" size="lg" loading={form.pending} disabled={!plan} className="mt-6 w-full sm:w-auto">
-          {early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}
+        {discordSignup && !loggedIn && <p className="mt-5 max-w-2xl rounded-lg border border-[#5865f2]/40 bg-[#5865f2]/[0.08] p-4 text-sm leading-relaxed text-gray-200">{s.discordSignupNote}</p>}
+        <Button type="submit" size="lg" loading={form.pending} disabled={!plan} icon={discordSignup && !loggedIn ? <DiscordIcon /> : undefined} className={cn('mt-6 w-full sm:w-auto', discordSignup && !loggedIn && 'bg-[#5865f2] hover:bg-[#6b76f5]')}>
+          {discordSignup && !loggedIn ? s.submitDiscord : early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}
         </Button>
       </div>
     </form>

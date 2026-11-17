@@ -4,6 +4,7 @@
  *  – E-Mail bestätigt → fortlaufender Platz (Position), Rang bestimmt EPYC oder Xeon
  *  – Freischalten im Admin → Status „pending“ → Server wird erstellt, sobald der Panel-Zugang steht
  */
+import { identityConfirmed } from './identity';
 import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { findPlan, freeHostingConfig, tierForPosition, websiteEpycSlots, type Locale, cycleEndFor } from '@chfree/shared';
 import { db, isUniqueViolation } from '../db/client';
@@ -114,7 +115,7 @@ export async function releaseWaitlist(
       message: `Wartelisten-Platz #${rank} (${tier === 'epyc' ? 'AMD EPYC' : 'Intel Xeon'}) freigeschaltet (durch ${admin.email})`,
       ip,
     });
-    if (u.emailVerifiedAt && u.pteroUserId) {
+    if (identityConfirmed(u) && u.pteroUserId) {
       const done = await activatePendingServers(u, ip);
       created += done.length;
     } else {

@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
 import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, serverLimitBlock, takenPlanIds, type BonusSlot, type ServerDTO } from '@chfree/shared';
+import { VerifyFlow } from '@/components/start/verify-flow';
+import { Alert } from '@/components/ui/primitives';
 import { StartForm } from '@/components/start/start-form';
 import { ButtonLink } from '@/components/ui/button';
 import { getDict, resolveLang } from '@/i18n';
@@ -122,9 +124,19 @@ export default async function StartPage({ params, searchParams }: Props) {
         userEmail={me?.user.email}
         early={early}
         newsletterOption={settings.newsletter.signupCheckbox}
+        discordSignup={settings.discord.signup}
       />
     );
   }
+  // Zurück von Discord (Registrierung/Anmeldung): mit dem nächsten Schritt weitermachen – Panel-Zugang, Beitritt, fertig
+  if (me && query.resume === '1') {
+    content = (
+      <div className="surface p-8 sm:p-10">
+        <VerifyFlow embedded resume />
+      </div>
+    );
+  }
+  const discordResult = query.discord ? t.discord.results[query.discord] : undefined;
 
   return (
     <div className="container-page py-12 sm:py-16">
@@ -136,7 +148,12 @@ export default async function StartPage({ params, searchParams }: Props) {
           </h1>
           <p className="mt-3 max-w-xl text-muted">{early ? e.startIntro : s.intro}</p>
           <DiscordRequiredNote site={settings} lang={lang} user={me?.user} className="mt-6" />
-          <div className="mt-8">{content}</div>
+          {discordResult && !discordResult.ok && (
+            <Alert tone="warning" title={discordResult.title} className="mt-8">
+              {discordResult.text}
+            </Alert>
+          )}
+          <div className={discordResult && !discordResult.ok ? 'mt-5' : 'mt-8'}>{content}</div>
         </div>
 
         <aside className="lg:pt-24">

@@ -10,7 +10,7 @@ import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
 import { Alert } from '@/components/ui/primitives';
 
-type Props = { params: Promise<{ lang: string }> };
+type Props = { params: Promise<{ lang: string }>; searchParams: Promise<Record<string, string | undefined>> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const lang = await resolveLang(params);
@@ -18,9 +18,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return pageMetadata(lang, 'login', { title: t.metaTitle, description: t.metaDescription });
 }
 
-export default async function LoginPage({ params }: Props) {
+export default async function LoginPage({ params, searchParams }: Props) {
   const lang = await resolveLang(params);
-  const t = getDict(lang).login;
+  const d = getDict(lang);
+  const t = d.login;
+  const query = await searchParams;
   if (await getCurrentUser()) redirect(localePath(lang, 'myServers'));
   const settings = await getSite();
   return (
@@ -31,7 +33,11 @@ export default async function LoginPage({ params }: Props) {
         </Alert>
       )}
       <div className="surface mx-auto max-w-md p-7 sm:p-9">
-        <LoginForm />
+        <LoginForm
+          discord={settings.discord.signup}
+          twoFactor={query.tf && (query.m === 'password' || query.m === 'totp') ? { method: query.m, ticket: query.tf } : undefined}
+          error={query.discord ? d.discord.results[query.discord] : undefined}
+        />
         <div className="mt-8 space-y-1.5 border-t border-line pt-5 text-[13px] text-subtle">
           <p>
             {t.noServer}{' '}

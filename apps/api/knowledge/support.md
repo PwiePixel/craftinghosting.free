@@ -20,23 +20,29 @@ unter „Meine Server“ nur den Zustand und erlaubt Reaktivieren und Löschen.
 
 1. Auf der Website auf „Server erstellen“ klicken.
 2. Angebot wählen (Minecraft-Server oder Discord-Bot), Paket, Typ bzw. Programmiersprache, Version und einen Namen.
-3. E-Mail-Adresse eingeben und die Nutzungsbedingungen akzeptieren.
-4. Wir schicken einen sechsstelligen Code per E-Mail. Diesen Code auf der Website eingeben.
+3. E-Mail-Adresse eingeben, die Nutzungsbedingungen akzeptieren und auf „Weiter mit Discord“ klicken.
+4. Bei Discord anmelden und zustimmen. Dabei tritt das Konto unserem Discord-Server bei. Die Registrierung läuft über
+   das Discord-Konto – kostenlose Server gibt es nur für Mitglieder unseres Discord-Servers.
 5. Benutzername und Passwort für das Pterodactyl-Panel festlegen. Danach wird der Server automatisch erstellt und
    installiert (dauert meist ein bis zwei Minuten).
 
-Ist die Mitgliedschaft auf unserem Discord-Server Pflicht, wird der Server erst eingerichtet, nachdem das Discord-Konto
-unter „Meine Server“ verbunden wurde (siehe „Discord“).
+Die E-Mail-Adresse muss nicht bestätigt werden. Wir schicken trotzdem einen sechsstelligen Code; wer ihn unter
+„Meine Server“ eingibt, hat eine bestätigte Adresse – das ist die Voraussetzung, um Partner zu werden. Unter
+„Meine Server“ lässt sich die Adresse auch ändern und ein neuer Code anfordern.
 
 Sind gerade alle Plätze belegt oder läuft eine Warteliste, zeigt die Website das an. Dann gibt es einen Platz auf der
 Warteliste und eine E-Mail, sobald der Server freigeschaltet ist.
 
 ## Anmelden
 
+- Auf der Anmeldeseite „Mit Discord anmelden“ wählen – mit dem Discord-Konto, mit dem man sich registriert hat.
+- Ältere Konten ohne Discord können sich weiter mit ihrer E-Mail-Adresse anmelden:
 - Unter „Meine Server“ die E-Mail-Adresse eingeben. Es kommt ein sechsstelliger Code per E-Mail, der auf der Website
   eingetippt wird. Ein Passwort ist dafür nicht nötig.
 - Der Code gilt nur kurz und nur einmal. Nach fünf falschen Eingaben muss ein neuer Code angefordert werden.
 - Kommt keine E-Mail an: Spam-Ordner prüfen, Schreibweise der Adresse prüfen, nach einer Minute „Code erneut senden“.
+  Wichtige Hinweise schickt unser Bot zusätzlich als Discord-Direktnachricht. Lehnt der Mailserver eine Adresse
+  mehrfach ab, schreiben wir nichts mehr dorthin – dann bitte die Adresse unter „Meine Server“ ändern.
 - Freiwillig lässt sich unter „Meine Server“ → „Sicherheit“ eine zweite Stufe einschalten: ein eigenes Passwort oder eine
   Authenticator-App. Beim Einschalten gibt es Wiederherstellungscodes für den Notfall.
 - Passwort der zweiten Stufe vergessen oder Handy verloren: einen Wiederherstellungscode verwenden. Sind auch die weg,

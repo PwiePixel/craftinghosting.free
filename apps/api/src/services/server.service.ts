@@ -1,3 +1,4 @@
+import { identityConfirmed, identityConfirmedSql } from './identity';
 import { and, count, desc, eq, inArray, isNull, ne, isNotNull } from 'drizzle-orm';
 import {
   cycleEndFor,
@@ -214,11 +215,11 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
 }
 
 /**
- * Wandelt offene Anfragen in echte Server um – sobald E-Mail bestätigt und
- * Panel-Konto verknüpft ist. Das Server-Limit wird in einer Schreib-Transaktion geprüft (Schreiber sind serialisiert).
+ * Wandelt offene Anfragen in echte Server um – sobald der Account bestätigt ist (Discord verknüpft oder E-Mail
+ * bestätigt) und das Panel-Konto verknüpft ist. Das Server-Limit wird in einer Schreib-Transaktion geprüft (Schreiber sind serialisiert).
  */
 export async function activatePendingServers(user: User, ip?: string): Promise<string[]> {
-  if (!user.emailVerifiedAt || !user.pteroUserId) return [];
+  if (!identityConfirmed(user) || !user.pteroUserId) return [];
   // Discord-Pflicht: Die Anfrage bleibt offen, bis das Konto verknüpft und der Nutzer Mitglied des Discord-Servers ist
   if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
@@ -274,7 +275,7 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
  * wurde aber (noch) nicht erstellt – z. B. weil die Erstellung beim letzten Versuch abgebrochen ist.
  */
 export async function pendingReasonFor(user: Pick<User, 'emailVerifiedAt' | 'pteroUserId' | 'discordId'>, opts: { cached?: boolean } = {}): Promise<PendingReason> {
-  if (!user.emailVerifiedAt) return 'email';
+  if (!identityConfirmed(user)) return 'email';
   if (!user.pteroUserId) return 'panel';
   const gate = await discordGate(user, opts);
   if (!gate.ok) return gate.reason === 'not_linked' ? 'discord_not_linked' : gate.reason === 'not_member' ? 'discord_not_member' : 'discord_unavailable';
@@ -292,7 +293,7 @@ export async function retryPendingServers(now = new Date()): Promise<{ accounts:
     .selectDistinct({ userId: servers.userId })
     .from(servers)
     .innerJoin(users, eq(users.id, servers.userId))
-    .where(and(eq(servers.status, 'pending'), isNotNull(users.emailVerifiedAt), isNotNull(users.pteroUserId), eq(users.status, 'active')))
+    .where(and(eq(servers.status, 'pending'), identityConfirmedSql(), isNotNull(users.pteroUserId), eq(users.status, 'active')))
     .limit(200);
   if (pendingTried.size > 5000) pendingTried.clear();
   const due = rows.filter((r) => now.getTime() - (pendingTried.get(r.userId) ?? 0) >= 10 * 60_000).slice(0, 20);
@@ -339,7 +340,7 @@ export const alreadyOnWaitlist = () =>
 
 /** Weiterer Server für angemeldete Nutzer (z. B. nach dem Löschen des alten). */
 export async function createServerForUser(user: User, input: ServerConfigInput, ip?: string): Promise<ServerDTO> {
-  if (!user.emailVerifiedAt) throw Errors.forbidden(L('Bitte bestätige zuerst deine E-Mail-Adresse.', 'Please confirm your email address first.'));
+  if (!identityConfirmed(user)) throw Errors.forbidden(L('Bitte melde dich zuerst mit Discord an oder bestätige deine E-Mail-Adresse.', 'Please sign in with Discord or confirm your email address first.'));
   await assertConfigAvailable(input);
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();

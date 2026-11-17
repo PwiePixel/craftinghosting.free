@@ -47,6 +47,8 @@ export interface DiscordSettings {
   enabled: boolean;
   /** Nur wer sein Discord-Konto verknüpft hat und Mitglied des Servers ist, bekommt kostenlose Server */
   required: boolean;
+  /** Wichtige Benachrichtigungen (die auch per E-Mail gehen) zusätzlich als Direktnachricht vom Bot schicken */
+  notifyByDm: boolean;
   /** Application ID der Discord-Anwendung (= Client ID) */
   clientId: string;
   /** ID des Discord-Servers */
@@ -363,6 +365,7 @@ export function defaultDiscordSettings(): DiscordSettings {
   return {
     enabled: false,
     required: false,
+    notifyByDm: true,
     clientId: '',
     guildId: '',
     autoJoin: true,
@@ -440,6 +443,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
   return {
     enabled: bool(i.enabled, d.enabled),
     required: bool(i.required, d.required),
+    notifyByDm: bool(i.notifyByDm, d.notifyByDm),
     clientId: snowflake(i.clientId),
     guildId: snowflake(i.guildId),
     autoJoin: bool(i.autoJoin, d.autoJoin),

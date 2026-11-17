@@ -137,6 +137,12 @@ export class PterodactylHttpClient implements PterodactylGateway {
     return this.mapUser(res.attributes);
   }
 
+  async updateUserEmail(id: number, email: string): Promise<void> {
+    // Das Panel verlangt beim Ändern den vollständigen Satz – deshalb zuerst den aktuellen Stand lesen
+    const a = (await this.request('application', 'GET', `/users/${id}`)).attributes as Json;
+    await this.request('application', 'PATCH', `/users/${id}`, { email, username: a.username, first_name: a.first_name, last_name: a.last_name, language: a.language ?? 'en' });
+  }
+
   async findServerByExternalId(externalId: string) {
     try {
       const res = await this.request('application', 'GET', `/servers/external/${encodeURIComponent(externalId)}?include=allocations`);

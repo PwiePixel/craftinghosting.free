@@ -2,6 +2,7 @@
  * Laufzeit-Hilfen: lädt Sessions und berechnet Fair-Use-/Zyklus-Zustände
  * über die gemeinsamen Regeln aus @chfree/shared.
  */
+import { identityConfirmed } from './identity';
 import { and, asc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import {
   computeCycle,
@@ -90,7 +91,7 @@ export function computeRuntimeState(server: Server, user: User, sessions: Server
     suspensionReason: server.suspensionReason,
     suspendedAt: server.suspendedAt,
     reactivationCount: server.reactivationCount,
-    userVerified: !!user.emailVerifiedAt,
+    userVerified: identityConfirmed(user),
     userActive: user.status === 'active',
     now,
     rules: cycleRulesFor(server.kind, cycleRules),

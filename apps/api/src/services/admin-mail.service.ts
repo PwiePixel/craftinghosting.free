@@ -6,6 +6,7 @@
  * Versendet wird über die Benachrichtigungen (Outbox): Die Nachricht erscheint auch unter „Meine Server“,
  * die E-Mail verschickt der Worker – Fehler stehen im Reiter „E-Mails“.
  */
+import { identityConfirmedSql } from './identity';
 import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from 'drizzle-orm';
 import { formatDateTime, freeHostingConfig, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type Locale, type Localized } from '@chfree/shared';
 import { db } from '../db/client';
@@ -34,7 +35,7 @@ async function discordWaiting(): Promise<Waiting[]> {
     .select({ s: servers, u: users })
     .from(servers)
     .innerJoin(users, eq(users.id, servers.userId))
-    .where(and(eq(servers.status, 'pending'), isNotNull(users.emailVerifiedAt), isNotNull(users.pteroUserId), eq(users.status, 'active')))
+    .where(and(eq(servers.status, 'pending'), identityConfirmedSql(), isNotNull(users.pteroUserId), eq(users.status, 'active')))
     .limit(2000);
   const byUser = new Map<string, Waiting>();
   for (const { s, u } of rows) {

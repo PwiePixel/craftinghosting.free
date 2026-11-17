@@ -22,6 +22,8 @@ export interface UserDTO {
   id: string;
   email: string;
   emailVerified: boolean;
+  /** Der Mailserver lehnt die Adresse ab – bitte ändern (bis dahin wird nichts dorthin geschickt) */
+  emailUndeliverable: boolean;
   /** Pterodactyl-Konto ist verknüpft */
   panelLinked: boolean;
   panelUsername: string | null;
@@ -399,6 +401,8 @@ export interface AdminUserDTO {
   status: 'active' | 'locked';
   locale: 'de' | 'en';
   emailVerified: boolean;
+  /** Der Mailserver lehnt die Adresse ab (nach zwei Fehlversuchen) */
+  emailUndeliverable: boolean;
   panelUsername: string | null;
   pteroUserId: number | null;
   panelAdminUrl: string | null;
@@ -755,7 +759,7 @@ export interface PublicSiteDTO {
   chat: { name: string; teaser: Localized; welcome: Localized; quick: { id: string; question: Localized }[]; ai: boolean; handoff: boolean; retentionDays: number } | null;
   /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
   /** autoJoin = beim Verbinden tritt das Konto dem Discord-Server automatisch bei (dann braucht niemand den Einladungslink) */
-  discord: { available: boolean; required: boolean; autoJoin: boolean; inviteUrl: string | null; note: Localized };
+  discord: { available: boolean; required: boolean; autoJoin: boolean; /** Registrierung und Anmeldung über Discord */ signup: boolean; inviteUrl: string | null; note: Localized };
   botFairUse: BotFairUseSettings;
   /** Aufgelöste Links (Admin-Einstellung → .env → Standard) */
   brand: BrandSettings;

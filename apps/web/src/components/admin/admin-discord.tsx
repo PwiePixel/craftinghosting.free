@@ -381,6 +381,12 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           hint="Gilt beim Erstellen und beim Reaktivieren. Offene Anfragen warten, bis das Konto verknüpft ist. Bereits laufende Server bleiben bestehen."
         />
         <Toggle
+          checked={d.notifyByDm}
+          onChange={(notifyByDm) => set({ notifyByDm })}
+          label="Wichtige Benachrichtigungen zusätzlich per Direktnachricht"
+          hint="Alles, was per E-Mail rausgeht (Server bereit, läuft ab, Upgrade …), schickt der Bot zusätzlich als Direktnachricht. So kommen Hinweise auch an, wenn E-Mails verloren gehen."
+        />
+        <Toggle
           checked={d.autoJoin}
           onChange={(autoJoin) => set({ autoJoin })}
           label="Beim Verknüpfen automatisch dem Server beitreten"

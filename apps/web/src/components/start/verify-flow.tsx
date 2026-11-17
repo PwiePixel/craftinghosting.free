@@ -32,11 +32,11 @@ function announceSession(discordLinked: boolean) {
  * erst nach der Verbindung erstellt. Der Knopf führt zum Verbindungslink (Zustimmung bei Discord, Beitritt inklusive) –
  * nicht zum Einladungslink.
  */
-function DiscordStep({ blocked, existing }: { blocked: Exclude<DiscordBlocked, null>; existing: boolean }) {
+function DiscordStep({ blocked, existing, viaDiscord }: { blocked: Exclude<DiscordBlocked, null>; existing: boolean; viaDiscord: boolean }) {
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
-  const steps = v.discordSteps(existing);
+  const steps = v.discordSteps(existing, viaDiscord);
   return (
     <div>
       <ol className="space-y-3 text-sm">
@@ -66,14 +66,14 @@ function DiscordStep({ blocked, existing }: { blocked: Exclude<DiscordBlocked, n
   );
 }
 
-export function DoneCard({ email, panelUrl, existing }: { email: string; panelUrl: string; existing: boolean }) {
+export function DoneCard({ email, panelUrl, existing, viaDiscord = false }: { email: string; panelUrl: string; existing: boolean; viaDiscord?: boolean }) {
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
   return (
     <div>
       <ol className="space-y-3 text-sm">
-        {v.doneSteps(existing).map((step, i) => (
+        {v.doneSteps(existing, viaDiscord).map((step, i) => (
           <li key={step} className="flex items-center gap-3 text-gray-200">
             <span className={i < 2 ? 'flex size-5 items-center justify-center rounded-full bg-emerald-400/15' : 'flex size-5 items-center justify-center'}>
               {i < 2 ? <Check className="size-3 text-emerald-400" strokeWidth={3} /> : <LoaderCircle className="size-4 animate-spin text-blue-400" />}
@@ -321,11 +321,30 @@ function afterLoginTarget(fallback: string): string {
  * `embedded` = ohne eigenen Rahmen (z. B. innerhalb des Anmelde- oder Bestellformulars).
  * Links aus älteren E-Mails (`token`) funktionieren bis zu ihrem Ablauf weiter.
  */
-export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { token?: string; email?: string; embedded?: boolean; onBack?: () => void; /** Hinweis über der Code-Eingabe – verschwindet, sobald der Code eingegeben ist */ intro?: ReactNode }) {
+export function VerifyFlow({
+  token,
+  email,
+  embedded = false,
+  onBack,
+  intro,
+  resume = false,
+  twoFactor,
+}: {
+  token?: string;
+  email?: string;
+  embedded?: boolean;
+  onBack?: () => void;
+  /** Hinweis über der Code-Eingabe – verschwindet, sobald der Code eingegeben ist */
+  intro?: ReactNode;
+  /** Bereits angemeldet (z. B. zurück von Discord): direkt mit dem nächsten Schritt weitermachen */
+  resume?: boolean;
+  /** Anmeldung über Discord mit eingeschalteter zweiter Stufe: Ticket aus dem Rückweg */
+  twoFactor?: { method: TwoFactorMethod; ticket: string };
+}) {
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
-  const [state, setState] = useState<State>(token ? { kind: 'loading' } : { kind: 'code' });
+  const [state, setState] = useState<State>(twoFactor ? { kind: 'twoFactor', ...twoFactor } : token || resume ? { kind: 'loading' } : { kind: 'code' });
   const started = useRef(false);
 
   const handle = useCallback(
@@ -348,12 +367,12 @@ export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { 
   );
 
   useEffect(() => {
-    if (!token || started.current) return;
+    if ((!token && !resume) || started.current) return;
     started.current = true;
-    api<VerifyResponse>('/auth/verify', { body: { token } })
+    (resume ? api<VerifyResponse>('/auth/continue', { body: {} }) : api<VerifyResponse>('/auth/verify', { body: { token } }))
       .then(handle)
       .catch((err) => setState({ kind: 'error', message: err instanceof ApiClientError ? err.message : v.failed }));
-  }, [token, handle, v.failed]);
+  }, [token, resume, handle, v.failed]);
 
   return (
     <div className={embedded ? undefined : 'surface mx-auto max-w-lg p-7 sm:p-9'}>
@@ -385,7 +404,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { 
       {state.kind === 'setup' && (
         <div>
           <p className="flex items-center gap-2 text-sm font-medium text-emerald-300">
-            <Check className="size-4" aria-hidden /> {v.confirmed}
+            <Check className="size-4" aria-hidden /> {resume ? v.discordConfirmed : v.confirmed}
           </p>
           <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">{v.setupTitle}</h1>
           <p className="mt-2 leading-relaxed text-muted">{v.setupText}</p>
@@ -395,6 +414,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { 
               onDone={(r) => setState({ kind: 'done', email: state.email, panelUrl: r.panelUrl, existing: r.existingPanelAccount, discord: r.discordBlocked ?? null })}
             />
           </div>
+          {resume && <p className="mt-5 text-[13px] leading-relaxed text-subtle">{v.emailLater}</p>}
         </div>
       )}
 
@@ -404,7 +424,7 @@ export function VerifyFlow({ token, email, embedded = false, onBack, intro }: { 
           <h1 className="text-2xl font-semibold tracking-tight text-white">{state.discord ? v.discordTitle : v.doneTitle}</h1>
           <p className="mt-2 text-muted">{state.discord ? v.discordText : v.doneText}</p>
           <div className="mt-7">
-            {state.discord ? <DiscordStep blocked={state.discord} existing={state.existing} /> : <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} />}
+            {state.discord ? <DiscordStep blocked={state.discord} existing={state.existing} viaDiscord={resume} /> : <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} viaDiscord={resume} />}
           </div>
         </div>
       )}

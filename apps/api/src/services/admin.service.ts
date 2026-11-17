@@ -48,6 +48,7 @@ import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { notificationMail } from './mail/templates';
 import { trySyncPanelDescription } from './panel';
+import { provisionServer } from './provisioning.service';
 import { activatePendingServers, hardDeleteServer, pendingReasonFor } from './server.service';
 import { destroyAllSessions } from './session.service';
 
@@ -303,6 +304,7 @@ export async function listUsersAdmin(
     status: u.status,
     locale: u.locale,
     emailVerified: !!u.emailVerifiedAt,
+    emailUndeliverable: !!u.emailUndeliverableAt,
     panelUsername: u.pteroUsername,
     pteroUserId: u.pteroUserId,
     panelAdminUrl: panelUserAdminUrl(u.pteroUserId),
@@ -379,6 +381,11 @@ async function getUserById(id: string): Promise<User> {
 
 const stateChanged = () =>
   Errors.conflict('state_changed', L('Der Status hat sich inzwischen geändert – bitte neu laden.', 'The status has changed in the meantime – please reload.'));
+
+const retryFailed = (error: string | null | undefined) => {
+  const text = (error ?? 'unbekannter Fehler').slice(0, 400);
+  return new ApiError(502, 'retry_failed', L(`Erneut versucht – wieder fehlgeschlagen: ${text}`, `Tried again – failed again: ${text}`));
+};
 
 export type ServerAction = 'suspend' | 'unsuspend' | 'extend' | 'clear-pause' | 'retry' | 'delete';
 
@@ -465,6 +472,12 @@ export async function serverAction(admin: User, id: string, action: ServerAction
           throw new ApiError(502, 'retry_failed', L(`Die Erstellung ist fehlgeschlagen: ${(err as Error).message}`.slice(0, 300), `Creation failed: ${(err as Error).message}`.slice(0, 300)));
         }
         if (activated.includes(id)) {
+          // Die Erstellung lief gerade – ist sie gescheitert, bekommt das Team den neuen Fehler sofort zu sehen
+          const [now2] = await db.select({ status: servers.status, error: servers.provisioningError }).from(servers).where(eq(servers.id, id)).limit(1);
+          if (now2?.status === 'provisioning_failed') {
+            await log('admin.pending_retry', `Offene Anfrage „${server.name}“ erneut versucht – Erstellung fehlgeschlagen: ${now2.error ?? 'unbekannter Fehler'}`);
+            throw retryFailed(now2.error);
+          }
           await log('admin.pending_retry', `Offene Anfrage „${server.name}“ erneut versucht – der Server wird erstellt`);
           return;
         }
@@ -489,7 +502,14 @@ export async function serverAction(admin: User, id: string, action: ServerAction
         .set({ provisioningAttempts: 0, lastProvisionAttemptAt: null, provisioningError: null })
         .where(and(eq(servers.id, id), eq(servers.status, 'provisioning_failed')));
       if (affectedRows(res) !== 1) throw stateChanged();
-      await log('admin.provisioning_retry', `Einrichtung von „${server.name}“ wird erneut versucht`);
+      // Sofort ausführen (nicht auf den nächsten Lauf des Jobs warten) und das Ergebnis melden
+      await provisionServer(id, 'system', ip);
+      const [after] = await db.select({ status: servers.status, error: servers.provisioningError }).from(servers).where(eq(servers.id, id)).limit(1);
+      if (after?.status === 'provisioning_failed') {
+        await log('admin.provisioning_retry', `Einrichtung von „${server.name}“ erneut versucht – wieder fehlgeschlagen: ${after.error ?? 'unbekannter Fehler'}`);
+        throw retryFailed(after.error);
+      }
+      await log('admin.provisioning_retry', `Einrichtung von „${server.name}“ erneut versucht – der Server wird erstellt`);
       return;
     }
     case 'delete': {

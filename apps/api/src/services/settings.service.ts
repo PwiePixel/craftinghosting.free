@@ -352,6 +352,8 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
       available: discordAvailable,
       required: discordAvailable && s.discord.required,
       autoJoin: s.discord.autoJoin,
+      // Registrierung und Anmeldung laufen über Discord, sobald die Anbindung eingerichtet ist
+      signup: discordAvailable,
       inviteUrl: s.discord.enabled ? botInviteUrl : null,
       note: s.discord.requiredNote,
     },

@@ -1,3 +1,4 @@
+import { EmailCard } from '@/components/my/email-card';
 import type { Metadata } from 'next';
 import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
 import { kindExhausted, localePath, productKinds, type BonusSlot, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
@@ -362,6 +363,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
               waiting={hasPending && user.panelLinked}
             />
           )}
+          <EmailCard user={user} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
           {query.neu === '1' && (
             <Alert tone="success" title={t.createdTitle}>
               {t.createdText}

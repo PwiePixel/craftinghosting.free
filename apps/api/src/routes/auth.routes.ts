@@ -1,4 +1,5 @@
-import { discordGate } from '../discord/service';
+import { identityConfirmed } from '../services/identity';
+import { discordAuthorizeUrl, discordConfig, discordGate } from '../discord/service';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { deleteAccount } from '../services/account.service';
@@ -6,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import {
   accountPasswordSchema,
   deleteAccountSchema,
+  emailSchema,
   loginLinkSchema,
   panelSetupSchema,
   secondFactorSchema,
@@ -26,7 +28,8 @@ import { assertNotMaintenance } from '../lib/maintenance';
 import { clearSessionCookie, currentUser, requireAuth, setSessionCookie } from '../plugins/auth';
 import { audit } from '../services/audit.service';
 import { createBetaTicket, redeemBetaTicket } from '../services/beta.service';
-import { getUser, requestLoginCode, requestServer, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
+import { changeEmail, confirmEmail, getUser, prepareSignup, requestLoginCode, requestServer, resumeLogin, sendEmailVerification, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
+import { newNonce, setSignupCookie } from '../lib/signup-cookie';
 import { rememberUserLocale } from '../services/locale.service';
 import { createPanelAccount } from '../services/provisioning.service';
 import { activatePendingServers, hardDeleteServer } from '../services/server.service';
@@ -37,11 +40,45 @@ const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { ma
 
 export async function authRoutes(app: FastifyInstance) {
   /** Server anfordern (öffentlich) → Bestätigungs-E-Mail */
-  app.post('/start', strict(6, '15 minutes'), async (request) => {
+  app.post('/start', strict(6, '15 minutes'), async (request, reply) => {
     await assertNotMaintenance(request);
     const input = startSchema.parse(request.body);
+    // Mit eingerichteter Discord-Anbindung läuft die Registrierung über Discord: Die Anfrage wandert in ein
+    // signiertes Cookie und wird nach der Rückkehr von Discord gespeichert. Die Website leitet zu `redirect` weiter.
+    if ((await discordConfig()).linkReady) {
+      await prepareSignup(input);
+      const nonce = newNonce();
+      setSignupCookie(reply, { input, locale: request.lang, nonce });
+      return { ok: true, redirect: await discordAuthorizeUrl({ kind: 'signup', id: nonce }, request.lang) };
+    }
     await requestServer(input, { ip: request.ip, locale: request.lang });
     return { ok: true };
+  });
+
+  /** Nach der Rückkehr von Discord (oder beim Wiederkommen): Wie geht es für diesen Account weiter? */
+  app.post('/auth/continue', { preHandler: requireAuth, ...strict(30, '15 minutes') }, async (request): Promise<VerifyResult> => {
+    const done = await resumeLogin(currentUser(request).id, { ip: request.ip, locale: request.lang });
+    return { user: toUserDTO(done.user), next: done.next, existingPanelAccount: done.existingPanelAccount, panelUrl: panelPublicUrl, waitlist: done.waitlist, discordBlocked: done.discordBlocked ?? null };
+  });
+
+  /* ------------------------------------------------------------ E-Mail-Adresse (Bestätigung ist freiwillig) */
+
+  /** Code zum Bestätigen der E-Mail-Adresse schicken */
+  app.post('/account/email/code', { preHandler: requireAuth, ...strict(6, '15 minutes') }, async (request) => {
+    await sendEmailVerification(await getUser(currentUser(request).id), request.lang);
+    return { ok: true };
+  });
+
+  app.post('/account/email/verify', { preHandler: requireAuth, ...strict(15, '15 minutes') }, async (request) => {
+    const { code } = z.object({ code: sixDigitCodeSchema }).parse(request.body);
+    return { user: toUserDTO(await confirmEmail(await getUser(currentUser(request).id), code, request.ip)) };
+  });
+
+  /** E-Mail-Adresse ändern (vertippt oder nicht erreichbar) – die neue Adresse ist unbestätigt */
+  app.post('/account/email', { preHandler: requireAuth, ...strict(6, '15 minutes') }, async (request) => {
+    await assertNotMaintenance(request);
+    const { email } = z.object({ email: emailSchema }).parse(request.body);
+    return { user: toUserDTO(await changeEmail(await getUser(currentUser(request).id), email, { ip: request.ip, locale: request.lang })) };
   });
 
   /** Anmeldecode anfordern (öffentlich). Antwort ist immer gleich. Der alte Pfad /auth/login-link bleibt als Alias. */
@@ -150,7 +187,7 @@ export async function authRoutes(app: FastifyInstance) {
     const input = panelSetupSchema.parse(request.body);
     const user = currentUser(request);
     await rememberUserLocale(user, request.lang);
-    if (!user.emailVerifiedAt) throw Errors.forbidden(L('Bitte bestätige zuerst deine E-Mail-Adresse.', 'Please confirm your email address first.'));
+    if (!identityConfirmed(user)) throw Errors.forbidden(L('Bitte melde dich zuerst mit Discord an oder bestätige deine E-Mail-Adresse.', 'Please sign in with Discord or confirm your email address first.'));
     if (user.pteroUserId) throw new ApiError(409, 'panel_already_linked', L('Dein Panel-Zugang ist bereits eingerichtet.', 'Your panel access is already set up.'));
     let existing: boolean;
     try {
