@@ -2,12 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Check, Copy, LogOut, RotateCcw, Trash2, UserRound } from 'lucide-react';
-import type { ServerDTO } from '@chfree/shared';
+import { Check, Copy, KeyRound, LogOut, RotateCcw, Trash2, UserRound } from 'lucide-react';
+import type { ServerDTO, UserDTO } from '@chfree/shared';
 import { localePath } from '@chfree/shared';
 import { Button } from '@/components/ui/button';
 import { useDict, useLang } from '@/i18n/client';
 import { api, ApiClientError } from '@/lib/api/client';
+import { cn } from '@/lib/utils';
 import { PanelSetupForm } from '@/components/start/panel-setup-form';
 
 /** Lädt die Seite neu, solange sich ein Zustand ändert (z. B. Installation). */
@@ -152,7 +153,131 @@ export function PanelSetupCard({ email }: { email: string }) {
   );
 }
 
-export function AccountActions({ email }: { email: string }) {
+/** Kontobereich: „Angemeldet bleiben“ und das Passwort für die Anmeldung mit E-Mail-Adresse und Passwort */
+function AccountSettings({ user }: { user: UserDTO }) {
+  const t = useDict().my;
+  const router = useRouter();
+  const [stay, setStay] = useState(user.staySignedIn);
+  const [hasPassword, setHasPassword] = useState(user.passwordLogin);
+  const [editing, setEditing] = useState(false);
+  const [password, setPassword] = useState('');
+  const [pending, setPending] = useState<'stay' | 'password' | null>(null);
+  // Die Rückmeldung erscheint bei der Einstellung, zu der sie gehört
+  const [message, setMessage] = useState<{ kind: 'stay' | 'password'; ok: boolean; text: string } | null>(null);
+
+  async function run(kind: 'stay' | 'password', action: () => Promise<string>) {
+    setPending(kind);
+    setMessage(null);
+    try {
+      setMessage({ kind, ok: true, text: await action() });
+      router.refresh();
+    } catch (err) {
+      setMessage({ kind, ok: false, text: err instanceof ApiClientError ? (err.fields?.password ?? err.message) : t.deleteFailed });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="p-5">
+        <label className="flex cursor-pointer items-start gap-4">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-white">{t.staySignedIn}</span>
+            <span className="mt-0.5 block text-[13px] leading-relaxed text-subtle">{t.staySignedInHint}</span>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-checked={stay}
+            className="peer sr-only"
+            checked={stay}
+            disabled={pending !== null}
+            onChange={(e) => {
+              const enabled = e.target.checked;
+              setStay(enabled);
+              void run('stay', async () => {
+                try {
+                  await api('/account/stay-signed-in', { body: { enabled } });
+                } catch (err) {
+                  setStay(!enabled);
+                  throw err;
+                }
+                return enabled ? t.staySignedInOn : t.staySignedInOff;
+              });
+            }}
+          />
+          <span aria-hidden className={cn('relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-400', stay ? 'bg-blue-600' : 'bg-white/15')}>
+            <span className={cn('absolute top-0.5 left-0.5 size-5 rounded-full bg-white transition-transform', stay && 'translate-x-5')} />
+          </span>
+        </label>
+        {message?.kind === 'stay' && <p className={cn('mt-3 text-sm', message.ok ? 'text-emerald-300' : 'text-red-300')}>{message.text}</p>}
+      </div>
+
+      <div className="p-5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div className="min-w-0 flex-1 basis-64">
+            <p className="text-sm font-medium text-white">{t.passwordTitle}</p>
+            <p className="mt-0.5 text-[13px] leading-relaxed text-subtle">{hasPassword ? t.passwordSet : t.passwordUnset}</p>
+          </div>
+          {!editing && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" icon={<KeyRound />} disabled={pending !== null} onClick={() => setEditing(true)}>
+                {hasPassword ? t.passwordChange : t.passwordSave}
+              </Button>
+              {hasPassword && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={pending === 'password'}
+                  disabled={pending !== null}
+                  onClick={() =>
+                    run('password', async () => {
+                      await api('/account/password/remove', { body: {} });
+                      setHasPassword(false);
+                      return t.passwordRemoved;
+                    })
+                  }
+                >
+                  {t.passwordRemove}
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+        {editing && (
+          <form
+            className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void run('password', async () => {
+                await api('/account/password', { body: { password } });
+                setHasPassword(true);
+                setEditing(false);
+                setPassword('');
+                return t.passwordSaved;
+              });
+            }}
+          >
+            <label className="block sm:min-w-72">
+              <span className="mb-1.5 block text-[13px] text-subtle">{t.passwordNew}</span>
+              <input className="input" type="password" autoComplete="new-password" value={password} maxLength={200} onChange={(e) => setPassword(e.target.value)} autoFocus />
+            </label>
+            <Button type="submit" size="sm" loading={pending === 'password'} disabled={password.length < 8}>
+              {t.passwordSave}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={pending !== null} onClick={() => { setEditing(false); setPassword(''); }}>
+              {t.deleteAccountCancel}
+            </Button>
+          </form>
+        )}
+        {message?.kind === 'password' && <p className={cn('mt-3 text-sm', message.ok ? 'text-emerald-300' : 'text-red-300')}>{message.text}</p>}
+      </div>
+    </>
+  );
+}
+
+export function AccountActions({ email, user }: { email: string; user?: UserDTO }) {
   const t = useDict().my;
   const lang = useLang();
   const home = localePath(lang, 'home');
@@ -186,6 +311,8 @@ export function AccountActions({ email }: { email: string }) {
           {t.logout}
         </Button>
       </div>
+
+      {user && <AccountSettings user={user} />}
 
       <div className="p-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">

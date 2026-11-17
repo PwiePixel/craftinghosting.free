@@ -17,7 +17,7 @@ type State =
   | { kind: 'twoFactor'; method: TwoFactorMethod; ticket: string }
   | { kind: 'error'; message: string }
   | { kind: 'setup'; email: string }
-  | { kind: 'done'; email: string; panelUrl: string; existing: boolean; discord: DiscordBlocked }
+  | { kind: 'done'; email: string; panelUrl: string; existing: boolean; discord: DiscordBlocked; panel?: boolean }
   | { kind: 'waitlist'; waitlist: WaitlistInfo };
 
 type DiscordBlocked = 'not_linked' | 'not_member' | 'unavailable' | null;
@@ -32,18 +32,20 @@ function announceSession(discordLinked: boolean) {
  * erst nach der Verbindung erstellt. Der Knopf führt zum Verbindungslink (Zustimmung bei Discord, Beitritt inklusive) –
  * nicht zum Einladungslink.
  */
-function DiscordStep({ blocked, existing, viaDiscord }: { blocked: Exclude<DiscordBlocked, null>; existing: boolean; viaDiscord: boolean }) {
+function DiscordStep({ blocked, existing, viaDiscord, panel = true }: { blocked: Exclude<DiscordBlocked, null>; existing: boolean; viaDiscord: boolean; /** Panel-Zugang schon angelegt? Sonst folgt er nach der Verbindung */ panel?: boolean }) {
   const lang = useLang();
   const t = useDict();
   const v = t.verify;
-  const steps = v.discordSteps(existing, viaDiscord);
+  const steps = panel ? v.discordSteps(existing, viaDiscord) : v.passwordSteps;
+  // Der aktuelle Schritt ist „Discord-Konto verbinden“
+  const current = panel ? 2 : 1;
   return (
     <div>
       <ol className="space-y-3 text-sm">
         {steps.map((step, i) => (
-          <li key={step} className={i === 2 ? 'flex items-center gap-3 font-medium text-white' : i < 2 ? 'flex items-center gap-3 text-gray-200' : 'flex items-center gap-3 text-subtle'}>
-            <span className={i < 2 ? 'flex size-5 items-center justify-center rounded-full bg-emerald-400/15' : i === 2 ? 'flex size-5 items-center justify-center rounded-full bg-[#5865f2]/25' : 'flex size-5 items-center justify-center rounded-full border border-line-strong'}>
-              {i < 2 ? <Check className="size-3 text-emerald-400" strokeWidth={3} /> : i === 2 ? <span className="size-2 rounded-full bg-[#8b93ff]" /> : null}
+          <li key={step} className={i === current ? 'flex items-center gap-3 font-medium text-white' : i < current ? 'flex items-center gap-3 text-gray-200' : 'flex items-center gap-3 text-subtle'}>
+            <span className={i < current ? 'flex size-5 items-center justify-center rounded-full bg-emerald-400/15' : i === current ? 'flex size-5 items-center justify-center rounded-full bg-[#5865f2]/25' : 'flex size-5 items-center justify-center rounded-full border border-line-strong'}>
+              {i < current ? <Check className="size-3 text-emerald-400" strokeWidth={3} /> : i === current ? <span className="size-2 rounded-full bg-[#8b93ff]" /> : null}
             </span>
             {step}
           </li>
@@ -61,7 +63,7 @@ function DiscordStep({ blocked, existing, viaDiscord }: { blocked: Exclude<Disco
           </a>
         </div>
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-subtle">{v.discordHint}</p>
+      <p className="mt-4 text-[13px] leading-relaxed text-subtle">{panel ? v.discordHint : v.passwordDiscordHint}</p>
     </div>
   );
 }
@@ -360,7 +362,7 @@ export function VerifyFlow({
       } else if (res.next === 'panel_setup') {
         setState({ kind: 'setup', email: res.user.email });
       } else {
-        setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount, discord: res.discordBlocked ?? null });
+        setState({ kind: 'done', email: res.user.email, panelUrl: res.panelUrl, existing: res.existingPanelAccount, discord: res.discordBlocked ?? null, panel: res.user.panelLinked });
       }
     },
     [lang],
@@ -424,7 +426,7 @@ export function VerifyFlow({
           <h1 className="text-2xl font-semibold tracking-tight text-white">{state.discord ? v.discordTitle : v.doneTitle}</h1>
           <p className="mt-2 text-muted">{state.discord ? v.discordText : v.doneText}</p>
           <div className="mt-7">
-            {state.discord ? <DiscordStep blocked={state.discord} existing={state.existing} viaDiscord={resume} /> : <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} viaDiscord={resume} />}
+            {state.discord ? <DiscordStep blocked={state.discord} existing={state.existing} viaDiscord={resume} panel={state.panel ?? true} /> : <DoneCard email={state.email} panelUrl={state.panelUrl} existing={state.existing} viaDiscord={resume} />}
           </div>
         </div>
       )}

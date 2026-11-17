@@ -4,7 +4,7 @@ import { VerifyFlow } from './verify-flow';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { Bot, Check, Pickaxe } from 'lucide-react';
+import { Bot, Check, KeyRound, Pickaxe } from 'lucide-react';
 import {
   createServerSchema,
   formatMb,
@@ -120,6 +120,10 @@ export function StartForm({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [accept, setAccept] = useState(false);
+  // Registrierung: über Discord (empfohlen) oder mit E-Mail-Adresse und Passwort
+  const [method, setMethod] = useState<'discord' | 'password'>('discord');
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [newsletter, setNewsletter] = useState(false);
   // Wählbare Versionen kommen aus dem Admin-Bereich (Einstellungen → Minecraft-Versionen)
   const versionsOf = (id: string, k: ProductKind = kind) => {
@@ -142,6 +146,8 @@ export function StartForm({
 
   const values = { planId, serverType: typeId, version, name, email, acceptTerms: accept || undefined, ...(newsletterOption && newsletter ? { newsletter: true } : {}) };
 
+  const viaDiscord = discordSignup && !loggedIn && method === 'discord';
+
   function submit() {
     void form.submit(loggedIn ? { ...values, email: undefined, newsletter: undefined } : values, async (data) => {
       if (loggedIn) {
@@ -149,7 +155,18 @@ export function StartForm({
         router.push(localePath(lang, 'myServers', { neu: early ? 'waitlist' : '1' }));
         router.refresh();
       } else {
-        const res = await api<{ ok: boolean; redirect?: string | null }>('/start', { body: data });
+        const withPassword = discordSignup && method === 'password';
+        if (withPassword && password.length < 8) {
+          setPasswordError(s.passwordHint);
+          return;
+        }
+        setPasswordError(null);
+        const res = await api<{ ok: boolean; redirect?: string | null; resume?: boolean }>('/start', { body: withPassword ? { ...data, password } : data });
+        // Konto mit Passwort angelegt und angemeldet: weiter mit dem nächsten Schritt (Discord verbinden)
+        if (res.resume) {
+          window.location.assign(`${localePath(lang, 'start')}?resume=1`);
+          await new Promise(() => {});
+        }
         // Registrierung über Discord: weiter zur Anmeldung bei Discord – von dort geht es zurück zum nächsten Schritt
         if (res.redirect) {
           window.location.assign(res.redirect);
@@ -325,9 +342,30 @@ export function StartForm({
             {s.loggedInAs} <span className="text-white">{userEmail}</span>. {early ? e.loggedInHint : s.loggedInHint}
           </p>
         ) : (
-          <Field label={s.emailLabel} htmlFor="email" error={form.fieldErrors.email} hint={discordSignup ? s.emailHintDiscord : s.emailHint}>
-            <input id="email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </Field>
+          <div className="space-y-5">
+            {discordSignup && (
+              <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={s.methodTitle}>
+                {(['discord', 'password'] as const).map((m) => (
+                  <label key={m} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition-colors', method === m ? 'border-blue-500 bg-blue-500/[0.06]' : 'border-line-strong hover:border-white/25')}>
+                    <input type="radio" name="signup-method" className="sr-only" checked={method === m} onChange={() => setMethod(m)} />
+                    {m === 'discord' ? <DiscordIcon className="size-5 shrink-0 text-[#8b93ff]" /> : <KeyRound className="size-5 shrink-0 text-muted" aria-hidden />}
+                    <span>
+                      <span className="block text-sm font-medium text-white">{m === 'discord' ? s.methodDiscord : s.methodPassword}</span>
+                      <span className="block text-[13px] text-subtle">{m === 'discord' ? s.methodDiscordHint : s.methodPasswordHint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <Field label={s.emailLabel} htmlFor="email" error={form.fieldErrors.email} hint={discordSignup ? s.emailHintDiscord : s.emailHint}>
+              <input id="email" type="email" autoComplete="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </Field>
+            {discordSignup && method === 'password' && (
+              <Field label={s.passwordLabel} htmlFor="signup-password" error={passwordError ?? form.fieldErrors.password} hint={s.passwordHint}>
+                <input id="signup-password" type="password" autoComplete="new-password" className="input" value={password} maxLength={200} onChange={(e) => setPassword(e.target.value)} />
+              </Field>
+            )}
+          </div>
         )}
       </Step>
 
@@ -358,9 +396,9 @@ export function StartForm({
           </label>
         )}
 
-        {discordSignup && !loggedIn && <p className="mt-5 max-w-2xl rounded-lg border border-[#5865f2]/40 bg-[#5865f2]/[0.08] p-4 text-sm leading-relaxed text-gray-200">{s.discordSignupNote}</p>}
-        <Button type="submit" size="lg" loading={form.pending} disabled={!plan} icon={discordSignup && !loggedIn ? <DiscordIcon /> : undefined} className={cn('mt-6 w-full sm:w-auto', discordSignup && !loggedIn && 'bg-[#5865f2] hover:bg-[#6b76f5]')}>
-          {discordSignup && !loggedIn ? s.submitDiscord : early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}
+        {discordSignup && !loggedIn && <p className="mt-5 max-w-2xl rounded-lg border border-[#5865f2]/40 bg-[#5865f2]/[0.08] p-4 text-sm leading-relaxed text-gray-200">{method === 'password' ? s.passwordNote : s.discordSignupNote}</p>}
+        <Button type="submit" size="lg" loading={form.pending} disabled={!plan} icon={viaDiscord ? <DiscordIcon /> : undefined} className={cn('mt-6 w-full sm:w-auto', viaDiscord && 'bg-[#5865f2] hover:bg-[#6b76f5]')}>
+          {viaDiscord ? s.submitDiscord : discordSignup && !loggedIn ? s.submitPassword : early ? (loggedIn ? e.submitLoggedIn : e.submit) : loggedIn ? s.submitLoggedIn(plan?.name ?? '') : s.submit}
         </Button>
       </div>
     </form>

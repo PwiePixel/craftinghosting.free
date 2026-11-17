@@ -75,6 +75,8 @@ const schema = z
     SESSION_MAX_HOURS: z.coerce.number().int().min(1).max(720).default(12),
     /** false = Session-Cookie endet mit dem Schließen des Browsers (Standard), true = bleibt bis zum Ablauf gespeichert */
     SESSION_PERSISTENT: bool(false),
+    /** „Angemeldet bleiben“: Tage ohne Aktivität, nach denen man trotzdem abgemeldet wird (Höchstdauer: das Dreifache) */
+    SESSION_STAY_DAYS: z.coerce.number().int().min(1).max(365).default(30),
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: z.enum(['auto', 'true', 'false']).default('auto'),
 

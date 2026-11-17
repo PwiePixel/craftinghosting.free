@@ -28,12 +28,12 @@ import { assertNotMaintenance } from '../lib/maintenance';
 import { clearSessionCookie, currentUser, requireAuth, setSessionCookie } from '../plugins/auth';
 import { audit } from '../services/audit.service';
 import { createBetaTicket, redeemBetaTicket } from '../services/beta.service';
-import { changeEmail, confirmEmail, getUser, prepareSignup, requestLoginCode, requestServer, resumeLogin, sendEmailVerification, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
+import { changeEmail, confirmEmail, getUser, loginWithPassword, prepareSignup, registerWithPassword, removeLoginPassword, setLoginPassword, requestLoginCode, requestServer, resumeLogin, sendEmailVerification, toUserDTO, verifyLogin, verifyTwoFactor } from '../services/auth.service';
 import { newNonce, setSignupCookie } from '../lib/signup-cookie';
 import { rememberUserLocale } from '../services/locale.service';
 import { createPanelAccount } from '../services/provisioning.service';
 import { activatePendingServers, hardDeleteServer } from '../services/server.service';
-import { createSession, destroySession } from '../services/session.service';
+import { createSession, destroySession, setStaySignedIn } from '../services/session.service';
 import { confirmTotp, disableSecondFactor, enablePasswordFactor, setupTotp, toSecurityDTO } from '../services/two-factor.service';
 
 const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { max, timeWindow } } });
@@ -45,7 +45,17 @@ export async function authRoutes(app: FastifyInstance) {
     const input = startSchema.parse(request.body);
     // Mit eingerichteter Discord-Anbindung läuft die Registrierung über Discord: Die Anfrage wandert in ein
     // signiertes Cookie und wird nach der Rückkehr von Discord gespeichert. Die Website leitet zu `redirect` weiter.
-    if ((await discordConfig()).linkReady) {
+    const linkReady = (await discordConfig()).linkReady;
+    // Alternative: Konto mit E-Mail-Adresse und Passwort. Der Server wartet dann, bis Discord verbunden ist.
+    const { password } = z.object({ password: accountPasswordSchema.shape.password.optional() }).parse(request.body);
+    if (password !== undefined) {
+      if (!linkReady) throw Errors.unavailable(L('Die Registrierung mit Passwort ist gerade nicht möglich.', 'Signing up with a password is not possible right now.'));
+      const account = await registerWithPassword(input, password, { ip: request.ip, locale: request.lang });
+      const session = await createSession(account.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
+      setSessionCookie(reply, session.token, session.expiresAt, session.persistent);
+      return { ok: true, resume: true };
+    }
+    if (linkReady) {
       await prepareSignup(input);
       const nonce = newNonce();
       setSignupCookie(reply, { input, locale: request.lang, nonce });
@@ -59,6 +69,29 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/continue', { preHandler: requireAuth, ...strict(30, '15 minutes') }, async (request): Promise<VerifyResult> => {
     const done = await resumeLogin(currentUser(request).id, { ip: request.ip, locale: request.lang });
     return { user: toUserDTO(done.user), next: done.next, existingPanelAccount: done.existingPanelAccount, panelUrl: panelPublicUrl, waitlist: done.waitlist, discordBlocked: done.discordBlocked ?? null };
+  });
+
+  /* ------------------------------------------------------------ Angemeldet bleiben, Passwort für die Anmeldung */
+
+  /** „Angemeldet bleiben“ ein- oder ausschalten – gilt sofort für diese und alle weiteren Sitzungen des Accounts */
+  app.post('/account/stay-signed-in', { preHandler: requireAuth, ...strict(30, '15 minutes') }, async (request, reply) => {
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(request.body);
+    const user = currentUser(request);
+    const expiresAt = await setStaySignedIn(user.id, enabled, request.sessionId);
+    const token = request.cookies[env.SESSION_COOKIE_NAME];
+    if (token && expiresAt) setSessionCookie(reply, token, expiresAt, enabled);
+    await audit({ userId: user.id, actor: 'user', action: 'account.stay_signed_in', message: enabled ? '„Angemeldet bleiben“ eingeschaltet' : '„Angemeldet bleiben“ ausgeschaltet', ip: request.ip });
+    return { user: toUserDTO(await getUser(user.id)) };
+  });
+
+  /** Passwort für die Anmeldung festlegen oder ändern */
+  app.post('/account/password', { preHandler: requireAuth, ...strict(10, '15 minutes') }, async (request) => {
+    const { password } = accountPasswordSchema.parse(request.body);
+    return { user: toUserDTO(await setLoginPassword(await getUser(currentUser(request).id), password, request.sessionId, request.ip)) };
+  });
+
+  app.post('/account/password/remove', { preHandler: requireAuth, ...strict(10, '15 minutes') }, async (request) => {
+    return { user: toUserDTO(await removeLoginPassword(await getUser(currentUser(request).id), request.ip)) };
   });
 
   /* ------------------------------------------------------------ E-Mail-Adresse (Bestätigung ist freiwillig) */
@@ -97,7 +130,7 @@ export async function authRoutes(app: FastifyInstance) {
   /** Sitzung anlegen und die Antwort für die Website bauen */
   const signIn = async (request: FastifyRequest, reply: FastifyReply, result: { user: User; next: VerifyResult['next']; existingPanelAccount: boolean; waitlist: VerifyResult['waitlist']; discordBlocked?: VerifyResult['discordBlocked'] }) => {
     const session = await createSession(result.user.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
-    setSessionCookie(reply, session.token, session.expiresAt);
+    setSessionCookie(reply, session.token, session.expiresAt, session.persistent);
     const body: VerifyResult = {
       user: toUserDTO(result.user),
       next: result.next,
@@ -118,6 +151,14 @@ export async function authRoutes(app: FastifyInstance) {
     const body = request.body as { token?: unknown } | null;
     const input = body && typeof body.token === 'string' ? tokenSchema.parse(body) : verifyCodeSchema.parse(body);
     const step = await verifyLogin(input, { ip: request.ip, locale: request.lang });
+    if (step.kind === 'two_factor') return { twoFactor: { method: step.method, ticket: step.ticket } };
+    return signIn(request, reply, step);
+  });
+
+  /** Anmeldung mit E-Mail-Adresse und Passwort (für Konten, die eines festgelegt haben) */
+  app.post('/auth/password-login', strict(10, '15 minutes'), async (request, reply): Promise<VerifyResponse> => {
+    const { email, password } = z.object({ email: emailSchema, password: z.string().min(1).max(200) }).parse(request.body);
+    const step = await loginWithPassword(email, password, { ip: request.ip, locale: request.lang });
     if (step.kind === 'two_factor') return { twoFactor: { method: step.method, ticket: step.ticket } };
     return signIn(request, reply, step);
   });
@@ -166,7 +207,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { ticket } = z.object({ ticket: z.string().min(20).max(400) }).parse(request.body);
     const user = await redeemBetaTicket(ticket);
     const session = await createSession(user.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
-    setSessionCookie(reply, session.token, session.expiresAt);
+    setSessionCookie(reply, session.token, session.expiresAt, session.persistent);
     return { ok: true, user: toUserDTO(user) };
   });
 

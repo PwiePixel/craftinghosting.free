@@ -404,7 +404,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
 
         <div className="mt-10 space-y-4">
           {security && <SecurityCard security={security} />}
-          <AccountActions email={user.email} />
+          <AccountActions email={user.email} user={user} />
         </div>
       </div>
     </div>

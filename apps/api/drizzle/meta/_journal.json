@@ -85,6 +85,13 @@
       "when": 1794922808036,
       "tag": "0011_mail_health",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794930167964,
+      "tag": "0012_stay_signed_in_password",
+      "breakpoints": true
     }
   ]
 }

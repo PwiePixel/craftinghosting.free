@@ -48,6 +48,12 @@ export const users = sqliteTable(
      * Zweite Stufe bei der Anmeldung (nach dem Code per E-Mail): eigenes Passwort oder Authenticator-App.
      * Passwort nur als scrypt-Hash, TOTP-Schlüssel verschlüsselt (encryptField), Wiederherstellungscodes als Hash.
      */
+    /** „Angemeldet bleiben“ (Kontobereich): Sitzungen halten lange und überleben das Schließen des Browsers */
+    staySignedIn: integer('stay_signed_in', { mode: 'boolean' }).notNull().default(false),
+    /** Passwort für die Anmeldung mit E-Mail und Passwort (unabhängig vom Passwort als zweite Stufe) */
+    loginPasswordHash: text('login_password_hash'),
+    loginFails: integer('login_fails').notNull().default(0),
+    loginLockedUntil: ts('login_locked_until'),
     twoFactorMethod: text('two_factor_method', { enum: ['password', 'totp'] }),
     passwordHash: text('password_hash'),
     totpSecret: text('totp_secret'),
@@ -76,6 +82,8 @@ export const authSessions = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     expiresAt: ts('expires_at').notNull(),
     lastSeenAt: ts('last_seen_at').notNull().$defaultFn(now),
+    /** „Angemeldet bleiben“: lange Laufzeit und dauerhaftes Cookie */
+    persistent: integer('persistent', { mode: 'boolean' }).notNull().default(false),
     ip: text('ip'),
     userAgent: text('user_agent'),
     createdAt: ts('created_at').notNull().$defaultFn(now),

@@ -24,6 +24,10 @@ export interface UserDTO {
   emailVerified: boolean;
   /** Der Mailserver lehnt die Adresse ab – bitte ändern (bis dahin wird nichts dorthin geschickt) */
   emailUndeliverable: boolean;
+  /** Anmeldung mit E-Mail-Adresse und Passwort ist eingerichtet */
+  passwordLogin: boolean;
+  /** „Angemeldet bleiben“: Sitzungen halten lange und überleben das Schließen des Browsers */
+  staySignedIn: boolean;
   /** Pterodactyl-Konto ist verknüpft */
   panelLinked: boolean;
   panelUsername: string | null;

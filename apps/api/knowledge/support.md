@@ -26,6 +26,9 @@ unter „Meine Server“ nur den Zustand und erlaubt Reaktivieren und Löschen.
 5. Benutzername und Passwort für das Pterodactyl-Panel festlegen. Danach wird der Server automatisch erstellt und
    installiert (dauert meist ein bis zwei Minuten).
 
+Statt mit Discord lässt sich das Konto auch mit E-Mail-Adresse und Passwort anlegen. Einen Server gibt es aber in jedem
+Fall erst, wenn das Discord-Konto verbunden und Mitglied unseres Discord-Servers ist – das ist dann der nächste Schritt.
+
 Die E-Mail-Adresse muss nicht bestätigt werden. Wir schicken trotzdem einen sechsstelligen Code; wer ihn unter
 „Meine Server“ eingibt, hat eine bestätigte Adresse – das ist die Voraussetzung, um Partner zu werden. Unter
 „Meine Server“ lässt sich die Adresse auch ändern und ein neuer Code anfordern.
@@ -36,6 +39,9 @@ Warteliste und eine E-Mail, sobald der Server freigeschaltet ist.
 ## Anmelden
 
 - Auf der Anmeldeseite „Mit Discord anmelden“ wählen – mit dem Discord-Konto, mit dem man sich registriert hat.
+- Wer ein Passwort festgelegt hat, meldet sich mit E-Mail-Adresse und Passwort an. Passwort vergessen: mit Discord oder
+  einem Code per E-Mail anmelden und unter „Meine Server“ → Konto ein neues Passwort festlegen.
+- Wer nicht ständig neu angemeldet werden möchte, schaltet unter „Meine Server“ → Konto „Angemeldet bleiben“ ein.
 - Ältere Konten ohne Discord können sich weiter mit ihrer E-Mail-Adresse anmelden:
 - Unter „Meine Server“ die E-Mail-Adresse eingeben. Es kommt ein sechsstelliger Code per E-Mail, der auf der Website
   eingetippt wird. Ein Passwort ist dafür nicht nötig.

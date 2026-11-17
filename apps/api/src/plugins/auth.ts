@@ -12,7 +12,7 @@ declare module 'fastify' {
   }
 }
 
-export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date) {
+export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date, persistent = false) {
   reply.setCookie(env.SESSION_COOKIE_NAME, token, {
     path: '/',
     httpOnly: true,
@@ -20,7 +20,8 @@ export function setSessionCookie(reply: FastifyReply, token: string, expiresAt: 
     sameSite: 'lax',
     domain: env.COOKIE_DOMAIN || undefined,
     // Ohne Ablaufdatum löscht der Browser das Cookie beim Schließen → erneute Anmeldung nötig
-    ...(env.SESSION_PERSISTENT ? { expires: expiresAt } : {}),
+    // (außer mit „Angemeldet bleiben“ im Kontobereich bzw. SESSION_PERSISTENT)
+    ...(env.SESSION_PERSISTENT || persistent ? { expires: expiresAt } : {}),
   });
 }
 
@@ -50,7 +51,7 @@ export const authPlugin = fp(async function authPlugin(app: FastifyInstance) {
     }
     request.user = session.user;
     request.sessionId = session.sessionId;
-    if (session.refreshed && env.SESSION_PERSISTENT) setSessionCookie(reply, token, session.expiresAt);
+    if (session.refreshed && (env.SESSION_PERSISTENT || session.persistent)) setSessionCookie(reply, token, session.expiresAt, session.persistent);
   });
 });
 

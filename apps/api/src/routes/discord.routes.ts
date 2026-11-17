@@ -133,7 +133,7 @@ export async function discordRoutes(app: FastifyInstance) {
         return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}?tf=${encodeURIComponent(twoFactorTicket(account.id))}&m=${account.twoFactorMethod}`);
       }
       const session = await createSession(account.id, { ip: request.ip, userAgent: request.headers['user-agent'] });
-      setSessionCookie(reply, session.token, session.expiresAt);
+      setSessionCookie(reply, session.token, session.expiresAt, session.persistent);
       const done = await completeDiscordLogin(account.id, meta).catch((err) => {
         request.log.warn({ err }, 'Anmeldung über Discord: nächster Schritt konnte nicht bestimmt werden');
         return null;
@@ -167,6 +167,13 @@ export async function discordRoutes(app: FastifyInstance) {
         if (result === 'linked' || result === 'linked_not_member') await startHandoff(conversation, fresh ?? user).catch((err) => request.log.warn({ err }, 'Chat: Übergabe nach der Discord-Verbindung fehlgeschlagen'));
         else await chatNote(conversation, result).catch(() => {});
       }
+    }
+    // Konto ohne Panel-Zugang mit wartender Anfrage (z. B. mit E-Mail und Passwort registriert): Nach dem Verbinden
+    // geht es direkt mit dem nächsten Schritt weiter – Panel-Zugang festlegen, danach wird der Server erstellt.
+    if (!fromChat && (result === 'linked' || result === 'linked_not_member')) {
+      const [fresh] = await db.select({ ptero: users.pteroUserId }).from(users).where(eq(users.id, user.id)).limit(1);
+      const [open] = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, user.id), eq(servers.status, 'pending'))).limit(1);
+      if (fresh && !fresh.ptero && open) return reply.redirect(`${env.APP_URL}${localePath(lang, 'start')}?resume=1`);
     }
     return done(result);
   });

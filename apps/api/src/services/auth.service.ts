@@ -4,6 +4,8 @@
  *    die Identität. Die E-Mail-Adresse wird angegeben, ihre Bestätigung per Code ist freiwillig
  *    (Voraussetzung, um Partner zu werden).
  *  – Ohne eingerichtete Discord-Anbindung wie früher: Server anfordern → Code per E-Mail → Bestätigung + Anmeldung
+ *  – Alternativ: Registrieren und anmelden mit E-Mail-Adresse und Passwort. Einen Server gibt es auch dann erst,
+ *    wenn das Discord-Konto verknüpft und Mitglied unseres Discord-Servers ist.
  *  – Bestehende Konten können sich weiter mit E-Mail-Adresse und Code anmelden
  *  – Freiwillige zweite Stufe: eigenes Passwort oder Authenticator-App (two-factor.service.ts)
  * Das Passwort des Pterodactyl-Panels wird nur an Pterodactyl übergeben und nie von uns gespeichert.
@@ -13,7 +15,9 @@ import { and, desc, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm';
 import { findPlan, isEmailBlocked, serverLimitBlock, type Locale, type StartInput, type TwoFactorMethod, type UserDTO, type VerifyNext, type WaitlistInfo } from '@chfree/shared';
 import { affectedRows, db, isUniqueViolation } from '../db/client';
 import { emailTokens, servers, users, type User } from '../db/schema';
-import { generateCode, hashCode } from '../lib/auth-crypto';
+import { generateCode, hashCode, hashPassword, verifyPassword } from '../lib/auth-crypto';
+import { identityConfirmed } from './identity';
+import { destroyAllSessions } from './session.service';
 import { encryptField, sha256, signToken, uuid, verifySignedToken } from '../lib/crypto';
 import { Errors, L } from '../lib/errors';
 import { canUseBeta, isAdmin } from '../plugins/auth';
@@ -49,6 +53,8 @@ export function toUserDTO(user: User): UserDTO {
     email: user.email,
     emailVerified: !!user.emailVerifiedAt,
     emailUndeliverable: !!user.emailUndeliverableAt,
+    passwordLogin: !!user.loginPasswordHash,
+    staySignedIn: user.staySignedIn,
     panelLinked: !!user.pteroUserId,
     panelUsername: user.pteroUsername,
     role: isAdmin(user) ? 'admin' : 'user',
@@ -213,7 +219,8 @@ export async function accountForDiscordSignup(discord: DiscordIdentity, email: s
   const byEmail = await findUserByEmail(email);
   try {
     if (byEmail) {
-      if (byEmail.discordId || byEmail.emailVerifiedAt || byEmail.pteroUserId) return { ok: false, reason: 'email_taken' };
+      // Ein Konto mit eigenem Passwort gehört jemandem – dort anmelden und Discord verbinden, statt es zu übernehmen
+      if (byEmail.discordId || byEmail.emailVerifiedAt || byEmail.pteroUserId || byEmail.loginPasswordHash) return { ok: false, reason: 'email_taken' };
       if (byEmail.status !== 'active') return { ok: false, reason: 'locked' };
       await db.update(users).set(link).where(and(eq(users.id, byEmail.id), isNull(users.discordId)));
     } else {
@@ -253,6 +260,92 @@ export async function finishDiscordSignup(user: User, input: StartInput, meta: {
   if (!user.emailVerifiedAt && !user.emailUndeliverableAt) {
     await sendEmailVerification(user, meta.locale).catch(() => {});
   }
+}
+
+/* ------------------------------------------------------------ Registrierung und Anmeldung mit E-Mail und Passwort */
+
+const MAX_LOGIN_FAILS = 5;
+const LOGIN_LOCK_MS = 15 * 60_000;
+
+/**
+ * Konto mit E-Mail-Adresse und Passwort anlegen. Die E-Mail-Bestätigung bleibt freiwillig; einen Server gibt es
+ * erst, wenn das Discord-Konto verknüpft und Mitglied unseres Discord-Servers ist.
+ */
+export async function registerWithPassword(input: StartInput, password: string, meta: { ip?: string; locale: Locale }): Promise<User> {
+  await prepareSignup(input);
+  const taken = () => {
+    const msg = L(
+      'Für diese E-Mail-Adresse gibt es schon ein Konto. Melde dich dort an – mit Discord, mit deinem Passwort oder mit einem Code per E-Mail.',
+      'An account already exists for this email address. Sign in there – with Discord, with your password or with a code by email.',
+    );
+    return Errors.badRequest('email_taken', msg, { email: msg });
+  };
+  const existing = await findUserByEmail(input.email);
+  try {
+    if (existing) {
+      // Nur ein leeres, nie benutztes Konto (alte Anfrage ohne Bestätigung) lässt sich so übernehmen
+      if (existing.emailVerifiedAt || existing.discordId || existing.pteroUserId || existing.loginPasswordHash || existing.status !== 'active') throw taken();
+      await db.update(users).set({ loginPasswordHash: hashPassword(password), loginFails: 0, loginLockedUntil: null }).where(eq(users.id, existing.id));
+    } else {
+      await db.insert(users).values({ id: uuid(), email: input.email, acceptedTermsAt: new Date(), locale: meta.locale, registrationIp: encryptField(meta.ip?.slice(0, 64)), loginPasswordHash: hashPassword(password) });
+    }
+  } catch (err) {
+    if (isUniqueViolation(err)) throw taken();
+    throw err;
+  }
+  const user = await findUserByEmail(input.email);
+  if (!user) throw new Error('Benutzer konnte nicht angelegt werden');
+  await audit({ userId: user.id, actor: 'user', action: 'account.created', message: 'Mit E-Mail und Passwort registriert', ip: meta.ip });
+  await finishDiscordSignup(user, input, meta);
+  return user;
+}
+
+/** Anmeldung mit E-Mail-Adresse und Passwort. Nach fünf Fehlversuchen ist sie 15 Minuten gesperrt. */
+export async function loginWithPassword(email: string, password: string, meta: { ip?: string; locale: Locale }): Promise<LoginStep> {
+  const wrong = () => {
+    const msg = L('E-Mail-Adresse oder Passwort stimmen nicht.', 'Email address or password is incorrect.');
+    return Errors.badRequest('invalid_login', msg, { password: msg });
+  };
+  const user = await findUserByEmail(email);
+  // Gleiche Antwort für unbekannte Adressen und Konten ohne Passwort – und trotzdem die Rechenzeit einer Prüfung
+  if (!user || !user.loginPasswordHash) {
+    verifyPassword(password, 'scrypt$16384$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    throw wrong();
+  }
+  const now = new Date();
+  if (user.loginLockedUntil && user.loginLockedUntil > now) {
+    throw Errors.badRequest('login_locked', L('Zu viele Fehlversuche. Bitte warte 15 Minuten – oder melde dich mit Discord bzw. einem Code per E-Mail an.', 'Too many failed attempts. Please wait 15 minutes – or sign in with Discord or a code by email.'));
+  }
+  if (!verifyPassword(password, user.loginPasswordHash)) {
+    const fails = user.loginFails + 1;
+    await db
+      .update(users)
+      .set(fails >= MAX_LOGIN_FAILS ? { loginFails: 0, loginLockedUntil: new Date(now.getTime() + LOGIN_LOCK_MS) } : { loginFails: sql`${users.loginFails} + 1` })
+      .where(eq(users.id, user.id));
+    throw wrong();
+  }
+  if (user.status !== 'active') throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));
+  if (user.loginFails > 0 || user.loginLockedUntil) await db.update(users).set({ loginFails: 0, loginLockedUntil: null }).where(eq(users.id, user.id));
+  if (user.twoFactorMethod) return { kind: 'two_factor', method: user.twoFactorMethod, ticket: twoFactorTicket(user.id) };
+  return { kind: 'done', ...(await completeLogin(user.id, meta, 'password')) };
+}
+
+/** Passwort für die Anmeldung festlegen oder ändern – alle anderen Sitzungen werden beendet */
+export async function setLoginPassword(user: User, password: string, sessionId: string | null, ip?: string): Promise<User> {
+  await db.update(users).set({ loginPasswordHash: hashPassword(password), loginFails: 0, loginLockedUntil: null }).where(eq(users.id, user.id));
+  await destroyAllSessions(user.id, sessionId ?? undefined);
+  await audit({ userId: user.id, actor: 'user', action: 'account.password_set', message: user.loginPasswordHash ? 'Passwort für die Anmeldung geändert' : 'Passwort für die Anmeldung festgelegt', ip });
+  return getUser(user.id);
+}
+
+/** Passwort entfernen – nur, wenn es einen anderen Weg zur Anmeldung gibt (Discord oder bestätigte E-Mail-Adresse) */
+export async function removeLoginPassword(user: User, ip?: string): Promise<User> {
+  if (!user.discordId && !user.emailVerifiedAt) {
+    throw Errors.conflict('password_needed', L('Ohne Passwort könntest du dich nicht mehr anmelden. Verknüpfe zuerst Discord oder bestätige deine E-Mail-Adresse.', 'Without a password you could no longer sign in. Link Discord or confirm your email address first.'));
+  }
+  await db.update(users).set({ loginPasswordHash: null, loginFails: 0, loginLockedUntil: null }).where(eq(users.id, user.id));
+  await audit({ userId: user.id, actor: 'user', action: 'account.password_removed', message: 'Passwort für die Anmeldung entfernt', ip });
+  return getUser(user.id);
 }
 
 /* ------------------------------------------------------------ E-Mail-Adresse bestätigen und ändern (freiwillig) */
@@ -393,6 +486,9 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
 export async function requestLoginCode(email: string, locale: Locale): Promise<void> {
   const user = await findUserByEmail(email);
   if (!user || user.status !== 'active') return;
+  // Eine unbestätigte Adresse beweist nichts: Gehört das Konto zu einem Discord-Konto, kommt man nur darüber hinein
+  // (sonst könnte der Inhaber des Postfachs ein fremdes Konto übernehmen, bei dem jemand seine Adresse angegeben hat).
+  if (!user.emailVerifiedAt && user.discordId) return;
   await rememberUserLocale(user, locale);
   const type = user.emailVerifiedAt ? 'login' : 'verify_email';
   // Fehler werden im Route-Handler nur geloggt – die Antwort verrät nicht, ob die Adresse existiert
@@ -412,7 +508,17 @@ const TWO_FACTOR_TTL_MS = 10 * 60_000;
 export async function verifyLogin(input: { token: string } | { email: string; code: string }, meta: { ip?: string; locale: Locale }): Promise<LoginStep> {
   const { userId } = 'token' in input ? await consumeLegacyLink(input.token) : await consumeCode(input.email, input.code);
   // Der Code beweist den Zugriff auf das Postfach – die Adresse gilt damit als bestätigt, auch wenn noch die zweite Stufe folgt
-  await db.update(users).set({ emailVerifiedAt: new Date() }).where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
+  const first = await db.update(users).set({ emailVerifiedAt: new Date(), emailFailCount: 0, emailUndeliverableAt: null }).where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
+  if (affectedRows(first) === 1) {
+    // Erste Bestätigung über das Postfach: Ein vorher gesetztes Passwort könnte von jemand anderem stammen, der diese
+    // Adresse nur angegeben hat. Es gilt deshalb nicht mehr (neu festlegen im Kontobereich), andere Sitzungen enden.
+    const [had] = await db.select({ hash: users.loginPasswordHash }).from(users).where(eq(users.id, userId)).limit(1);
+    if (had?.hash) {
+      await db.update(users).set({ loginPasswordHash: null, loginFails: 0, loginLockedUntil: null }).where(eq(users.id, userId));
+      await destroyAllSessions(userId);
+      await audit({ userId, actor: 'system', action: 'account.password_removed', message: 'Passwort entfernt: E-Mail-Adresse wurde erstmals per Code bestätigt (Passwort bitte neu festlegen)', ip: meta.ip });
+    }
+  }
   const user = await getUser(userId);
   if (user.status !== 'active') {
     throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));
@@ -443,7 +549,7 @@ export async function verifyTwoFactor(ticket: string, input: SecondFactorInput, 
 }
 
 /** Anmeldung abschließen: letzter Login, Newsletter, Warteliste, Panel-Konto, offene Server – und der nächste Schritt */
-async function completeLogin(userId: string, meta: { ip?: string; locale: Locale }, how: 'email' | 'discord' | 'resume' = 'email'): Promise<LoginDone> {
+async function completeLogin(userId: string, meta: { ip?: string; locale: Locale }, how: 'email' | 'discord' | 'password' | 'resume' = 'email'): Promise<LoginDone> {
   // IP des letzten Logins – nur verschlüsselt gespeichert
   if (how !== 'resume') {
     await db
@@ -475,11 +581,13 @@ async function completeLogin(userId: string, meta: { ip?: string; locale: Locale
   }
 
   if (how !== 'resume') {
-    const via = how === 'discord' ? 'über Discord' : 'Code per E-Mail';
+    const via = how === 'discord' ? 'über Discord' : how === 'password' ? 'E-Mail und Passwort' : 'Code per E-Mail';
     await audit({ userId, actor: 'user', action: 'auth.signed_in', message: user.twoFactorMethod ? `Angemeldet (${via} + zweite Stufe)` : `Angemeldet (${via})`, ip: meta.ip });
   }
 
   if (pending.length > 0) {
+    // Konto mit Passwort, noch ohne Discord und ohne bestätigte E-Mail: zuerst Discord verbinden – erst danach der Panel-Zugang
+    if (!user.pteroUserId && !identityConfirmed(user)) return { user, next: 'done', existingPanelAccount, waitlist: null, discordBlocked: 'not_linked' };
     if (!user.pteroUserId) return { user, next: 'panel_setup', existingPanelAccount, waitlist: null };
     const activated = await activatePendingServers(user, meta.ip);
     // Nichts erstellt, weil die Discord-Pflicht noch nicht erfüllt ist → die Website zeigt „Mit Discord verbinden“
