@@ -115,6 +115,10 @@ const schema = z
 
     /** Adresse von YouTube (Kanalseiten und Feeds für den Social Ping). Nur für Tests ändern. */
     YOUTUBE_BASE_URL: z.string().url().default('https://www.youtube.com'),
+    /** Nur für Tests: Webhooks der Partner-API auch an lokale Adressen zustellen */
+    PARTNER_WEBHOOK_ALLOW_PRIVATE: bool(false),
+    /** Panel-Aufrufe je Minute, die alle Partner zusammen auslösen dürfen (das Panel erlaubt je Key standardmäßig 720 bzw. 240) */
+    PARTNER_PANEL_CALLS_PER_MINUTE: z.coerce.number().int().min(30).max(100000).default(300),
     /** Adresse der Modrinth-Schnittstelle (Mods über die Partner-API installieren). Nur für Tests ändern. */
     MODRINTH_API_URL: z.string().url().default('https://api.modrinth.com/v2'),
     /** Adresse von TikTok (Profilseiten für den Social Ping). Nur für Tests ändern. */

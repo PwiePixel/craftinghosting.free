@@ -112,6 +112,18 @@ async function getEggCached(nestId: number, eggId: number): Promise<PteroEgg> {
   return egg;
 }
 
+/** Egg, Image, Startbefehl und Variablen für einen Servertyp in einer Version (auch für den späteren Wechsel) */
+export async function startupFor(serverType: string, version: string, settings: SiteSettings): Promise<{ eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }> {
+  const egg = getEggMapping(serverType, settings);
+  if (!getServerType(serverType) || !egg) throw new Error(`Für den Servertyp „${serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
+  const eggInfo = await getEggCached(egg.nestId, egg.eggId);
+  const environment: Record<string, string> = {};
+  for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
+  Object.assign(environment, egg.environment ?? {});
+  if (egg.versionVariable) environment[egg.versionVariable] = version;
+  return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, startup: eggInfo.startup, environment };
+}
+
 function errorFields(err: PterodactylError): string {
   return JSON.stringify(err.details ?? err.message).toLowerCase();
 }
@@ -259,6 +271,17 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
       })
       .where(and(eq(servers.id, server.id), inArray(servers.status, ['provisioning', 'provisioning_failed'])));
 
+    if (affectedRows(res) !== 1) {
+      // Der Server wurde währenddessen gelöscht: den eben angelegten Panel-Server wieder entfernen, sonst bliebe er
+      // ohne Eintrag bei uns für immer liegen (und würde bei keiner Grenze mitgezählt)
+      const [cur] = await db.select({ status: servers.status }).from(servers).where(eq(servers.id, server.id)).limit(1);
+      if (!cur || cur.status === 'deleted') {
+        const orphan = pServer.id;
+        const removed = await ptero.deleteServer(orphan).then(() => true, () => false);
+        await audit({ userId: user.id, serverId: server.id, actor: 'system', action: 'server.orphan_removed', message: removed ? `Während der Einrichtung gelöscht – Panel-Server #${orphan} wieder entfernt` : `Während der Einrichtung gelöscht – Panel-Server #${orphan} konnte NICHT entfernt werden (bitte im Panel löschen)`, meta: { pteroServerId: orphan, removed } });
+        return 'active';
+      }
+    }
     if (affectedRows(res) === 1) {
       await audit({
         userId: user.id,

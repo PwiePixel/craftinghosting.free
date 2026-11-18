@@ -33,7 +33,14 @@ import {
   upsertPlayer,
 } from '../services/partner.service';
 import {
+  changePartnerServer,
+  consoleTarget,
+  createPartnerBackup,
   createPartnerFolder,
+  deletePartnerBackup,
+  listPartnerBackups,
+  partnerBackupDownloadUrl,
+  restorePartnerBackup,
   decompressPartnerFile,
   deletePartnerFiles,
   getPartnerSettings,
@@ -49,6 +56,9 @@ import {
   setPartnerSettings,
   writePartnerFile,
 } from '../services/partner-extras.service';
+import { streamPartnerConsole } from '../services/partner-console';
+import { clearPartnerWebhook, emitPartnerEvent, partnerWebhookStatus, setPartnerWebhook } from '../services/partner-webhooks.service';
+import { asPartner } from '../pterodactyl/budget';
 import { getSettings } from '../services/settings.service';
 
 declare module 'fastify' {
@@ -66,16 +76,19 @@ const keyOf = (request: FastifyRequest): string | undefined => {
   return typeof header === 'string' ? header.trim() : undefined;
 };
 
-/** Anfragen werden je API-Key begrenzt (nicht je IP): Der Partner bündelt die Anfragen vieler Nutzer */
+/**
+ * Anfragen werden je Partner begrenzt (nicht je IP): Der Partner bündelt die Anfragen vieler Nutzer.
+ * Der Key ist an dieser Stelle schon geprüft – ein erfundener Key bekommt also kein eigenes Kontingent, sondern
+ * zählt (mit einer deutlich kleineren Grenze) auf die IP-Adresse.
+ */
 const limit = (max: number) => ({
+  // Kein automatisches HEAD-Gegenstück: Es bekäme einen eigenen Zähler und würde jede Lese-Grenze verdoppeln
+  exposeHeadRoute: false,
   config: {
     rateLimit: {
-      max,
+      max: (request: FastifyRequest) => (request.partner ? max : Math.min(max, 30)),
       timeWindow: '1 minute',
-      keyGenerator: (request: FastifyRequest) => {
-        const key = keyOf(request);
-        return key?.startsWith('chp_') ? `partner:${sha256(key).slice(0, 24)}` : `partner-ip:${request.ip}`;
-      },
+      keyGenerator: (request: FastifyRequest) => (request.partner ? `partner:${request.partner.id}` : `partner-ip:${request.ip}`),
     },
   },
 });
@@ -105,15 +118,24 @@ export async function partnerRoutes(app: FastifyInstance) {
     }
   });
 
-  /** Jede Anfrage braucht einen gültigen API-Key eines aktiven Partners */
-  app.addHook('preHandler', async (request) => {
-    const partner = await partnerByKey(keyOf(request));
-    if (!partner) throw new ApiError(401, 'invalid_api_key', L('Der API-Key fehlt, ist ungültig oder der Partner ist deaktiviert.', 'The API key is missing, invalid or the partner is disabled.'));
-    request.partner = partner;
+  // Den Key ganz am Anfang prüfen – noch vor der Anfragebegrenzung (die danach je Partner zählt) …
+  app.addHook('onRequest', async (request) => {
+    request.partner = await partnerByKey(keyOf(request));
+  });
+  // … und ohne gültigen Key ablehnen, bevor der Inhalt der Anfrage (bis zu 10 MB) überhaupt gelesen wird
+  app.addHook('preParsing', async (request) => {
+    if (!request.partner) throw new ApiError(401, 'invalid_api_key', L('Der API-Key fehlt, ist ungültig oder der Partner ist deaktiviert.', 'The API key is missing, invalid or the partner is disabled.'));
+  });
+  // Panel-Aufrufe aus einer Partner-Anfrage zählen gegen das Kontingent dieses Partners (pterodactyl/budget.ts)
+  app.addHook('onRoute', (route) => {
+    const handler = route.handler;
+    route.handler = function (request, reply) {
+      return request.partner ? asPartner(request.partner.id, () => handler.call(this, request, reply)) : handler.call(this, request, reply);
+    };
   });
   const partnerOf = (request: FastifyRequest) => request.partner!;
   const idOf = (request: FastifyRequest) => idParam.parse(request.params).id;
-  /** Während einer Wartung lassen sich keine Server erstellen oder starten */
+  /** Während einer Wartung lassen sich keine Server erstellen, starten, löschen, neu installieren oder Backups anlegen/einspielen */
   const assertOpen = async () => {
     if ((await getSettings()).maintenance.enabled) throw new ApiError(503, 'maintenance', L('Gerade laufen Wartungsarbeiten. Bitte später erneut versuchen.', 'Maintenance is in progress. Please try again later.'));
   };
@@ -187,10 +209,71 @@ export async function partnerRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  /** Server umbenennen: { "name": "…" } */
-  app.patch('/partner/servers/:id', limit(600), async (request) => {
-    const { name } = z.object({ name: z.string().max(60) }).parse(request.body);
-    return { server: await renamePartnerServer(partnerOf(request), idOf(request), name, request.ip) };
+  /**
+   * Server ändern: { "name": "…" } benennt um; { "serverType": "…", "version": "…" } wechselt Typ bzw. Version und
+   * installiert neu (der Server muss dafür aus sein). Paket, Ressourcen und Laufzeit-Stand bleiben.
+   */
+  app.patch('/partner/servers/:id', limit(300), async (request) => {
+    // Streng: nur diese drei Felder – Ressourcen, Startbefehl, Image usw. lassen sich hier nicht mitgeben
+    const body = z.strictObject({ name: z.string().max(60).optional(), serverType: z.string().max(40).optional(), version: z.string().max(40).optional() }).parse(request.body);
+    if (body.name === undefined && body.serverType === undefined && body.version === undefined) throw new ApiError(400, 'validation_error', L('Bitte „name“, „serverType“ oder „version“ angeben.', 'Please specify “name”, “serverType” or “version”.'));
+    let server = body.name !== undefined ? await renamePartnerServer(partnerOf(request), idOf(request), body.name, request.ip) : null;
+    if (body.serverType !== undefined || body.version !== undefined) {
+      await assertOpen();
+      server = await changePartnerServer(partnerOf(request), idOf(request), { serverType: body.serverType, version: body.version }, request.ip);
+    }
+    return { server };
+  });
+  /** Neu installieren, ohne etwas zu ändern (der Server muss aus sein) */
+  app.post('/partner/servers/:id/reinstall', limit(60), async (request) => {
+    await assertOpen();
+    return { server: await changePartnerServer(partnerOf(request), idOf(request), {}, request.ip) };
+  });
+
+  /* ---- Backups (Anzahl laut Paket) ---- */
+  const backupOf = (request: FastifyRequest) => z.string().max(40).parse((request.params as { backup: string }).backup);
+  app.get('/partner/servers/:id/backups', limit(1200), async (request) => listPartnerBackups(partnerOf(request), idOf(request)));
+  app.post('/partner/servers/:id/backups', limit(60), async (request, reply) => {
+    const { name } = z.object({ name: z.string().max(60).optional() }).parse(request.body ?? {});
+    await assertOpen();
+    reply.code(201);
+    return createPartnerBackup(partnerOf(request), idOf(request), name);
+  });
+  app.get('/partner/servers/:id/backups/:backup/download-url', limit(600), async (request) => partnerBackupDownloadUrl(partnerOf(request), idOf(request), backupOf(request)));
+  app.post('/partner/servers/:id/backups/:backup/restore', limit(60), async (request) => {
+    const { truncate } = z.object({ truncate: z.boolean().default(false) }).parse(request.body ?? {});
+    await assertOpen();
+    return restorePartnerBackup(partnerOf(request), idOf(request), backupOf(request), truncate, request.ip);
+  });
+  app.delete('/partner/servers/:id/backups/:backup', limit(300), async (request) => deletePartnerBackup(partnerOf(request), idOf(request), backupOf(request)));
+
+  /* ---- Webhooks ---- */
+  app.get('/partner/webhook', limit(600), async (request) => partnerWebhookStatus(partnerOf(request)));
+  /** Adresse setzen bzw. ändern – das Geheimnis zum Prüfen der Signatur steht nur in dieser Antwort */
+  app.put('/partner/webhook', limit(30), async (request) => {
+    const { url } = z.object({ url: z.string().min(8).max(500) }).parse(request.body);
+    return setPartnerWebhook(partnerOf(request), url);
+  });
+  app.delete('/partner/webhook', limit(30), async (request) => {
+    await clearPartnerWebhook(partnerOf(request));
+    return { ok: true };
+  });
+  /** Test-Ereignis an die eingerichtete Adresse schicken */
+  app.post('/partner/webhook/test', limit(30), async (request) => {
+    const partner = partnerOf(request);
+    if (!(await partnerWebhookStatus(partner)).url) throw new ApiError(409, 'no_webhook', L('Es ist kein Webhook eingerichtet.', 'No webhook is configured.'));
+    await emitPartnerEvent(partner.id, 'webhook.test', { message: 'Test' });
+    return { ok: true };
+  });
+
+  /**
+   * Live-Konsole als Server-Sent Events (nur lesend): Ereignisse „line“, „status“, „info“ und „end“.
+   * Höchstens 15 Minuten je Verbindung – danach neu verbinden. Zählt nicht als Lebenszeichen.
+   */
+  app.get('/partner/servers/:id/console/stream', limit(300), async (request, reply) => {
+    const partner = partnerOf(request);
+    const server = await consoleTarget(partner, idOf(request));
+    await streamPartnerConsole(partner, server, request, reply);
   });
 
   /* ---- Dateien: Mods, Plugins, Einstellungen, Welten ---- */
@@ -248,6 +331,7 @@ export async function partnerRoutes(app: FastifyInstance) {
 
   /** Server samt Daten löschen (DELETE oder POST …/delete) */
   const remove = async (request: FastifyRequest) => {
+    await assertOpen();
     await deletePartnerServer(partnerOf(request), idOf(request), request.ip);
     return { ok: true };
   };

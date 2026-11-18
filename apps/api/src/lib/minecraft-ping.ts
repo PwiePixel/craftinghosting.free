@@ -47,9 +47,12 @@ export function minecraftStatus(host: string, port: number, timeoutMs = 2500): P
     const finish = (result: MinecraftStatus | null) => {
       if (done) return;
       done = true;
+      clearTimeout(deadline);
       socket.destroy();
       resolve(result);
     };
+    // Harte Frist für die ganze Abfrage: Ein Server, der die Antwort nur tröpfchenweise schickt, hält sonst den Aufrufer fest
+    const deadline = setTimeout(() => finish(null), timeoutMs);
     socket.setTimeout(timeoutMs, () => finish(null));
     socket.on('error', () => finish(null));
     socket.on('close', () => finish(null));

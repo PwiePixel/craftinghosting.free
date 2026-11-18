@@ -30,6 +30,7 @@ import { bonusSlotsFor } from '../discord/rewards';
 import { discordConfig, discordGate, syncCustomerRoleSoon } from '../discord/service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
+import { pterodactylConfig } from '../config/pterodactyl.config';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
@@ -489,9 +490,15 @@ export async function deleteServer(user: User, id: string, confirmName: string, 
 }
 
 export async function hardDeleteServer(server: Server): Promise<void> {
-  if (server.pteroServerId) {
+  let pteroServerId = server.pteroServerId;
+  if (!pteroServerId) {
+    // Noch keine Panel-ID bei uns eingetragen (Einrichtung lief gerade oder ist fehlgeschlagen): im Panel nachsehen,
+    // damit dort kein Server ohne Eintrag bei uns zurückbleibt
+    pteroServerId = (await pterodactyl().findServerByExternalId(`${pterodactylConfig.externalIdPrefix.server}${server.id}`).catch(() => null))?.id ?? null;
+  }
+  if (pteroServerId) {
     try {
-      await pterodactyl().deleteServer(server.pteroServerId);
+      await pterodactyl().deleteServer(pteroServerId);
     } catch {
       throw new ApiError(
         503,

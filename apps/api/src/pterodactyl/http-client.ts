@@ -8,6 +8,7 @@ import {
   type BackupScheduleSpec,
   type CreateServerSpec,
   type PteroAllocation,
+  type PteroBackup,
   type PteroEgg,
   type PteroFile,
   type PteroEggSummary,
@@ -476,6 +477,49 @@ export class PterodactylHttpClient implements PterodactylGateway {
   async renameServer(id: number, name: string): Promise<void> {
     const a = (await this.request('application', 'GET', `/servers/${id}`)).attributes as Json;
     await this.request('application', 'PATCH', `/servers/${id}/details`, { name, user: a.user, external_id: a.external_id ?? undefined, description: a.description ?? '' });
+  }
+
+  /* ---- Backups ---- */
+
+  private mapBackup(a: Json): PteroBackup {
+    return { uuid: a.uuid, name: a.name, bytes: Number(a.bytes ?? 0), completedAt: a.completed_at ?? null, successful: a.is_successful !== false, createdAt: a.created_at };
+  }
+
+  async listBackups(identifier: string): Promise<PteroBackup[]> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/backups?per_page=50`);
+    return ((res.data ?? []) as Json[]).map((b) => this.mapBackup(b.attributes));
+  }
+
+  async createBackup(identifier: string, name: string): Promise<PteroBackup> {
+    const res = await this.request('client', 'POST', `/servers/${identifier}/backups`, { name });
+    return this.mapBackup(res.attributes);
+  }
+
+  async backupDownloadUrl(identifier: string, uuid: string): Promise<string> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/backups/${encodeURIComponent(uuid)}/download`);
+    return res.attributes.url as string;
+  }
+
+  async restoreBackup(identifier: string, uuid: string, truncate: boolean): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/backups/${encodeURIComponent(uuid)}/restore`, { truncate });
+  }
+
+  async deleteBackup(identifier: string, uuid: string): Promise<void> {
+    await this.request('client', 'DELETE', `/servers/${identifier}/backups/${encodeURIComponent(uuid)}`);
+  }
+
+  async updateServerStartup(id: number, spec: { eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }): Promise<void> {
+    await this.request('application', 'PATCH', `/servers/${id}/startup`, { startup: spec.startup, environment: spec.environment, egg: spec.eggId, image: spec.dockerImage, skip_scripts: false });
+  }
+
+  async reinstallServer(id: number): Promise<void> {
+    await this.request('application', 'POST', `/servers/${id}/reinstall`);
+  }
+
+  async consoleSocket(identifier: string): Promise<{ url: string; token: string; origin: string } | null> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/websocket`);
+    const data = res.data as Json | undefined;
+    return data?.socket && data?.token ? { url: data.socket, token: data.token, origin: new URL(this.baseUrl).origin } : null;
   }
 
   async createBackupSchedule(identifier: string, spec: BackupScheduleSpec): Promise<number> {

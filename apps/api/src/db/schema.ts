@@ -626,6 +626,9 @@ export const partners = sqliteTable(
     deleteAfterIdleDays: integer('delete_after_idle_days').notNull().default(30),
     /** Der Server läuft weiter, solange noch Spieler darauf sind – auch wenn der Launcher des Hosts schon zu ist */
     keepAliveWhilePlayers: integer('keep_alive_while_players', { mode: 'boolean' }).notNull().default(false),
+    /** Webhook: Adresse (https) und Geheimnis zum Signieren (feldverschlüsselt) – null = keine Benachrichtigungen */
+    webhookUrl: text('webhook_url'),
+    webhookSecret: text('webhook_secret'),
     /** Feste Nodes für die Server dieses Partners (leer = wie normale Minecraft-Server); private Nodes sind erlaubt */
     nodeIds: text('node_ids', { mode: 'json' }).$type<number[]>().notNull().default([]),
     lastUsedAt: ts('last_used_at'),
@@ -646,6 +649,13 @@ export const partnerPlayers = sqliteTable(
     externalId: text('external_id').notNull(),
     name: text('name'),
     blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Übertrag aus gelöschten Servern: angerechnete Laufzeit, letzter Stopp und laufende Pflichtpause. Ein neu
+     * erstellter Server des Spielers übernimmt sie – Löschen und neu Erstellen setzt die Laufzeit-Regel nicht zurück.
+     */
+    carryRunSeconds: integer('carry_run_seconds').notNull().default(0),
+    carryLastStopAt: ts('carry_last_stop_at'),
+    carryCooldownUntil: ts('carry_cooldown_until'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
     lastSeenAt: ts('last_seen_at'),
   },
@@ -681,8 +691,34 @@ export const partnerServers = sqliteTable(
     /** Hinweis im Spiel kurz vor der Grenze schon geschickt? (verbleibende Minuten der letzten Warnung) */
     warnedMinutes: integer('warned_minutes'),
     eulaAcceptedAt: ts('eula_accepted_at'),
+    /** Webhooks: „läuft“ für diese Sitzung schon gemeldet · Ende der Pflichtpause schon gemeldet · Warnung vor der Löschung */
+    installedNotified: integer('installed_notified', { mode: 'boolean' }).notNull().default(true),
+    runningNotified: integer('running_notified', { mode: 'boolean' }).notNull().default(false),
+    cooldownNotified: integer('cooldown_notified', { mode: 'boolean' }).notNull().default(true),
+    deletionWarnedAt: ts('deletion_warned_at'),
   },
   (t) => [index('partner_servers_partner_idx').on(t.partnerId), index('partner_servers_player_idx').on(t.playerId), index('partner_servers_active_idx').on(t.hostActive)],
+);
+
+/** Ausgangskorb der Webhooks: Ereignisse werden signiert zugestellt und bei Fehlern mit wachsendem Abstand wiederholt */
+export const partnerWebhookEvents = sqliteTable(
+  'partner_webhook_events',
+  {
+    id: text('id').primaryKey(),
+    partnerId: text('partner_id')
+      .notNull()
+      .references(() => partners.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: ts('next_attempt_at').notNull().$defaultFn(now),
+    deliveredAt: ts('delivered_at'),
+    /** Endgültig aufgegeben (zu viele Fehlversuche oder Webhook entfernt) */
+    failedAt: ts('failed_at'),
+    lastError: text('last_error'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [index('partner_webhook_events_due_idx').on(t.deliveredAt, t.failedAt, t.nextAttemptAt), index('partner_webhook_events_partner_idx').on(t.partnerId)],
 );
 
 export type Partner = typeof partners.$inferSelect;

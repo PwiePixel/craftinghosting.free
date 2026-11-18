@@ -59,7 +59,11 @@ export const partnerDoc: DocPage = {
               ['POST', '/servers/{id}/heartbeat', { de: 'Lebenszeichen des Hosts', en: 'Heartbeat of the host' }],
               ['POST', '/heartbeat', { de: 'Lebenszeichen für bis zu 500 Server: {"servers":["…"]}', en: 'Heartbeat for up to 500 servers: {"servers":["…"]}' }],
               ['POST', '/servers/{id}/stop', { de: 'Herunterfahren (Daten bleiben). Mit {"whenEmpty":true}: erst, wenn keine Spieler mehr da sind (falls für dich freigeschaltet)', en: 'Shut down (data is kept). With {"whenEmpty":true}: only once no players are left (if enabled for you)' }],
-              ['PATCH', '/servers/{id}', { de: 'Umbenennen: {"name":"…"}', en: 'Rename: {"name":"…"}' }],
+              ['PATCH', '/servers/{id}', { de: 'Umbenennen: {"name":"…"} · Typ/Version wechseln: {"serverType":"…","version":"…"}', en: 'Rename: {"name":"…"} · change type/version: {"serverType":"…","version":"…"}' }],
+              ['POST', '/servers/{id}/reinstall', { de: 'Neu installieren (Server muss aus sein)', en: 'Reinstall (server must be off)' }],
+              ['GET', '/servers/{id}/console/stream', { de: 'Konsole live (Server-Sent Events)', en: 'Live console (server-sent events)' }],
+              ['GET / POST', '/servers/{id}/backups', { de: 'Backups auflisten bzw. anlegen', en: 'List or create backups' }],
+              ['GET / PUT / DELETE', '/webhook', { de: 'Webhook für Statuswechsel', en: 'Webhook for status changes' }],
               ['GET', '/servers/{id}/stats', { de: 'Live-Werte: CPU, Arbeitsspeicher, Speicherplatz, Netzwerk, Spielerzahl', en: 'Live values: CPU, memory, disk, network, player count' }],
               ['GET', '/servers/{id}/logs?lines=100', { de: 'Die letzten Zeilen der Konsole (höchstens 1000)', en: 'The last console lines (at most 1000)' }],
               ['GET / PATCH', '/servers/{id}/settings', { de: 'Servereinstellungen (server.properties) lesen und setzen', en: 'Read and set server settings (server.properties)' }],
@@ -126,7 +130,7 @@ export const partnerDoc: DocPage = {
         {
           ul: [
             { de: 'state: installing · offline · starting · running · stopping · failed · suspended', en: 'state: installing · offline · starting · running · stopping · failed · suspended' },
-            { de: 'session.lastStopReason: host_stopped (Launcher hat gestoppt) · host_timeout (kein Lebenszeichen) · session_limit (Laufzeit-Grenze) · admin', en: 'session.lastStopReason: host_stopped (launcher stopped it) · host_timeout (no heartbeat) · session_limit (runtime limit) · admin' },
+            { de: 'session.lastStopReason: host_stopped (Launcher hat gestoppt) · host_timeout (kein Lebenszeichen) · session_limit (Laufzeit-Grenze) · settings_limit (Einstellungen über den Grenzen) · admin', en: 'session.lastStopReason: host_stopped (launcher stopped it) · host_timeout (no heartbeat) · session_limit (runtime limit) · settings_limit (settings above the limits) · admin' },
           ],
         },
       ],
@@ -211,6 +215,146 @@ curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \
             { de: 'GET /servers/{id}/logs?lines=100 liefert die letzten Zeilen der Konsole (aus logs/latest.log; das Protokoll beginnt bei jedem Start neu). Für eine laufende Anzeige alle paar Sekunden abfragen.', en: 'GET /servers/{id}/logs?lines=100 returns the last console lines (from logs/latest.log; the log starts anew on every start). For a live view poll every few seconds.' },
             { de: 'GET /servers/{id}/stats liefert CPU (Prozent), Arbeitsspeicher und Speicherplatz (Bytes, jeweils mit Grenze), Netzwerk, Laufzeit und „players“ ({online, max} – null, solange der Server nicht antwortet).', en: 'GET /servers/{id}/stats returns CPU (percent), memory and disk (bytes, each with its limit), network, uptime and “players” ({online, max} – null while the server does not answer).' },
             { de: 'POST /servers/{id}/command schickt einen Befehl an die Konsole.', en: 'POST /servers/{id}/command sends a command to the console.' },
+            { de: 'GET /servers/{id}/console/stream liefert die Konsole live als Server-Sent Events (text/event-stream) – ohne ständiges Abfragen.', en: 'GET /servers/{id}/console/stream delivers the console live as server-sent events (text/event-stream) – no polling needed.' },
+          ],
+        },
+        {
+          table: {
+            head: [{ de: 'Ereignis', en: 'Event' }, { de: 'Inhalt (data, immer JSON)', en: 'Content (data, always JSON)' }],
+            rows: [
+              ['line', { de: 'Eine Zeile der Konsole als JSON-Text, z. B. "[12:00:01] Done (4.2s)!"', en: 'One console line as a JSON string, e.g. "[12:00:01] Done (4.2s)!"' }],
+              ['status', { de: '{"state":"running"} – Wechsel des Zustands', en: '{"state":"running"} – state change' }],
+              ['info', { de: '{"source":"live"} oder {"source":"log"} – woher die Zeilen kommen', en: '{"source":"live"} or {"source":"log"} – where the lines come from' }],
+              ['end', { de: '{"reason":"max_duration"} – Verbindung beendet; bei Bedarf neu verbinden', en: '{"reason":"max_duration"} – connection ended; reconnect if needed' }],
+            ],
+          },
+        },
+        { code: `curl -N {api}/servers/$ID/console/stream -H "Authorization: Bearer $API_KEY"
+
+event: info
+data: {"source":"live"}
+
+event: line
+data: "[12:00:01] [Server thread/INFO]: Done (4.2s)!"` },
+        {
+          ul: [
+            { de: 'Der Stream ist nur lesend. Befehle gehen weiter über POST /servers/{id}/command.', en: 'The stream is read-only. Commands still go through POST /servers/{id}/command.' },
+            { de: 'Eine Verbindung läuft höchstens 15 Minuten (danach „end“ – einfach neu verbinden). Gleichzeitig offen: höchstens 3 je Server und 50 insgesamt, sonst 429 too_many_streams.', en: 'A connection lasts at most 15 minutes (then “end” – simply reconnect). Open at the same time: at most 3 per server and 50 in total, otherwise 429 too_many_streams.' },
+            { de: 'Ein offener Stream ist kein Lebenszeichen: POST /servers/{id}/heartbeat muss weiter kommen.', en: 'An open stream is not a heartbeat: POST /servers/{id}/heartbeat must keep coming.' },
+          ],
+        },
+      ],
+    },
+    {
+      heading: { de: 'Backups', en: 'Backups' },
+      blocks: [
+        { p: { de: 'Wie viele Backups ein Server haben darf, legt euer Paket fest („limit“ in der Liste). Ist die Zahl erreicht, zuerst ein älteres löschen.', en: 'How many backups a server may have is set by your plan (“limit” in the list). Once reached, delete an older one first.' } },
+        {
+          table: {
+            head: [{ de: 'Methode', en: 'Method' }, { de: 'Pfad', en: 'Path' }, { de: 'Zweck', en: 'Purpose' }],
+            rows: [
+              ['GET', '/servers/{id}/backups', { de: 'Liste mit „limit“ und Zustand je Backup (creating, ready, failed)', en: 'List with “limit” and the state of each backup (creating, ready, failed)' }],
+              ['POST', '/servers/{id}/backups', { de: 'Backup anlegen: {"name":"Vor dem Update"} (Name freiwillig)', en: 'Create a backup: {"name":"Before the update"} (name optional)' }],
+              ['GET', '/servers/{id}/backups/{backup}/download-url', { de: 'Adresse zum Herunterladen (kurz gültig)', en: 'Download URL (valid briefly)' }],
+              ['POST', '/servers/{id}/backups/{backup}/restore', { de: 'Einspielen: {"truncate":false} – mit true werden vorher alle Dateien gelöscht', en: 'Restore: {"truncate":false} – true deletes all files first' }],
+              ['DELETE', '/servers/{id}/backups/{backup}', { de: 'Backup löschen', en: 'Delete the backup' }],
+            ],
+          },
+        },
+        {
+          ul: [
+            { de: 'Einspielen geht nur, wenn der Server aus ist und keine Sitzung läuft (sonst 409 server_running). Danach warten, bis der Zustand wieder „offline“ ist, und normal starten.', en: 'Restoring only works while the server is off and no session is running (otherwise 409 server_running). Then wait until the state is “offline” again and start normally.' },
+            { de: 'Je Server: höchstens 2 neue Backups und 2 Einspielungen in 10 Minuten (429 too_often), und immer nur ein Backup-Vorgang zugleich (409 backup_busy).', en: 'Per server: at most 2 new backups and 2 restores per 10 minutes (429 too_often), and only one backup operation at a time (409 backup_busy).' },
+            { de: 'Ein Backup ändert nichts an Laufzeit, Pause oder Löschdatum. Wird ein Server gelöscht, werden seine Backups mit gelöscht.', en: 'A backup changes nothing about runtime, pause or deletion date. When a server is deleted, its backups are deleted with it.' },
+          ],
+        },
+      ],
+    },
+    {
+      heading: { de: 'Servertyp und Version wechseln', en: 'Changing server type and version' },
+      blocks: [
+        { p: { de: 'PATCH /servers/{id} mit „serverType“ und/oder „version“ stellt den Server um und installiert ihn neu – ohne ihn zu löschen. Erlaubt sind dieselben Typen und Versionen wie beim Erstellen (siehe GET /me). POST /servers/{id}/reinstall installiert neu, ohne etwas zu ändern.', en: 'PATCH /servers/{id} with “serverType” and/or “version” switches the server and reinstalls it – without deleting it. The same types and versions as on creation are allowed (see GET /me). POST /servers/{id}/reinstall reinstalls without changing anything.' } },
+        { code: `curl -X PATCH {api}/servers/$ID -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+  -d '{"serverType":"fabric","version":"1.21.1"}'` },
+        {
+          ul: [
+            { de: 'Der Server muss aus sein und darf keine laufende Sitzung haben (sonst 409 server_running).', en: 'The server must be off with no running session (otherwise 409 server_running).' },
+            { de: 'Während der Neuinstallation ist der Zustand „installing“; Starten und Dateizugriffe antworten so lange mit 409 server_installing. Mit einem Webhook kommt „server.installed“, sobald er fertig ist.', en: 'During the reinstall the state is “installing”; starting and file access answer 409 server_installing meanwhile. With a webhook you get “server.installed” once it is done.' },
+            { de: 'Paket, Arbeitsspeicher, Adresse, Laufzeit-Stand, Pflichtpause und EULA-Zustimmung bleiben unverändert. Die Dateien des Servers bleiben erhalten – eine Welt aus einer neueren Version lässt sich aber nicht mit einer älteren öffnen.', en: 'Plan, memory, address, runtime counter, mandatory pause and EULA acceptance stay unchanged. The server’s files are kept – but a world from a newer version cannot be opened with an older one.' },
+            { de: 'Je Server höchstens 3 Neuinstallationen pro Stunde (429 too_often).', en: 'At most 3 reinstalls per server per hour (429 too_often).' },
+          ],
+        },
+      ],
+    },
+    {
+      heading: { de: 'Webhooks', en: 'Webhooks' },
+      blocks: [
+        { p: { de: 'Statt ständig abzufragen, könnt ihr euch Statuswechsel schicken lassen. Je Zugang gibt es eine Adresse. Beim Setzen bekommt ihr einmalig ein Geheimnis (whsec_…), mit dem ihr jede Zustellung prüft.', en: 'Instead of polling you can have status changes sent to you. There is one URL per access. When setting it you receive a secret once (whsec_…) with which you verify every delivery.' } },
+        {
+          table: {
+            head: [{ de: 'Methode', en: 'Method' }, { de: 'Pfad', en: 'Path' }, { de: 'Zweck', en: 'Purpose' }],
+            rows: [
+              ['PUT', '/webhook', { de: '{"url":"https://…"} setzen oder ändern – Antwort enthält „secret“ (nur dieses eine Mal)', en: 'Set or change {"url":"https://…"} – the response contains “secret” (this one time only)' }],
+              ['GET', '/webhook', { de: 'Adresse, wartende Ereignisse und die letzten Zustellungen', en: 'URL, pending events and the latest deliveries' }],
+              ['POST', '/webhook/test', { de: 'Test-Ereignis „webhook.test“ schicken', en: 'Send the test event “webhook.test”' }],
+              ['DELETE', '/webhook', { de: 'Webhook entfernen', en: 'Remove the webhook' }],
+            ],
+          },
+        },
+        {
+          table: {
+            head: [{ de: 'Ereignis', en: 'Event' }, { de: 'Wann', en: 'When' }, { de: 'Zusätzlich in data', en: 'Additionally in data' }],
+            rows: [
+              ['server.installed', { de: 'Installation bzw. Neuinstallation fertig', en: 'Installation or reinstall finished' }, 'address'],
+              ['server.running', { de: 'Server ist hochgefahren und erreichbar', en: 'Server is up and reachable' }, 'address'],
+              ['server.stopped', { de: 'Sitzung beendet', en: 'Session ended' }, 'reason (host_stopped · host_timeout · session_limit · settings_limit · admin), cooldownUntil'],
+              ['server.cooldown_ended', { de: 'Pflichtpause vorbei – Start wieder möglich', en: 'Mandatory pause over – start possible again' }, '–'],
+              ['server.deletion_soon', { de: 'Server wird bald wegen Nichtnutzung gelöscht', en: 'Server will soon be deleted for inactivity' }, 'deleteAt'],
+              ['server.deleted', { de: 'Server wegen Nichtnutzung gelöscht', en: 'Server deleted for inactivity' }, 'reason'],
+            ],
+          },
+        },
+        { p: { de: 'Jede Zustellung ist ein POST mit JSON. „data“ enthält immer serverId, name und playerId.', en: 'Every delivery is a POST with JSON. “data” always contains serverId, name and playerId.' } },
+        { code: `POST https://euer-backend.example/chf-webhook
+X-CHF-Event: server.stopped
+X-CHF-Delivery: 5b0c…            (ID des Ereignisses – bei Wiederholungen gleich)
+X-CHF-Timestamp: 1795025048
+X-CHF-Signature: sha256=<HMAC-SHA256 über "<Timestamp>.<Körper>" mit eurem Geheimnis>
+
+{"id":"5b0c…","type":"server.stopped","createdAt":"2026-11-18T18:04:08.000Z",
+ "data":{"serverId":"…","name":"Meine Welt #PAB12CD3","playerId":"PAB12CD3","reason":"host_timeout","cooldownUntil":null}}` },
+        { code: `// Prüfen der Signatur (Node.js) – immer über den unveränderten Körper der Anfrage
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verify(rawBody, headers, secret) {
+  const ts = headers['x-chf-timestamp'];
+  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // älter als 5 Minuten: ablehnen
+  const expected = 'sha256=' + createHmac('sha256', secret).update(ts + '.' + rawBody).digest('hex');
+  const got = String(headers['x-chf-signature'] ?? '');
+  return got.length === expected.length && timingSafeEqual(Buffer.from(got), Buffer.from(expected));
+}` },
+        {
+          ul: [
+            { de: 'Die Adresse muss https auf dem Standard-Port sein und öffentlich erreichbar; Weiterleitungen folgen wir nicht.', en: 'The URL must be https on the default port and publicly reachable; we do not follow redirects.' },
+            { de: 'Antwortet mit einem 2xx-Status innerhalb von 8 Sekunden. Sonst versuchen wir es erneut: nach 30 Sekunden, 2 Minuten, 10 Minuten, 1 Stunde und 6 Stunden – danach gilt die Zustellung als fehlgeschlagen.', en: 'Answer with a 2xx status within 8 seconds. Otherwise we retry: after 30 seconds, 2 minutes, 10 minutes, 1 hour and 6 hours – after that the delivery counts as failed.' },
+            { de: 'Ereignisse können doppelt oder in anderer Reihenfolge ankommen. Merkt euch die „id“ und fragt im Zweifel den Stand mit GET /servers/{id} ab.', en: 'Events may arrive twice or out of order. Remember the “id” and when in doubt fetch the state with GET /servers/{id}.' },
+            { de: 'Webhooks sind reine Benachrichtigungen: Eure Antwort ändert nichts am Server. Gestartet wird weiterhin nur über POST /servers/{id}/start.', en: 'Webhooks are notifications only: your response changes nothing on the server. Starting still only happens through POST /servers/{id}/start.' },
+          ],
+        },
+      ],
+    },
+    {
+      heading: { de: 'Regeln, die immer gelten', en: 'Rules that always apply' },
+      blocks: [
+        { p: { de: 'Damit die Integration nicht an unerwarteten Stellen hängen bleibt: Diese Regeln setzt unser System fest durch – unabhängig davon, über welchen Endpunkt etwas geändert wurde.', en: 'So your integration does not get stuck in unexpected places: our system enforces these rules firmly – regardless of which endpoint was used to change something.' } },
+        {
+          ul: [
+            { de: 'Laufzeit und Pflichtpause gehören zum Spieler: Wird ein Server gelöscht und neu erstellt, gelten die bereits gelaufene Zeit und eine laufende Pause weiter.', en: 'Runtime and mandatory pause belong to the player: if a server is deleted and recreated, the time already run and a running pause continue to apply.' },
+            { de: 'Ohne laufende Sitzung ist ein Server aus. Reagiert er nicht auf den Stopp-Befehl, wird er nach 2 Minuten hart beendet (nicht gespeicherte Änderungen können dann fehlen).', en: 'Without a running session a server is off. If it does not react to the stop command, it is killed after 2 minutes (unsaved changes may then be missing).' },
+            { de: 'Die Grenzen der Servereinstellungen (z. B. maxPlayers 1–100, viewDistance 3–16) gelten auch für eine hochgeladene server.properties: Vor jedem Start werden zu hohe Werte zurückgesetzt. Läuft ein Server trotzdem mit Werten über den Grenzen, wird er gestoppt (reason: settings_limit).', en: 'The limits of the server settings (e.g. maxPlayers 1–100, viewDistance 3–16) also apply to an uploaded server.properties: before every start, values that are too high are reset. If a server still runs with values above the limits, it is stopped (reason: settings_limit).' },
+            { de: '„Weiterlaufen, solange Spieler online sind“ gilt höchstens 2 Stunden ohne Lebenszeichen des Hosts.', en: '“Keep running while players are online” applies for at most 2 hours without a heartbeat from the host.' },
+            { de: 'Ein Server lässt sich nicht löschen, solange er noch eingerichtet wird (409 server_installing) oder von uns gesperrt ist (409 server_suspended).', en: 'A server cannot be deleted while it is still being set up (409 server_installing) or suspended by us (409 server_suspended).' },
+            { de: 'Während einer Wartung sind Erstellen, Starten, Löschen, Neuinstallieren und Backups gesperrt (503 maintenance). Lesen geht weiter.', en: 'During maintenance, creating, starting, deleting, reinstalling and backups are blocked (503 maintenance). Reading still works.' },
           ],
         },
       ],
@@ -223,7 +367,8 @@ curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \
             { de: 'Feste Adresse: „host“ und „port“ eines Servers bleiben gleich, solange es den Server gibt – ein eigener SRV-Eintrag ist also möglich. Ausnahme: Wir verlegen den Server auf andere Hardware; dann ändert sich die Adresse.', en: 'Fixed address: a server’s “host” and “port” stay the same as long as the server exists – so your own SRV record is possible. Exception: we move the server to other hardware; then the address changes.' },
             { de: '„deleteAt“ in jeder Server-Antwort: Wird der Server bis dahin nicht gestartet, wird er samt Daten gelöscht. Jeder Start verschiebt das Datum.', en: '“deleteAt” in every server response: if the server is not started by then it is deleted including its data. Every start pushes the date back.' },
             { de: '„session.hostPresent“: false bedeutet, der Launcher des Hosts meldet sich nicht mehr und der Server läuft nur noch, weil Spieler darauf sind.', en: '“session.hostPresent”: false means the host’s launcher no longer reports in and the server only keeps running because players are on it.' },
-            { de: 'Anfrage-Limit: je API-Key und Minute, je nach Endpunkt 300 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After.', en: 'Rate limit: per API key and minute, 300 to 12,000 requests depending on the endpoint. Every response carries X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After.' },
+            { de: 'Anfrage-Limit: je Zugang und Minute, je nach Endpunkt 30 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After. Ein neuer API-Key setzt die Zähler nicht zurück.', en: 'Rate limit: per access and minute, 30 to 12,000 requests depending on the endpoint. Every response contains X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After. A new API key does not reset the counters.' },
+            { de: 'Zusätzlich gibt es eine Obergrenze für Anfragen, die wir an die Server-Verwaltung weiterreichen müssen (Dateien, Einstellungen, Backups, Zustand). Wer sehr dicht abfragt, bekommt 429 panel_busy – dann seltener abfragen. GET /servers/{id}/stats und der Zustand in GET /servers/{id} sind 5 Sekunden zwischengespeichert; die Liste GET /servers zeigt den zuletzt bekannten Zustand (höchstens eine Minute alt). Für Statuswechsel sind Webhooks der bessere Weg.', en: 'In addition there is a cap on requests we have to pass on to the server management (files, settings, backups, state). If you poll very densely you get 429 panel_busy – then poll less often. GET /servers/{id}/stats and the state in GET /servers/{id} are cached for 5 seconds; the list GET /servers shows the last known state (at most one minute old). For status changes, webhooks are the better way.' },
           ],
         },
         {
@@ -232,9 +377,11 @@ curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \
             rows: [
               ['POST /servers/{id}/heartbeat', '12 000'],
               ['GET /servers/{id}, GET /servers/{id}/stats', '6 000'],
-              [{ de: 'Lesen, start, stop, command, logs, settings (GET), files (GET), POST /heartbeat', en: 'Reads, start, stop, command, logs, settings (GET), files (GET), POST /heartbeat' }, '1 200'],
-              [{ de: 'Schreiben: Dateien, Mods, Einstellungen, Umbenennen, Löschen, GET /me', en: 'Writes: files, mods, settings, rename, delete, GET /me' }, '600'],
-              ['POST /servers, POST /files/decompress', '300'],
+              [{ de: 'Lesen, start, stop, command, logs, settings (GET), files (GET), Backups (GET), POST /heartbeat', en: 'Reads, start, stop, command, logs, settings (GET), files (GET), backups (GET), POST /heartbeat' }, '1 200'],
+              [{ de: 'Schreiben: Dateien, Mods, Einstellungen, Löschen, GET /me, GET /webhook, Backup-Download', en: 'Writes: files, mods, settings, delete, GET /me, GET /webhook, backup download' }, '600'],
+              [{ de: 'POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE Backup, GET /console/stream', en: 'POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE backup, GET /console/stream' }, '300'],
+              [{ de: 'Backup anlegen/einspielen, POST /reinstall', en: 'Create/restore backup, POST /reinstall' }, '60'],
+              [{ de: 'Webhook setzen, löschen, testen', en: 'Set, delete, test webhook' }, '30'],
             ],
           },
         },
@@ -262,7 +409,12 @@ curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \
               ['400', 'invalid_path, invalid_url, file_rejected', { de: 'Pfad bzw. Adresse ungültig oder vom Server abgelehnt', en: 'Path or URL invalid or rejected by the server' }],
               ['404', 'file_not_found, mod_not_found', { de: 'Datei gibt es nicht bzw. bei Modrinth keine passende Version', en: 'File does not exist or no matching version on Modrinth' }],
               ['409', 'mods_unsupported, log_too_large', { de: 'Servertyp ohne Mods/Plugins bzw. Protokoll zu groß zum Abrufen', en: 'Server type without mods/plugins or log too large to fetch' }],
-              ['429', 'rate_limited', { de: 'Zu viele Anfragen – die Grenzen gelten je API-Key', en: 'Too many requests – limits apply per API key' }],
+              ['409', 'server_running', { de: 'Dafür muss der Server aus sein (Backup einspielen, Typ/Version wechseln, neu installieren)', en: 'The server must be off for this (restore backup, change type/version, reinstall)' }],
+              ['409', 'state_changed', { de: 'Der Stand hat sich gerade geändert (z. B. Laufzeit-Grenze im selben Moment erreicht) – noch einmal versuchen', en: 'The state has just changed (e.g. runtime limit reached at the same moment) – try again' }],
+              ['409 / 404', 'backup_limit, backup_busy, backup_rejected, backup_not_found', { de: 'Höchstzahl erreicht, Vorgang läuft schon, vom Server abgelehnt bzw. Backup gibt es nicht', en: 'Maximum reached, operation already running, rejected by the server or backup does not exist' }],
+              ['409', 'no_webhook', { de: 'Es ist kein Webhook eingerichtet', en: 'No webhook is configured' }],
+              ['429', 'rate_limited', { de: 'Zu viele Anfragen – die Grenzen gelten je Zugang', en: 'Too many requests – limits apply per access' }],
+              ['429', 'panel_busy, too_often, too_many_streams, backup_rate_limited', { de: 'Zu dicht abgefragt, zu viele Backups/Neuinstallationen in kurzer Zeit bzw. zu viele offene Konsolen-Streams', en: 'Polled too densely, too many backups/reinstalls in a short time or too many open console streams' }],
               ['503', 'maintenance, unavailable, panel_unavailable', { de: 'Wartung bzw. vorübergehend nicht möglich – später erneut versuchen', en: 'Maintenance or temporarily unavailable – try again later' }],
             ],
           },

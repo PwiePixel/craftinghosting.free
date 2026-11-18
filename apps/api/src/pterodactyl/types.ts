@@ -26,6 +26,17 @@ export interface PteroServer {
   allocations: PteroAllocation[];
 }
 
+/** Backup eines Servers im Panel */
+export interface PteroBackup {
+  uuid: string;
+  name: string;
+  bytes: number;
+  /** null = wird noch erstellt */
+  completedAt: string | null;
+  successful: boolean;
+  createdAt: string;
+}
+
 /** Eintrag in der Dateiliste eines Servers */
 export interface PteroFile {
   name: string;
@@ -205,6 +216,25 @@ export interface PterodactylGateway {
   pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void>;
   /** Server im Panel umbenennen */
   renameServer(id: number, name: string): Promise<void>;
+
+  /* ---- Backups ---- */
+  listBackups(identifier: string): Promise<PteroBackup[]>;
+  createBackup(identifier: string, name: string): Promise<PteroBackup>;
+  backupDownloadUrl(identifier: string, uuid: string): Promise<string>;
+  /** Backup einspielen. truncate = vorher alle Dateien des Servers löschen */
+  restoreBackup(identifier: string, uuid: string, truncate: boolean): Promise<void>;
+  deleteBackup(identifier: string, uuid: string): Promise<void>;
+
+  /* ---- Servertyp/Version wechseln ---- */
+  updateServerStartup(id: number, spec: { eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }): Promise<void>;
+  /** Installations-Skript erneut ausführen (vorhandene Dateien bleiben, sofern das Egg sie nicht überschreibt) */
+  reinstallServer(id: number): Promise<void>;
+
+  /**
+   * Zugang zur Live-Konsole des Servers (Websocket des Daemons). Wird NIE an Dritte weitergegeben – darüber ließe
+   * sich der Server auch starten. null = nicht verfügbar (z. B. im Mock-Modus).
+   */
+  consoleSocket(identifier: string): Promise<{ url: string; token: string; origin: string } | null>;
 
   /** Erreichbarkeit in ms */
   ping(): Promise<number>;

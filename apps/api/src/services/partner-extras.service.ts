@@ -3,15 +3,17 @@
  * Dateien (Mods, Plugins, Welten), Mods von Modrinth, Konsolen-Ausgabe, Servereinstellungen, Live-Werte, Umbenennen.
  */
 import { eq } from 'drizzle-orm';
-import { freeHostingConfig } from '@chfree/shared';
+import { findPlan, freeHostingConfig, getServerType, versionsFor } from '@chfree/shared';
 import { db } from '../db/client';
-import { servers, type Partner, type Server } from '../db/schema';
+import { partnerServers, servers, type Partner, type Server } from '../db/schema';
 import { env } from '../env';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
-import { getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
+import { forgetLiveState, stillInstalling, getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
+import { startupFor } from './provisioning.service';
+import { getSettings, serverTypeAvailable } from './settings.service';
 
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
 
@@ -20,7 +22,7 @@ const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
 /** Server muss fertig eingerichtet sein, damit sich Dateien und Einstellungen ändern lassen */
 async function ready(partner: Partner, id: string): Promise<Server & { pteroIdentifier: string }> {
   const { server } = await loadPartnerServer(partner, id);
-  if (server.status !== 'active' || !server.pteroIdentifier || server.powerState === 'installing') {
+  if (server.status !== 'active' || !server.pteroIdentifier || (await stillInstalling(server))) {
     throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet. Bitte gleich noch einmal versuchen.', 'The server is still being set up. Please try again shortly.'));
   }
   return server as Server & { pteroIdentifier: string };
@@ -50,6 +52,12 @@ function panelFailure(err: unknown, notFound = L('Diese Datei gibt es nicht.', '
     if (err.status === 400 || err.status === 413 || err.status === 422) throw new ApiError(400, 'file_rejected', L(`Das hat der Server abgelehnt: ${err.message}`.slice(0, 240), `The server rejected this: ${err.message}`.slice(0, 240)));
   }
   throw Errors.unavailable(L('Der Server ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.', 'The server cannot be reached right now. Please try again shortly.'));
+}
+
+/** Server für den Konsolen-Stream (muss fertig eingerichtet sein) */
+export async function consoleTarget(partner: Partner, id: string): Promise<{ id: string; pteroIdentifier: string }> {
+  const server = await ready(partner, id);
+  return { id: server.id, pteroIdentifier: server.pteroIdentifier };
 }
 
 /* ------------------------------------------------------------ Dateien */
@@ -374,12 +382,17 @@ export async function setPartnerSettings(partner: Partner, id: string, input: Re
 
 /* ------------------------------------------------------------ Live-Werte */
 
+const statsCache = new Map<string, { at: number; value: unknown }>();
+
 export async function partnerStats(partner: Partner, id: string) {
   const server = await ready(partner, id);
+  // Kurz gemerkt: Häufiges Abfragen kostet so höchstens einen Panel-Aufruf alle fünf Sekunden je Server
+  const cached = statsCache.get(id);
+  if (cached && Date.now() - cached.at < 5_000) return cached.value;
   try {
     const r = await pterodactyl().getResources(server.pteroIdentifier);
     const running = r.state === 'running';
-    return {
+    const value = {
       state: r.state,
       cpuPercent: Math.round(r.cpuAbsolute * 10) / 10,
       cpuLimitPercent: server.cpuPercent,
@@ -393,6 +406,9 @@ export async function partnerStats(partner: Partner, id: string) {
       // Spielerzahl: direkte Abfrage beim Minecraft-Server (null = antwortet gerade nicht, z. B. während des Starts)
       players: running ? await playersOnline(server) : null,
     };
+    if (statsCache.size > 5000) statsCache.clear();
+    statsCache.set(id, { at: Date.now(), value });
+    return value;
   } catch (err) {
     panelFailure(err);
   }
@@ -418,5 +434,234 @@ export async function renamePartnerServer(partner: Partner, id: string, nameRaw:
   }
   await db.update(servers).set({ name: full }).where(eq(servers.id, id));
   await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_renamed', message: `Partner „${partner.name}“: „${server.name}“ heißt jetzt „${full}“`, ip });
+  return getPartnerServer(partner, id);
+}
+
+/* ------------------------------------------------------------ Grenzen der Einstellungen beim Start durchsetzen */
+
+/**
+ * Vor jedem Start: Werte in der server.properties auf die erlaubten Bereiche zurückführen. So lassen sich die
+ * Grenzen des Einstellungs-Endpunkts nicht über einen direkten Datei-Upload oder ein eingespieltes Backup umgehen.
+ */
+export async function enforceSettingsCaps(identifier: string): Promise<void> {
+  const text = await pterodactyl().readFile(identifier, '/server.properties');
+  if (text === null) return;
+  const fixed = capProperties(text);
+  if (fixed !== text) await pterodactyl().writeFile(identifier, '/server.properties', fixed);
+}
+
+/** Schlüssel bzw. Wert einer .properties-Zeile entschlüsseln (\uXXXX, \t, \n …) – so wie Java es beim Laden tut */
+const unescapeProperty = (v: string) =>
+  v.replace(/\\u([0-9a-fA-F]{4})|\\(.)/gs, (_m, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCharCode(parseInt(hex, 16)) : ch === 't' ? '\t' : ch === 'n' ? '\n' : ch === 'r' ? '\r' : ch === 'f' ? '\f' : (ch ?? '')));
+
+/**
+ * Begrenzte Einstellungen in einer server.properties auf den erlaubten Bereich bringen. Gelesen wird nach den Regeln
+ * von Java (Trennzeichen „=“, „:“ oder Leerraum, Fortsetzungszeilen, maskierte Zeichen, der letzte Eintrag gewinnt) –
+ * sonst ließe sich die Prüfung mit einer anderen Schreibweise desselben Schlüssels umgehen.
+ */
+export function capProperties(text: string): string {
+  const caps = new Map(Object.values(SERVER_SETTINGS).filter((s) => s.kind === 'int').map((s) => [s.key, s]));
+  const physical = text.split(/\r\n|\n|\r/);
+  // Logische Zeilen: Endet eine Zeile mit einer ungeraden Zahl von „\“, gehört die nächste dazu
+  const logical: Array<{ from: number; to: number; key: string | null; value: string }> = [];
+  for (let i = 0; i < physical.length; i++) {
+    const from = i;
+    let line = physical[i]!.replace(/^[ \t\f]+/, '');
+    if (line === '' || line.startsWith('#') || line.startsWith('!')) {
+      logical.push({ from, to: i, key: null, value: '' });
+      continue;
+    }
+    while (/(?:^|[^\\])(?:\\\\)*\\$/.test(line) && i + 1 < physical.length) {
+      i++;
+      line = line.slice(0, -1) + physical[i]!.replace(/^[ \t\f]+/, '');
+    }
+    // Schlüssel: bis zum ersten nicht maskierten „=“, „:“ oder Leerraum
+    let end = 0;
+    while (end < line.length && !/[=: \t\f]/.test(line[end]!)) end += line[end] === '\\' ? 2 : 1;
+    const key = unescapeProperty(line.slice(0, end));
+    const rest = line.slice(end).replace(/^[ \t\f]*[=:]?[ \t\f]*/, '');
+    logical.push({ from, to: i, key, value: unescapeProperty(rest) });
+  }
+  const last = new Map<string, number>();
+  logical.forEach((l, index) => {
+    if (l.key !== null && caps.has(l.key)) last.set(l.key, index);
+  });
+  if (last.size === 0) return text;
+  const out: string[] = [];
+  logical.forEach((l, index) => {
+    const cap = l.key !== null ? caps.get(l.key) : undefined;
+    if (!cap) return void out.push(...physical.slice(l.from, l.to + 1));
+    // Frühere Einträge desselben Schlüssels entfallen – es zählt ohnehin nur der letzte
+    if (last.get(l.key!) !== index) return;
+    const plain = /^[+-]?\d{1,9}$/.test(l.value.trim());
+    const value = plain ? Number(l.value.trim()) : NaN;
+    const clamped = Number.isFinite(value) ? Math.min(cap.max!, Math.max(cap.min!, value)) : cap.max!;
+    const wanted = `${cap.key}=${clamped}`;
+    // Unverändert lassen, wenn die Zeile schon genau so dasteht (dann wird die Datei nicht neu geschrieben)
+    out.push(l.from === l.to && clamped === value && physical[l.from]!.trim() === wanted ? physical[l.from]! : wanted);
+  });
+  return out.join('\n');
+}
+
+/* ------------------------------------------------------------ Backups */
+
+/**
+ * Eigene Grenzen je Server (zusätzlich zur Anfragebegrenzung je Partner): Backups und Neuinstallationen belasten den
+ * Node stark, und die Anfragebegrenzung allein würde hunderte davon in der Stunde erlauben.
+ */
+const recentActions = new Map<string, number[]>();
+function throttle(key: string, max: number, windowMs: number, what: { de: string; en: string }): void {
+  const now = Date.now();
+  const times = (recentActions.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (times.length >= max) {
+    const wait = Math.ceil((windowMs - (now - times[0]!)) / 60_000);
+    throw new ApiError(429, 'too_often', L(`${what.de} Bitte in etwa ${wait} Minute${wait === 1 ? '' : 'n'} erneut versuchen.`, `${what.en} Please try again in about ${wait} minute${wait === 1 ? '' : 's'}.`), { retryAfterSeconds: String(wait * 60) });
+  }
+  times.push(now);
+  if (recentActions.size > 20_000) recentActions.clear();
+  recentActions.set(key, times);
+}
+
+/** Je Server immer nur ein Backup-Vorgang zugleich – sonst ließe sich die Höchstzahl mit gleichzeitigen Anfragen überschreiten */
+const backupBusy = new Set<string>();
+async function oneAtATime<T>(serverId: string, fn: () => Promise<T>): Promise<T> {
+  if (backupBusy.has(serverId)) throw new ApiError(409, 'backup_busy', L('Für diesen Server läuft gerade ein Backup-Vorgang. Bitte kurz warten.', 'A backup operation is already running for this server. Please wait a moment.'));
+  backupBusy.add(serverId);
+  try {
+    return await fn();
+  } finally {
+    backupBusy.delete(serverId);
+  }
+}
+
+/** Alle Backups eines Servers löschen (vor dem Löschen des Servers – sonst blieben sie auf dem Node liegen) */
+export async function purgePartnerBackups(identifier: string): Promise<void> {
+  const list = await pterodactyl().listBackups(identifier).catch(() => []);
+  for (const backup of list) await pterodactyl().deleteBackup(identifier, backup.uuid).catch(() => {});
+}
+
+const backupDTO = (b: { uuid: string; name: string; bytes: number; completedAt: string | null; successful: boolean; createdAt: string }) => ({ id: b.uuid, name: b.name, bytes: b.bytes, state: b.completedAt ? (b.successful ? 'ready' : 'failed') : 'creating', createdAt: b.createdAt, completedAt: b.completedAt });
+
+function backupFailure(err: unknown): never {
+  if (err instanceof PterodactylError) {
+    const text = JSON.stringify(err.details ?? '') + err.message;
+    if (err.status === 404) throw new ApiError(404, 'backup_not_found', L('Dieses Backup gibt es nicht.', 'This backup does not exist.'));
+    if (/TooManyBackups|limit of backups|backup limit/i.test(text)) throw new ApiError(409, 'backup_limit', L('Die Höchstzahl an Backups für diesen Server ist erreicht. Lösche zuerst ein älteres.', 'The maximum number of backups for this server has been reached. Delete an older one first.'));
+    if (err.status === 429 || /TooManyRequests|rate/i.test(text)) throw new ApiError(429, 'backup_rate_limited', L('Es wurden gerade erst Backups erstellt. Bitte ein paar Minuten warten.', 'Backups were created just now. Please wait a few minutes.'));
+    if (err.status === 400 || err.status === 409) throw new ApiError(409, 'backup_rejected', L(`Das Panel hat das abgelehnt: ${err.message}`.slice(0, 240), `The panel rejected this: ${err.message}`.slice(0, 240)));
+  }
+  panelFailure(err);
+}
+
+export async function listPartnerBackups(partner: Partner, id: string) {
+  const server = await ready(partner, id);
+  const limit = findPlan(await getSettings(), server.planId)?.backups ?? 0;
+  try {
+    return { limit, backups: (await pterodactyl().listBackups(server.pteroIdentifier)).map(backupDTO) };
+  } catch (err) {
+    backupFailure(err);
+  }
+}
+
+/** Backup anlegen – die Zahl der Backups begrenzt das Paket. Geprüft wird hier UND vom Panel. */
+export async function createPartnerBackup(partner: Partner, id: string, nameRaw?: string) {
+  const server = await ready(partner, id);
+  const name = (nameRaw ?? '').replace(/[^\p{L}\p{N} _.:-]/gu, '').trim().slice(0, 60) || `Backup ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+  const limit = findPlan(await getSettings(), server.planId)?.backups ?? 0;
+  return oneAtATime(id, async () => {
+    try {
+      const existing = await pterodactyl().listBackups(server.pteroIdentifier);
+      if (existing.length >= limit) throw new ApiError(409, 'backup_limit', L('Die Höchstzahl an Backups für diesen Server ist erreicht. Lösche zuerst ein älteres.', 'The maximum number of backups for this server has been reached. Delete an older one first.'));
+      throttle(`backup:${id}`, 2, 10 * 60_000, { de: 'Für diesen Server wurden gerade erst Backups erstellt.', en: 'Backups were created for this server just now.' });
+      return { backup: backupDTO(await pterodactyl().createBackup(server.pteroIdentifier, name)) };
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      backupFailure(err);
+    }
+  });
+}
+
+const backupId = (value: string) => {
+  if (!/^[0-9a-f-]{36}$/i.test(value)) throw new ApiError(404, 'backup_not_found', L('Dieses Backup gibt es nicht.', 'This backup does not exist.'));
+  return value;
+};
+
+export async function partnerBackupDownloadUrl(partner: Partner, id: string, backup: string) {
+  const server = await ready(partner, id);
+  try {
+    return { id: backupId(backup), url: await pterodactyl().backupDownloadUrl(server.pteroIdentifier, backupId(backup)), expiresInSeconds: 300 };
+  } catch (err) {
+    backupFailure(err);
+  }
+}
+
+/** Server muss aus sein und darf keine laufende Sitzung haben (Einspielen, Typwechsel, Neuinstallation) */
+async function assertOffline(partner: Partner, id: string) {
+  const { server, ps } = await loadPartnerServer(partner, id);
+  const dto = await getPartnerServer(partner, id);
+  if (ps.hostActive || dto.state !== 'offline') {
+    throw new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
+  }
+  if (!server.pteroIdentifier || !server.pteroServerId) throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet.', 'The server is still being set up.'));
+  return server as Server & { pteroIdentifier: string; pteroServerId: number };
+}
+
+export async function restorePartnerBackup(partner: Partner, id: string, backup: string, truncate: boolean, ip?: string) {
+  const server = await assertOffline(partner, id);
+  backupId(backup);
+  throttle(`restore:${id}`, 2, 10 * 60_000, { de: 'Auf diesem Server wurde gerade erst ein Backup eingespielt.', en: 'A backup was restored on this server just now.' });
+  try {
+    await pterodactyl().restoreBackup(server.pteroIdentifier, backupId(backup), truncate);
+  } catch (err) {
+    backupFailure(err);
+  }
+  forgetLiveState(id);
+  statsCache.delete(id);
+  await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.backup_restored', message: `Partner „${partner.name}“: Backup auf „${server.name}“ eingespielt`, ip });
+  return { ok: true, note: 'The restore runs in the background. Start the server once its state is offline again.' };
+}
+
+export async function deletePartnerBackup(partner: Partner, id: string, backup: string) {
+  const server = await ready(partner, id);
+  try {
+    await pterodactyl().deleteBackup(server.pteroIdentifier, backupId(backup));
+    return { ok: true };
+  } catch (err) {
+    backupFailure(err);
+  }
+}
+
+/* ------------------------------------------------------------ Servertyp und Version wechseln, neu installieren */
+
+/**
+ * Servertyp und/oder Version ändern und neu installieren (oder nur neu installieren). Erlaubt sind dieselben Typen
+ * und Versionen wie beim Erstellen; Paket, Ressourcen und Laufzeit-Stand des Servers bleiben unverändert.
+ */
+export async function changePartnerServer(partner: Partner, id: string, input: { serverType?: string; version?: string }, ip?: string): Promise<PartnerServerDTO> {
+  const server = await assertOffline(partner, id);
+  const settings = await getSettings();
+  const serverType = input.serverType ?? server.serverType;
+  const version = input.version ?? (input.serverType && input.serverType !== server.serverType ? 'latest' : server.version);
+  const type = getServerType(serverType);
+  if (!type || type.kind !== 'minecraft' || !serverTypeAvailable(serverType, settings)) {
+    const msg = L('Dieser Servertyp ist nicht verfügbar.', 'This server type is not available.');
+    throw Errors.badRequest('server_type_unavailable', msg, { serverType: msg });
+  }
+  if (!versionsFor(settings, type.id).includes(version)) {
+    const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
+    throw Errors.badRequest('version_unavailable', msg, { version: msg });
+  }
+  throttle(`reinstall:${id}`, 3, 60 * 60_000, { de: 'Dieser Server wurde gerade erst mehrfach neu installiert.', en: 'This server has been reinstalled several times just now.' });
+  try {
+    await pterodactyl().updateServerStartup(server.pteroServerId, await startupFor(serverType, version, settings));
+    await pterodactyl().reinstallServer(server.pteroServerId);
+  } catch (err) {
+    panelFailure(err);
+  }
+  await db.update(servers).set({ serverType, version, powerState: 'installing' }).where(eq(servers.id, id));
+  forgetLiveState(id);
+  statsCache.delete(id);
+  await db.update(partnerServers).set({ installedNotified: false }).where(eq(partnerServers.serverId, id));
+  await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_reinstalled', message: `Partner „${partner.name}“: „${server.name}“ neu installiert (${serverType} ${version}${serverType !== server.serverType || version !== server.version ? `, vorher ${server.serverType} ${server.version}` : ''})`, ip });
   return getPartnerServer(partner, id);
 }

@@ -50,7 +50,15 @@ Spieler erstellen im Launcher einen Server, der nicht auf ihrem PC läuft, sonde
 
 | Methode | Pfad | Zweck |
 | --- | --- | --- |
-| `PATCH` | `/servers/{id}` | Umbenennen: `{"name":"…"}` (die Spieler-ID im Namen bleibt) |
+| `PATCH` | `/servers/{id}` | Umbenennen: `{"name":"…"}` (die Spieler-ID im Namen bleibt) · Typ/Version wechseln und neu installieren: `{"serverType":"fabric","version":"1.21.1"}` (Server muss aus sein) |
+| `POST` | `/servers/{id}/reinstall` | Neu installieren, ohne etwas zu ändern (Server muss aus sein; höchstens 3 je Stunde und Server) |
+| `GET` | `/servers/{id}/console/stream` | Konsole live als Server-Sent Events (`line`, `status`, `info`, `end`); nur lesend, höchstens 15 Minuten je Verbindung, 3 je Server, 50 je Partner; zählt nicht als Lebenszeichen |
+| `GET` / `POST` | `/servers/{id}/backups` | Backups auflisten (`limit` = Höchstzahl laut Paket) bzw. anlegen (`{"name":"…"}`) |
+| `GET` | `/servers/{id}/backups/{backup}/download-url` | Adresse zum Herunterladen |
+| `POST` | `/servers/{id}/backups/{backup}/restore` | Einspielen (`{"truncate":false}`), nur wenn der Server aus ist |
+| `DELETE` | `/servers/{id}/backups/{backup}` | Backup löschen |
+| `GET` / `PUT` / `DELETE` | `/webhook` | Webhook für Statuswechsel lesen, setzen (`{"url":"https://…"}` → Antwort enthält einmalig `secret`), entfernen |
+| `POST` | `/webhook/test` | Test-Ereignis schicken |
 | `GET` | `/servers/{id}/stats` | CPU, Arbeitsspeicher, Speicherplatz, Netzwerk, Laufzeit, `players` (`{online,max}` oder `null`) |
 | `GET` | `/servers/{id}/logs?lines=100` | Die letzten Zeilen der Konsole (aus `logs/latest.log`, höchstens 1000) |
 | `GET` / `PATCH` | `/servers/{id}/settings` | `server.properties` lesen/setzen: `motd`, `maxPlayers` (1–100), `gamemode`, `difficulty`, `hardcore`, `pvp`, `whitelist`, `allowFlight`, `seed`, `levelType` (`normal`/`flat`/`large_biomes`/`amplified`), `spawnProtection` (0–64), `viewDistance`, `simulationDistance` (3–16) |
@@ -72,10 +80,17 @@ Hinweise:
   eingeschaltet, läuft der Server weiter, bis niemand mehr darauf ist (`session.hostPresent` ist dann `false`).
 - Jede Server-Antwort enthält `host`, `port` (bleiben gleich, solange es den Server gibt – außer wir verlegen ihn auf
   andere Hardware) und `deleteAt` (Löschung, wenn bis dahin nicht gestartet wird).
-- **Anfrage-Limit** je API-Key und Minute: `heartbeat` 12 000 · `GET /servers/{id}` und `stats` 6 000 · übrige
-  Lese-Endpunkte, `start`, `stop`, `command` 1 200 · Schreiben (Dateien, Mods, Einstellungen, Umbenennen, Löschen) und
-  `GET /me` 600 · `POST /servers` und `decompress` 300. Jede Antwort enthält `X-RateLimit-Limit`,
-  `X-RateLimit-Remaining` und `X-RateLimit-Reset`; bei Überschreitung `429` mit `Retry-After`.
+- **Anfrage-Limit** je Partner und Minute: `heartbeat` 12 000 · `GET /servers/{id}` und `stats` 6 000 · übrige
+  Lese-Endpunkte, `start`, `stop`, `command` 1 200 · Schreiben (Dateien, Mods, Einstellungen, Löschen) und
+  `GET /me` 600 · `POST /servers`, `PATCH /servers/{id}`, `decompress`, Konsolen-Stream 300 · Backup anlegen/einspielen
+  und `reinstall` 60 · Webhook setzen/löschen/testen 30. Jede Antwort enthält `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining` und `X-RateLimit-Reset`; bei Überschreitung `429` mit `Retry-After`. Anfragen mit einem
+  ungültigen Key zählen je IP-Adresse (höchstens 30 je Minute und Endpunkt).
+- **Panel-Kontingent:** Anfragen, die wir an das Panel weiterreichen, sind zusätzlich begrenzt
+  (`PARTNER_PANEL_CALLS_PER_MINUTE`, Standard 300 für alle Partner zusammen, ein einzelner höchstens 80 % davon).
+  Ist es aufgebraucht: `429 panel_busy`. So kann kein Partner das Kontingent aufbrauchen, das unsere eigenen
+  Stopp-Befehle brauchen. `stats` und der Zustand in `GET /servers/{id}` sind 5 Sekunden zwischengespeichert; die
+  Liste `GET /servers` zeigt den zuletzt bekannten Zustand ohne Panel-Aufruf.
 - Die vollständige Beschreibung mit Beispielen steht für Partner-Konten unter `/docs/partner-api`.
 
 ### Server erstellen
@@ -141,6 +156,47 @@ Ablauf im Launcher:
 4. Antwortet `heartbeat` mit `not_running`, ist die Sitzung beendet (Grund steht in `fields.reason`) – dem Spieler
    Bescheid sagen und ggf. `start` anbieten.
 
+## Webhooks
+
+Je Partner eine Adresse (`PUT /webhook`). Ereignisse: `server.installed`, `server.running`, `server.stopped`
+(`reason`: `host_stopped`, `host_timeout`, `session_limit`, `settings_limit`, `admin`; `cooldownUntil`),
+`server.cooldown_ended`, `server.deletion_soon` (`deleteAt`), `server.deleted`, `webhook.test`.
+
+```
+POST <eure Adresse>
+X-CHF-Event: server.stopped
+X-CHF-Delivery: <ID des Ereignisses, bei Wiederholungen gleich>
+X-CHF-Timestamp: 1795025048
+X-CHF-Signature: sha256=<HMAC-SHA256 über "<Timestamp>.<Körper>" mit dem Geheimnis whsec_…>
+
+{"id":"…","type":"server.stopped","createdAt":"…","data":{"serverId":"…","name":"…","playerId":"…","reason":"host_timeout","cooldownUntil":null}}
+```
+
+- Nur `https` auf Port 443, öffentlich erreichbar, keine Zugangsdaten in der Adresse. Der Host wird bei jeder
+  Zustellung neu geprüft und es wird genau an die geprüfte IP zugestellt; Weiterleitungen werden nicht verfolgt.
+  Unsere eigenen Hosts (Website, Panel) sind als Ziel gesperrt.
+- Erwartet wird ein 2xx-Status innerhalb von 8 Sekunden. Wiederholungen nach 30 s, 2 min, 10 min, 1 h, 6 h.
+- Das Geheimnis liegt verschlüsselt in der Datenbank und wird nur beim Setzen einmal ausgegeben.
+- Webhooks sind reine Benachrichtigungen – die Antwort des Empfängers ändert nichts am Server.
+
+## Regeln, die sich über die API nicht umgehen lassen
+
+| Regel | Wie sie durchgesetzt wird |
+| --- | --- |
+| Höchstzahl Server (gesamt / je Spieler) | Prüfen und Anlegen in einer Schreib-Transaktion – gleichzeitige Anfragen können die Grenze nicht überschreiten |
+| Laufzeit-Grenze und Pflichtpause | Stand wird beim Löschen auf den Spieler übertragen und beim neu Erstellen übernommen; ein fehlgeschlagener Start setzt nichts zurück |
+| „Server läuft nur mit Sitzung“ | Der Job `partner-sessions` (alle 30 s) stoppt jeden Partner-Server ohne Sitzung und beendet ihn nach 2 Minuten hart (`kill`), falls er den Stopp ignoriert |
+| Lebenszeichen | Konsolen-Stream, Webhooks, Backups zählen nicht als Lebenszeichen; „Weiterlaufen mit Spielern“ höchstens 2 Stunden |
+| Paket-Ressourcen, Servertypen, Versionen | Typ-/Versionswechsel nimmt Egg, Image und Startbefehl nur aus unserer Konfiguration; Ressourcen werden nie geändert |
+| Grenzen der Einstellungen | `server.properties` wird vor jedem Start nach Java-Regeln gelesen und begrenzt; Nachprüfung bei laufendem Server (alle 5 Minuten), bei Verstoß Stopp mit `settings_limit` |
+| Backups | Höchstzahl laut Paket (von uns und vom Panel geprüft), ein Vorgang zugleich je Server, werden mit dem Server gelöscht |
+| Anfragebegrenzung | je Partner (nicht je Key – ein neuer oder erfundener Key bringt kein neues Kontingent), dazu das Panel-Kontingent |
+| Daemon-Zugang | Die Live-Konsole wird von unserer API gelesen und weitergereicht; Adresse und Token des Daemons verlassen den Server nie |
+
+Was sich technisch **nicht** verhindern lässt: Ein Partner kann beliebige Plugins/Mods und auch eine andere Server-JAR
+hochladen. Damit lassen sich Dinge *im Spiel* verändern (z. B. die angezeigte Spielerzahl oder die Sichtweite je Welt).
+Arbeitsspeicher, CPU, Speicherplatz und Ports begrenzt aber der Container des Panels – daran kommt kein Plugin vorbei.
+
 ## Fehler
 
 Fehler kommen mit passendem HTTP-Status und diesem Aufbau:
@@ -161,7 +217,11 @@ Fehler kommen mit passendem HTTP-Status und diesem Aufbau:
 | 409 | `cooldown` | Pflichtpause läuft noch (`fields.cooldownUntil`) |
 | 409 | `not_running` | Keine laufende Sitzung (bei `heartbeat` und `command`) |
 | 409 | `server_failed`, `server_suspended` | Einrichtung fehlgeschlagen bzw. Server gesperrt |
-| 429 | `rate_limited` | Zu viele Anfragen – die Grenzen gelten je API-Key |
+| 409 | `server_running` | Dafür muss der Server aus sein (Backup einspielen, Typ/Version wechseln, neu installieren) |
+| 409 | `state_changed` | Der Stand hat sich im selben Moment geändert – noch einmal versuchen |
+| 409 / 404 | `backup_limit`, `backup_busy`, `backup_rejected`, `backup_not_found` | Höchstzahl erreicht, Vorgang läuft schon, vom Panel abgelehnt bzw. Backup gibt es nicht |
+| 429 | `rate_limited` | Zu viele Anfragen – die Grenzen gelten je Partner |
+| 429 | `panel_busy`, `too_often`, `too_many_streams` | Panel-Kontingent aufgebraucht, zu viele Backups/Neuinstallationen in kurzer Zeit bzw. zu viele offene Konsolen-Streams |
 | 503 | `maintenance`, `unavailable`, `panel_unavailable` | Wartung bzw. vorübergehend nicht möglich – später erneut versuchen |
 
 Sprache der Fehlermeldungen: Kopfzeile `Accept-Language: de` oder `en`.

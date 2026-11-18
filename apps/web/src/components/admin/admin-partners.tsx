@@ -42,7 +42,7 @@ function Fields({ value, set, plans }: { value: AdminPartnerInput; set: (patch: 
         </select>
       </Labeled>
       {num('maxServers', 'Server insgesamt (höchstens)', 'Zählt nicht gegen die Plätze der Website.')}
-      {num('maxServersPerPlayer', 'Server je Spieler', 'So viele Server darf ein Nutzer des Partners haben.')}
+      {num('maxServersPerPlayer', 'Server je Spieler', 'So viele Server darf ein Nutzer des Partners haben. Laufzeit und Pause zählen je Server: Mit 2 kann ein Nutzer abwechselnd immer einen Server laufen lassen.')}
       {num('sessionMaxHours', 'Laufzeit bis zur Pause (Stunden)', 'Danach wird der Server gestoppt.')}
       {num('cooldownHours', 'Länge der Pause (Stunden)', 'Erst danach lässt sich der Server über die API wieder starten.')}
       {num('heartbeatTimeoutSeconds', 'Stopp ohne Lebenszeichen nach (Sekunden)', 'Mindestens 60. Meldet sich der Launcher so lange nicht, geht der Server aus.')}
@@ -159,7 +159,7 @@ function PartnerCard({ partner, plans, onChange }: { partner: AdminPartnerDTO; p
           checked={value.keepAliveWhilePlayers}
           onChange={(keepAliveWhilePlayers) => setValue({ ...value, keepAliveWhilePlayers })}
           label="Weiterlaufen, solange Spieler online sind"
-          hint="Eingeschaltet bleibt ein Server an, wenn der Host seinen Launcher schließt, solange noch jemand darauf spielt. Er stoppt, sobald er leer ist. Die Laufzeit-Grenze gilt weiter."
+          hint="Eingeschaltet bleibt ein Server an, wenn der Host seinen Launcher schließt, solange noch jemand darauf spielt – höchstens 2 Stunden. Er stoppt, sobald er leer ist. Die Laufzeit-Grenze gilt weiter."
         />
         <Toggle checked={value.enabled} onChange={(enabled) => setValue({ ...value, enabled })} label="Zugang aktiv" hint="Ausgeschaltet wird der API-Key abgelehnt; laufende Server des Partners werden gestoppt. Daten bleiben erhalten." />
       </div>

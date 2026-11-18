@@ -18,6 +18,7 @@ import {
   type PteroResources,
   type PteroServer,
   type PteroAllocation,
+  type PteroBackup,
   type PteroFile,
   type PteroUser,
   type PterodactylGateway,
@@ -51,6 +52,10 @@ interface MockServer {
   movedManually?: boolean;
   /** Laufender Umzug: Ziel-Node, Port und Zeitpunkt, ab dem er als abgeschlossen gilt */
   transfer?: { nodeId: number; port: number; extraPorts?: number[]; doneAt: number };
+  /** Backups (der Mock zählt sie gegen featureLimits.backups) */
+  backups?: PteroBackup[];
+  /** Egg nach einem Wechsel des Servertyps */
+  eggId?: number;
   /** Zusätzliche Ports neben dem Hauptport */
   extraPorts?: number[];
   /** Dateien des Servers (nur, was der Mock braucht – z. B. /eula.txt) */
@@ -530,6 +535,73 @@ export class PterodactylMockClient implements PterodactylGateway {
     this.mutate(id, (s) => {
       s.name = name;
     });
+  }
+
+  /* ---- Backups ---- */
+
+  private withServer<T>(identifier: string, fn: (s: MockServer) => T): T {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    const out = fn(s);
+    this.save(state);
+    return out;
+  }
+
+  async listBackups(identifier: string): Promise<PteroBackup[]> {
+    return this.withServer(identifier, (s) => [...(s.backups ?? [])]);
+  }
+
+  async createBackup(identifier: string, name: string): Promise<PteroBackup> {
+    return this.withServer(identifier, (s) => {
+      const limit = s.featureLimits?.backups ?? 0;
+      if ((s.backups ?? []).length >= limit) throw new PterodactylError('backup limit reached', 400, [{ code: 'TooManyBackupsException', detail: 'Cannot create a new backup, this server has reached its limit of backups.' }]);
+      const backup: PteroBackup = { uuid: randomUUID(), name, bytes: 123_456, completedAt: new Date().toISOString(), successful: true, createdAt: new Date().toISOString() };
+      s.backups = [...(s.backups ?? []), backup];
+      return backup;
+    });
+  }
+
+  async backupDownloadUrl(identifier: string, uuid: string): Promise<string> {
+    return this.withServer(identifier, (s) => {
+      if (!(s.backups ?? []).some((b) => b.uuid === uuid)) throw new PterodactylError('backup not found', 404);
+      return `https://node.mock.invalid/download/backup?token=mock-${uuid}`;
+    });
+  }
+
+  async restoreBackup(identifier: string, uuid: string, _truncate: boolean): Promise<void> {
+    this.withServer(identifier, (s) => {
+      if (!(s.backups ?? []).some((b) => b.uuid === uuid)) throw new PterodactylError('backup not found', 404);
+      if (s.state !== 'offline') throw new PterodactylError('server must be offline', 400);
+      s.files = { ...(s.files ?? {}), '/restored-from.txt': uuid };
+    });
+  }
+
+  async deleteBackup(identifier: string, uuid: string): Promise<void> {
+    this.withServer(identifier, (s) => {
+      if (!(s.backups ?? []).some((b) => b.uuid === uuid)) throw new PterodactylError('backup not found', 404);
+      s.backups = (s.backups ?? []).filter((b) => b.uuid !== uuid);
+    });
+  }
+
+  async updateServerStartup(id: number, spec: { eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }): Promise<void> {
+    this.mutate(id, (s) => {
+      s.eggId = spec.eggId;
+      s.files = { ...(s.files ?? {}), '/.startup-env.json': JSON.stringify(spec.environment) };
+    });
+  }
+
+  async reinstallServer(id: number): Promise<void> {
+    this.mutate(id, (s) => {
+      s.installedAt = Date.now() + INSTALL_MS;
+      s.state = 'offline';
+      s.target = null;
+      s.transitionAt = null;
+    });
+  }
+
+  async consoleSocket(_identifier: string): Promise<{ url: string; token: string; origin: string } | null> {
+    return null;
   }
 
   async createBackupSchedule(identifier: string, _spec: BackupScheduleSpec): Promise<number> {

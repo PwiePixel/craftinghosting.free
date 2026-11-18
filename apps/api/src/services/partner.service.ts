@@ -14,19 +14,23 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { and, count, desc, eq, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import { NO_CYCLE_END, findPlan, freeHostingConfig, getServerType, versionsFor, type AdminPartnerDTO, type AdminPartnerInput } from '@chfree/shared';
-import { db, isUniqueViolation } from '../db/client';
+import { affectedRows, db, isUniqueViolation, writeTx } from '../db/client';
 import { partnerPlayers, partnerServers, partners, servers, users, type Partner, type PartnerPlayer, type PartnerServer, type Server } from '../db/schema';
 import { env } from '../env';
 import { pterodactylConfig } from '../config/pterodactyl.config';
+import { mapLimit } from '../jobs/types';
 import { sha256, uuid } from '../lib/crypto';
 import { minecraftStatus } from '../lib/minecraft-ping';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
+import { unbudgeted } from '../pterodactyl/budget';
 import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
 import { provisionServer } from './provisioning.service';
+import { capProperties, enforceSettingsCaps, purgePartnerBackups } from './partner-extras.service';
+import { emitPartnerEvent } from './partner-webhooks.service';
 import { hardDeleteServer } from './server.service';
-import { getSettings, serverTypeAvailable } from './settings.service';
+import { deletionsAllowed, getSettings, serverTypeAvailable } from './settings.service';
 
 const LIVE = ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended'] as const;
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10; // Platz für „ #<Spieler-ID>“
@@ -169,7 +173,10 @@ export async function deletePartner(admin: { email: string }, id: string, ip?: s
   const p = await partnerById(id);
   await db.update(partners).set({ enabled: false }).where(eq(partners.id, id));
   const batch = await db.select().from(servers).where(and(eq(servers.partnerId, id), ne(servers.status, 'deleted'))).limit(25);
-  for (const server of batch) await hardDeleteServer(server);
+  for (const server of batch) {
+    if (server.pteroIdentifier) await purgePartnerBackups(server.pteroIdentifier);
+    await hardDeleteServer(server);
+  }
   const [left] = await db.select({ n: count() }).from(servers).where(and(eq(servers.partnerId, id), ne(servers.status, 'deleted')));
   const remaining = Number(left?.n ?? 0);
   if (remaining > 0) return { deleted: false, remaining };
@@ -240,38 +247,50 @@ export interface PartnerServerDTO {
 
 const liveCache = new Map<string, { at: number; state: LiveState }>();
 
-async function liveState(server: Server): Promise<LiveState> {
+/** Zuletzt bekannter Stand aus unserer Datenbank (der Power-Abgleich läuft jede Minute) – ohne Panel-Aufruf */
+function knownState(server: Server): LiveState {
   if (server.status === 'provisioning') return 'installing';
   if (server.status === 'provisioning_failed') return 'failed';
   if (server.status === 'suspended') return 'suspended';
   if (!server.pteroIdentifier) return 'installing';
+  const s = server.powerState;
+  return s === 'installing' ? 'installing' : s === 'running' || s === 'starting' || s === 'stopping' ? s : 'offline';
+}
+
+async function liveState(server: Server): Promise<LiveState> {
+  if (server.status !== 'active' && server.status !== 'expiring') return knownState(server);
+  if (!server.pteroIdentifier) return 'installing';
   const cached = liveCache.get(server.id);
-  if (cached && Date.now() - cached.at < 3_000) return cached.state;
+  if (cached && Date.now() - cached.at < 5_000) return cached.state;
   let state: LiveState;
   try {
-    const p = await pterodactyl().getServer(server.pteroServerId!);
-    if (p?.status === 'installing') state = 'installing';
-    else if (p?.status === 'install_failed') state = 'failed';
-    else {
-      const r = await pterodactyl().getResources(server.pteroIdentifier);
-      state = r.state === 'running' || r.state === 'starting' || r.state === 'stopping' ? r.state : 'offline';
-    }
+    const r = await pterodactyl().getResources(server.pteroIdentifier);
+    if (r.state === 'installing') {
+      // Installiert noch – oder die Installation ist fehlgeschlagen (das weiß nur die Verwaltungs-Schnittstelle)
+      const p = await pterodactyl().getServer(server.pteroServerId!).catch(() => null);
+      state = p?.status === 'install_failed' ? 'failed' : 'installing';
+    } else state = r.state === 'running' || r.state === 'starting' || r.state === 'stopping' ? r.state : 'offline';
   } catch {
-    // Panel gerade nicht erreichbar: der zuletzt bekannte Stand
-    const s = server.powerState;
-    state = s === 'installing' ? 'installing' : s === 'running' || s === 'starting' || s === 'stopping' ? s : 'offline';
+    // Panel gerade nicht erreichbar oder das Kontingent ist aufgebraucht: der zuletzt bekannte Stand
+    return knownState(server);
   }
   if (liveCache.size > 5000) liveCache.clear();
   liveCache.set(server.id, { at: Date.now(), state });
   return state;
 }
 
+/** Wird der Server gerade (neu) installiert? Unser gemerkter Stand kann bis zu einer Minute alt sein – dann im Panel nachsehen. */
+export const stillInstalling = async (server: Server): Promise<boolean> => server.powerState === 'installing' && (await liveState(server)) === 'installing';
+
+/** Nach einer Änderung (Neuinstallation, Backup einspielen) den gemerkten Stand verwerfen */
+export const forgetLiveState = (serverId: string) => void liveCache.delete(serverId);
+
 /** Laufzeit einschließlich der noch nicht verbuchten Sekunden */
 function runSecondsNow(ps: PartnerServer, now: Date): number {
   return ps.runSeconds + (ps.hostActive && ps.countedAt ? Math.max(0, Math.floor((now.getTime() - ps.countedAt.getTime()) / 1000)) : 0);
 }
 
-async function toDTO(partner: Partner, server: Server, ps: PartnerServer, player: PartnerPlayer, now = new Date()): Promise<PartnerServerDTO> {
+async function toDTO(partner: Partner, server: Server, ps: PartnerServer, player: PartnerPlayer, now = new Date(), live = true): Promise<PartnerServerDTO> {
   const max = partner.sessionMaxHours * 3600;
   const run = Math.min(max, runSecondsNow(ps, now));
   const cooling = ps.cooldownUntil && ps.cooldownUntil > now ? ps.cooldownUntil : null;
@@ -281,7 +300,8 @@ async function toDTO(partner: Partner, server: Server, ps: PartnerServer, player
     id: server.id,
     name: server.name,
     player: { id: player.id, externalId: player.externalId, name: player.name },
-    state: await liveState(server),
+    // In Listen der zuletzt bekannte Stand (höchstens eine Minute alt) – sonst kostete eine Liste hunderte Panel-Aufrufe
+    state: live ? await liveState(server) : knownState(server),
     address: server.address,
     host,
     port: port !== null && Number.isFinite(port) ? port : null,
@@ -391,7 +411,7 @@ export async function listPartnerServers(partner: Partner, opts: { playerExterna
     .limit(Math.min(Math.max(opts.limit ?? 50, 1), 100))
     .offset(Math.max(opts.offset ?? 0, 0));
   const now = new Date();
-  return Promise.all(rows.map((r) => toDTO(partner, r.server, r.ps, r.player, now)));
+  return Promise.all(rows.map((r) => toDTO(partner, r.server, r.ps, r.player, now, false)));
 }
 
 export async function getPartnerServer(partner: Partner, id: string): Promise<PartnerServerDTO> {
@@ -427,23 +447,30 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
   }
   const player = await upsertPlayer(partner, input.player.externalId, input.player.name);
 
-  // Grenzen: insgesamt und je Spieler
-  const [total] = await db.select({ n: count() }).from(servers).where(and(eq(servers.partnerId, partner.id), inArray(servers.status, [...LIVE])));
-  if (Number(total?.n ?? 0) >= partner.maxServers) {
-    throw new ApiError(409, 'partner_limit_reached', L('Die Höchstzahl an Servern für diesen Partner ist erreicht.', 'The maximum number of servers for this partner has been reached.'));
-  }
-  const [mine] = await db
-    .select({ n: count() })
-    .from(partnerServers)
-    .innerJoin(servers, eq(servers.id, partnerServers.serverId))
-    .where(and(eq(partnerServers.playerId, player.id), inArray(servers.status, [...LIVE])));
-  if (Number(mine?.n ?? 0) >= partner.maxServersPerPlayer) {
-    throw new ApiError(409, 'player_limit_reached', L(`Dieser Spieler hat bereits die Höchstzahl an Servern (${partner.maxServersPerPlayer}).`, `This player already has the maximum number of servers (${partner.maxServersPerPlayer}).`));
-  }
-
   const id = uuid();
   const now = new Date();
-  await db.insert(servers).values({
+  // Grenzen prüfen und den Server anlegen in EINER Schreib-Transaktion (Schreiber laufen nacheinander) – so können
+  // gleichzeitige Anfragen die Grenzen nicht überschreiten. Maßgeblich sind die aktuellen Werte des Partners.
+  await writeTx(async (tx) => {
+    const [fresh] = await tx.select().from(partners).where(eq(partners.id, partner.id)).limit(1);
+    if (!fresh || !fresh.enabled) throw new ApiError(401, 'invalid_api_key', L('Der Zugang ist deaktiviert.', 'Access is disabled.'));
+    const [total] = await tx.select({ n: count() }).from(servers).where(and(eq(servers.partnerId, partner.id), inArray(servers.status, [...LIVE])));
+    if (Number(total?.n ?? 0) >= fresh.maxServers) {
+      throw new ApiError(409, 'partner_limit_reached', L('Die Höchstzahl an Servern für diesen Partner ist erreicht.', 'The maximum number of servers for this partner has been reached.'));
+    }
+    const [mine] = await tx
+      .select({ n: count() })
+      .from(partnerServers)
+      .innerJoin(servers, eq(servers.id, partnerServers.serverId))
+      .where(and(eq(partnerServers.playerId, player.id), inArray(servers.status, [...LIVE])));
+    if (Number(mine?.n ?? 0) >= fresh.maxServersPerPlayer) {
+      throw new ApiError(409, 'player_limit_reached', L(`Dieser Spieler hat bereits die Höchstzahl an Servern (${fresh.maxServersPerPlayer}).`, `This player already has the maximum number of servers (${fresh.maxServersPerPlayer}).`));
+    }
+    // Übertrag aus einem zuvor gelöschten Server: Laufzeit und Pflichtpause gelten weiter
+    const [who] = await tx.select().from(partnerPlayers).where(eq(partnerPlayers.id, player.id)).limit(1);
+    const cooling = who?.carryCooldownUntil && who.carryCooldownUntil > now ? who.carryCooldownUntil : null;
+    const recent = !!who?.carryLastStopAt && now.getTime() - who.carryLastStopAt.getTime() < fresh.cooldownHours * 3_600_000;
+    await tx.insert(servers).values({
     id,
     userId: partner.userId,
     partnerId: partner.id,
@@ -460,10 +487,21 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
     cycleNumber: 1,
     cycleStartedAt: now,
     // Kein 30-Tage-Zyklus: Für Partner-Server gilt nur die Laufzeit-Regel der Partner-API
-    cycleEndsAt: NO_CYCLE_END,
+      cycleEndsAt: NO_CYCLE_END,
+    });
+    await tx.insert(partnerServers).values({
+      serverId: id,
+      partnerId: partner.id,
+      playerId: player.id,
+      runSeconds: recent || cooling ? (who?.carryRunSeconds ?? 0) : 0,
+      lastStopAt: recent || cooling ? (who?.carryLastStopAt ?? null) : null,
+      cooldownUntil: cooling,
+      cooldownNotified: !cooling,
+      installedNotified: false,
+      stopReason: cooling ? 'session_limit' : null,
+    });
+    await tx.update(partnerPlayers).set({ lastSeenAt: now }).where(eq(partnerPlayers.id, player.id));
   });
-  await db.insert(partnerServers).values({ serverId: id, partnerId: partner.id, playerId: player.id });
-  await db.update(partnerPlayers).set({ lastSeenAt: now }).where(eq(partnerPlayers.id, player.id));
   await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_created', message: `Partner „${partner.name}“: Server „${name}“ für Spieler ${player.id} (${player.externalId}) angelegt`, ip });
   // Direkt im Panel anlegen – schlägt das fehl, versucht es der Hintergrund-Job erneut
   await provisionServer(id, 'system', ip);
@@ -471,7 +509,7 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
 }
 
 /** Server stoppen und die Laufzeit verbuchen. `cooldown` = Pflichtpause beginnt (Laufzeit-Grenze erreicht) */
-async function endSession(partner: Partner, server: Server, ps: PartnerServer, reason: 'host_stopped' | 'host_timeout' | 'session_limit' | 'admin', now: Date): Promise<void> {
+async function endSession(partner: Partner, server: Server, ps: PartnerServer, reason: 'host_stopped' | 'host_timeout' | 'session_limit' | 'settings_limit' | 'admin', now: Date): Promise<void> {
   const limit = reason === 'session_limit';
   await db
     .update(partnerServers)
@@ -486,8 +524,21 @@ async function endSession(partner: Partner, server: Server, ps: PartnerServer, r
     })
     .where(eq(partnerServers.serverId, server.id));
   liveCache.delete(server.id);
-  if (server.pteroIdentifier) await pterodactyl().sendPowerSignal(server.pteroIdentifier, 'stop').catch(() => {});
+  if (limit) await db.update(partnerServers).set({ cooldownNotified: false }).where(eq(partnerServers.serverId, server.id));
+  // Das Durchsetzen einer Grenze darf nie am Kontingent für Partner-Anfragen scheitern. Kommt der Befehl trotzdem nicht
+  // an, holt ihn der Hintergrund-Job nach (und beendet den Server notfalls hart).
+  if (server.pteroIdentifier) await unbudgeted(() => pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'stop')).catch(() => {});
+  if (ps.hostActive) {
+    await emitPartnerEvent(partner.id, 'server.stopped', {
+      ...eventServer(server, ps),
+      reason,
+      cooldownUntil: limit ? new Date(now.getTime() + partner.cooldownHours * 3_600_000).toISOString() : null,
+    }).catch(() => {});
+  }
 }
+
+/** Angaben zum Server in jedem Webhook-Ereignis */
+const eventServer = (server: Server, ps: PartnerServer) => ({ serverId: server.id, name: server.name, playerId: ps.playerId });
 
 /**
  * Server starten (bzw. nach der Pflichtpause reaktivieren). Ab jetzt muss der Launcher regelmäßig ein Lebenszeichen
@@ -517,9 +568,17 @@ export async function startPartnerServer(partner: Partner, id: string, opts: { a
     }
     await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.eula_accepted', message: `Minecraft-EULA für „${server.name}“ akzeptiert (Spieler ${player.id}, Partner „${partner.name}“)`, ip });
   }
+  // Grenzen der Einstellungen durchsetzen (z. B. nach einem direkten Datei-Upload oder einem eingespielten Backup)
+  try {
+    await enforceSettingsCaps(server.pteroIdentifier);
+  } catch {
+    throw Errors.unavailable(L('Der Server ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.', 'The server cannot be reached right now. Please try again shortly.'));
+  }
   // War der Server lange genug aus (mindestens die Pausenlänge), beginnt die Laufzeit wieder bei null
   const rested = !ps.hostActive && (!ps.lastStopAt || now.getTime() - ps.lastStopAt.getTime() >= partner.cooldownHours * 3_600_000);
-  await db
+  // Nur setzen, wenn sich der Stand seit dem Lesen nicht geändert hat – sonst könnte ein Start, der gleichzeitig mit dem
+  // Erreichen der Laufzeit-Grenze eintrifft, die eben verhängte Pause wieder löschen
+  const started = await db
     .update(partnerServers)
     .set({
       hostActive: true,
@@ -531,13 +590,24 @@ export async function startPartnerServer(partner: Partner, id: string, opts: { a
       stopReason: null,
       cooldownUntil: null,
       eulaAcceptedAt: ps.eulaAcceptedAt ?? now,
+      runningNotified: ps.hostActive ? ps.runningNotified : false,
+      cooldownNotified: true,
+      deletionWarnedAt: null,
     })
-    .where(eq(partnerServers.serverId, id));
+    .where(and(eq(partnerServers.serverId, id), eq(partnerServers.hostActive, ps.hostActive), or(sql`${partnerServers.cooldownUntil} is null`, lt(partnerServers.cooldownUntil, now)), ps.lastStopAt ? eq(partnerServers.lastStopAt, ps.lastStopAt) : sql`${partnerServers.lastStopAt} is null`));
+  if (affectedRows(started) !== 1) throw Errors.conflict('state_changed', L('Der Stand des Servers hat sich gerade geändert. Bitte noch einmal versuchen.', 'The state of the server has just changed. Please try again.'));
   await db.update(partnerPlayers).set({ lastSeenAt: now }).where(eq(partnerPlayers.id, player.id));
   try {
     await pterodactyl().sendPowerSignal(server.pteroIdentifier, 'start');
   } catch {
-    await db.update(partnerServers).set({ hostActive: false, countedAt: null, lastStopAt: ps.lastStopAt, stopReason: ps.stopReason }).where(eq(partnerServers.serverId, id));
+    // Lief die Sitzung schon, bleibt sie unverändert. Sonst exakt den Stand von vorher wiederherstellen – ein
+    // fehlgeschlagener Start darf weder die Laufzeit zurücksetzen noch als „benutzt“ zählen.
+    if (!ps.hostActive) {
+      await db
+        .update(partnerServers)
+        .set({ hostActive: false, runSeconds: ps.runSeconds, countedAt: null, sessionStartedAt: ps.sessionStartedAt, lastStartAt: ps.lastStartAt, lastStopAt: ps.lastStopAt, stopReason: ps.stopReason, cooldownUntil: ps.cooldownUntil, runningNotified: ps.runningNotified, cooldownNotified: ps.cooldownNotified, deletionWarnedAt: ps.deletionWarnedAt })
+        .where(eq(partnerServers.serverId, id));
+    }
     throw Errors.unavailable(L('Der Server konnte gerade nicht gestartet werden. Bitte gleich noch einmal versuchen.', 'The server could not be started right now. Please try again shortly.'));
   }
   liveCache.delete(id);
@@ -565,6 +635,12 @@ export async function heartbeatMany(partner: Partner, ids: string[]): Promise<{ 
   return { ok, notRunning: wanted.filter((id) => !ok.includes(id)) };
 }
 
+/**
+ * So lange darf ein Server ohne Lebenszeichen des Hosts höchstens weiterlaufen, wenn noch Spieler darauf sind.
+ * Die Spielerzahl meldet der Server selbst – sie lässt sich also fälschen und darf deshalb nichts unbegrenzt verlängern.
+ */
+export const KEEP_ALIVE_MAX_SECONDS = 2 * 3600;
+
 /** Spielerzahl eines laufenden Servers (null = antwortet nicht) */
 export async function playersOnline(server: Pick<Server, 'address'>): Promise<{ online: number; max: number } | null> {
   if (!server.address) return null;
@@ -582,7 +658,7 @@ export async function stopPartnerServer(partner: Partner, id: string, opts: { wh
   const { server, ps } = await loadPartnerServer(partner, id);
   if (opts.whenEmpty && partner.keepAliveWhilePlayers && ps.hostActive && ((await playersOnline(server))?.online ?? 0) > 0) {
     // Der Host ist weg: kein Lebenszeichen mehr – der Hintergrund-Job stoppt, sobald der Server leer ist
-    await db.update(partnerServers).set({ heartbeatAt: new Date(0) }).where(eq(partnerServers.serverId, id));
+    await db.update(partnerServers).set({ heartbeatAt: new Date(Date.now() - (partner.heartbeatTimeoutSeconds + 1) * 1000) }).where(and(eq(partnerServers.serverId, id), eq(partnerServers.hostActive, true)));
     return getPartnerServer(partner, id);
   }
   await endSession(partner, server, ps, 'host_stopped', new Date());
@@ -600,14 +676,78 @@ export async function commandPartnerServer(partner: Partner, id: string, command
   }
 }
 
+/**
+ * Beim Löschen eines Servers Laufzeit und Pflichtpause auf den Spieler übertragen – sonst ließe sich die
+ * Laufzeit-Regel durch Löschen und neu Erstellen zurücksetzen. Es gilt jeweils der strengere Stand.
+ */
+async function carryOver(partner: Partner, ps: PartnerServer, player: PartnerPlayer, now: Date): Promise<void> {
+  const run = Math.min(partner.sessionMaxHours * 3600, runSecondsNow(ps, now));
+  const lastStop = ps.hostActive ? now : ps.lastStopAt;
+  const cooling = ps.cooldownUntil && ps.cooldownUntil > now ? ps.cooldownUntil : null;
+  const window = partner.cooldownHours * 3_600_000;
+  const relevant = !!cooling || (run > 0 && !!lastStop && now.getTime() - lastStop.getTime() < window);
+  if (!relevant) return;
+  const [cur] = await db.select().from(partnerPlayers).where(eq(partnerPlayers.id, player.id)).limit(1);
+  const curRecent = !!cur?.carryLastStopAt && now.getTime() - cur.carryLastStopAt.getTime() < window;
+  const curCooling = cur?.carryCooldownUntil && cur.carryCooldownUntil > now ? cur.carryCooldownUntil : null;
+  await db
+    .update(partnerPlayers)
+    .set({
+      carryRunSeconds: Math.max(run, curRecent ? (cur?.carryRunSeconds ?? 0) : 0),
+      carryLastStopAt: lastStop && cur?.carryLastStopAt && curRecent ? new Date(Math.max(lastStop.getTime(), cur.carryLastStopAt.getTime())) : lastStop,
+      carryCooldownUntil: cooling && curCooling ? new Date(Math.max(cooling.getTime(), curCooling.getTime())) : (cooling ?? curCooling),
+    })
+    .where(eq(partnerPlayers.id, player.id));
+}
+
 /** Server samt Daten löschen */
 export async function deletePartnerServer(partner: Partner, id: string, ip?: string): Promise<void> {
-  const { server } = await loadPartnerServer(partner, id);
+  const { server, ps, player } = await loadPartnerServer(partner, id);
+  // Während der Einrichtung gäbe es im Panel einen Server, den wir noch nicht kennen – erst danach löschen
+  if (server.status === 'provisioning') throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet. Bitte gleich noch einmal versuchen.', 'The server is still being set up. Please try again shortly.'));
+  // Eine Sperre durch uns lässt sich nicht durch Löschen und neu Erstellen aufheben
+  if (server.status === 'suspended') throw new ApiError(409, 'server_suspended', L('Dieser Server ist gesperrt und kann nur von CraftingHosting gelöscht werden.', 'This server is suspended and can only be deleted by CraftingHosting.'));
+  const now = new Date();
+  // Erst den Stand auf den Spieler übertragen, dann löschen: Schlägt das Löschen fehl, schadet der Übertrag nicht
+  await carryOver(partner, ps, player, now);
+  // Backups mit entfernen – sonst blieben sie auf dem Node liegen und jede Runde „löschen und neu erstellen“ kostete Speicher
+  if (server.pteroIdentifier) await purgePartnerBackups(server.pteroIdentifier);
   await hardDeleteServer(server);
+  await db.update(partnerServers).set({ hostActive: false, countedAt: null, runSeconds: Math.min(partner.sessionMaxHours * 3600, runSecondsNow(ps, now)), ...(ps.hostActive ? { lastStopAt: now, stopReason: 'host_stopped' } : {}) }).where(eq(partnerServers.serverId, id));
+  mustBeOffSince.delete(id);
   await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_deleted', message: `Partner „${partner.name}“: Server „${server.name}“ gelöscht`, ip });
 }
 
 /* ------------------------------------------------------------ Hintergrund-Job */
+
+/** Wann die Einstellungen eines laufenden Servers zuletzt nachgeprüft wurden */
+const settingsCheckedAt = new Map<string, number>();
+const SETTINGS_RECHECK_MS = 5 * 60_000;
+
+/**
+ * Nachprüfung bei laufendem Server: Minecraft schreibt beim Hochfahren die geladenen Werte in die server.properties
+ * zurück. Stehen dort Werte über unseren Grenzen, wurde die Datei zwischen unserer Prüfung und dem (Neu-)Start
+ * ausgetauscht – dann wird sie korrigiert und der Server gestoppt.
+ * Rückgabe: true = gestoppt, false = in Ordnung, null = gerade nicht prüfbar.
+ */
+async function verifySettings(partner: Partner, server: Server, ps: PartnerServer, now: Date): Promise<boolean | null> {
+  if (!server.pteroIdentifier) return false;
+  const text = await pterodactyl().readFile(server.pteroIdentifier, '/server.properties').catch(() => undefined);
+  if (text === undefined) return null;
+  if (settingsCheckedAt.size > 20_000) settingsCheckedAt.clear();
+  settingsCheckedAt.set(server.id, now.getTime());
+  if (text === null) return false;
+  const fixed = capProperties(text);
+  if (fixed === text) return false;
+  await pterodactyl().writeFile(server.pteroIdentifier, '/server.properties', fixed).catch(() => {});
+  await pterodactyl().sendCommand(server.pteroIdentifier, 'say Die Servereinstellungen überschreiten die erlaubten Grenzen – der Server wird gestoppt. / The server settings exceed the allowed limits – the server is being stopped.').catch(() => {});
+  await endSession(partner, server, ps, 'settings_limit', now);
+  await audit({ userId: partner.userId, serverId: server.id, actor: 'system', action: 'partner.settings_limit', message: `Partner „${partner.name}“: „${server.name}“ lief mit Einstellungen über den Grenzen und wurde gestoppt` });
+  return true;
+}
+
+/** Seit wann ein Server ohne Sitzung noch läuft (für die Frist zwischen Stopp und hartem Beenden) */
+const mustBeOffSince = new Map<string, number>();
 
 /**
  * Läuft alle 30 Sekunden:
@@ -616,15 +756,17 @@ export async function deletePartnerServer(partner: Partner, id: string, ip?: str
  *  – löscht lange nicht gestartete Server
  */
 export async function runPartnerSessions(now = new Date()) {
-  const stats = { active: 0, timeouts: 0, limits: 0, warned: 0, strays: 0, idleDeleted: 0, keptAlive: 0 };
+  const stats = { active: 0, timeouts: 0, limits: 0, warned: 0, strays: 0, killed: 0, settingsStops: 0, idleDeleted: 0, keptAlive: 0, failed: 0 };
   const all = await db.select().from(partners);
   const byId = new Map(all.map((p) => [p.id, p]));
 
   const active = await db.select({ ps: partnerServers, server: servers }).from(partnerServers).innerJoin(servers, eq(servers.id, partnerServers.serverId)).where(eq(partnerServers.hostActive, true));
   stats.active = active.length;
-  for (const { ps, server } of active) {
+  // Jede Sitzung für sich und mehrere gleichzeitig: Ein einzelner hängender oder fehlerhafter Server darf die Regeln
+  // für alle anderen nicht aufhalten
+  const sessions = await mapLimit(active, 8, async ({ ps, server }) => {
     const partner = byId.get(ps.partnerId);
-    if (!partner) continue;
+    if (!partner) return;
     const max = partner.sessionMaxHours * 3600;
     const run = runSecondsNow(ps, now);
     const silent = ps.heartbeatAt ? (now.getTime() - ps.heartbeatAt.getTime()) / 1000 : Infinity;
@@ -634,7 +776,7 @@ export async function runPartnerSessions(now = new Date()) {
       if (server.pteroIdentifier) await pterodactyl().sendCommand(server.pteroIdentifier, `say Laufzeit-Grenze erreicht – der Server pausiert jetzt ${partner.cooldownHours} Stunden. / Runtime limit reached – the server now pauses for ${partner.cooldownHours} hours.`).catch(() => {});
       await endSession(partner, server, ps, 'session_limit', now);
       stats.limits++;
-    } else if (silent > partner.heartbeatTimeoutSeconds && partner.keepAliveWhilePlayers && ((await playersOnline(server))?.online ?? 0) > 0) {
+    } else if (silent > partner.heartbeatTimeoutSeconds && partner.keepAliveWhilePlayers && silent < partner.heartbeatTimeoutSeconds + KEEP_ALIVE_MAX_SECONDS && ((await playersOnline(server))?.online ?? 0) > 0) {
       // Der Host ist weg, aber es sind noch Spieler da: weiterlaufen lassen (die Laufzeit zählt weiter)
       await db.update(partnerServers).set({ runSeconds: run, countedAt: now }).where(and(eq(partnerServers.serverId, ps.serverId), eq(partnerServers.hostActive, true)));
       stats.keptAlive++;
@@ -642,6 +784,9 @@ export async function runPartnerSessions(now = new Date()) {
       // Der Launcher des Hosts meldet sich nicht mehr (geschlossen, abgestürzt, offline)
       await endSession(partner, server, ps, 'host_timeout', now);
       stats.timeouts++;
+    } else if (server.powerState === 'running' && ps.runningNotified && now.getTime() - (settingsCheckedAt.get(server.id) ?? 0) >= SETTINGS_RECHECK_MS && (await verifySettings(partner, server, ps, now))) {
+      // Der Server wurde mitten in der Sitzung mit ausgetauschten Einstellungen neu hochgefahren
+      stats.settingsStops++;
     } else {
       // Laufzeit verbuchen und kurz vor der Grenze im Spiel Bescheid sagen (10 und 1 Minute)
       const leftMinutes = (max - run) / 60;
@@ -653,35 +798,124 @@ export async function runPartnerSessions(now = new Date()) {
         stats.warned++;
       }
     }
-  }
+  });
+  stats.failed += sessions.failed;
 
-  // Läuft ohne aktive Sitzung: stoppen (der Stand kommt aus dem Power-Abgleich, der jede Minute läuft)
-  const strays = await db
-    .select({ server: servers })
+  // Webhooks: „läuft“ (einmal je Sitzung), „installiert“, „Pause vorbei“, „Löschung steht bevor“
+  const toNotify = await db
+    .select({ ps: partnerServers, server: servers })
     .from(partnerServers)
     .innerJoin(servers, eq(servers.id, partnerServers.serverId))
-    .where(and(eq(partnerServers.hostActive, false), inArray(servers.powerState, ['running', 'starting']), isNotNull(servers.pteroIdentifier), or(sql`${partnerServers.lastStartAt} is null`, lt(partnerServers.lastStartAt, new Date(now.getTime() - 90_000)))))
-    .limit(50);
-  for (const { server } of strays) {
-    await pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'stop').catch(() => {});
-    stats.strays++;
+    .where(and(ne(servers.status, 'deleted'), or(and(eq(partnerServers.hostActive, true), eq(partnerServers.runningNotified, false)), eq(partnerServers.installedNotified, false), eq(partnerServers.cooldownNotified, false))))
+    .limit(200);
+  for (const { ps, server } of toNotify) {
+    const partner = byId.get(ps.partnerId);
+    if (!partner) continue;
+    const patch: Partial<typeof partnerServers.$inferInsert> = {};
+    const state = !ps.installedNotified || (ps.hostActive && !ps.runningNotified) ? await liveState(server) : null;
+    if (!ps.installedNotified && state !== null && state !== 'installing') {
+      patch.installedNotified = true;
+      if (state !== 'failed') await emitPartnerEvent(partner.id, 'server.installed', { ...eventServer(server, ps), address: server.address }).catch(() => {});
+    }
+    if (ps.hostActive && !ps.runningNotified && state === 'running') {
+      const checked = await verifySettings(partner, server, ps, now);
+      if (checked === null) continue; // Panel gerade nicht erreichbar – beim nächsten Lauf
+      if (checked) {
+        stats.settingsStops++;
+        continue;
+      }
+    }
+    if (ps.hostActive && !ps.runningNotified && state === 'running') {
+      patch.runningNotified = true;
+      await emitPartnerEvent(partner.id, 'server.running', { ...eventServer(server, ps), address: server.address }).catch(() => {});
+    }
+    if (!ps.cooldownNotified && (!ps.cooldownUntil || ps.cooldownUntil <= now)) {
+      patch.cooldownNotified = true;
+      await emitPartnerEvent(partner.id, 'server.cooldown_ended', eventServer(server, ps)).catch(() => {});
+    }
+    if (Object.keys(patch).length) await db.update(partnerServers).set(patch).where(eq(partnerServers.serverId, ps.serverId));
+  }
+  for (const partner of all) {
+    if (partner.deleteAfterIdleDays <= 0 || !partner.webhookUrl) continue;
+    // Drei Tage vor der Löschung Bescheid geben (bei kürzerer Frist: ab der Hälfte)
+    const lead = Math.min(3, partner.deleteAfterIdleDays / 2) * 86_400_000;
+    const threshold = new Date(now.getTime() - (partner.deleteAfterIdleDays * 86_400_000 - lead));
+    const soon = await db
+      .select({ ps: partnerServers, server: servers })
+      .from(partnerServers)
+      .innerJoin(servers, eq(servers.id, partnerServers.serverId))
+      .where(and(eq(partnerServers.partnerId, partner.id), eq(partnerServers.hostActive, false), sql`${partnerServers.deletionWarnedAt} is null`, eq(servers.status, 'active'), lt(servers.createdAt, threshold), or(sql`${partnerServers.lastStartAt} is null`, lt(partnerServers.lastStartAt, threshold))))
+      .limit(50);
+    for (const { ps, server } of soon) {
+      const lastUse = Math.max(server.createdAt.getTime(), ps.lastStartAt?.getTime() ?? 0);
+      await db.update(partnerServers).set({ deletionWarnedAt: now }).where(eq(partnerServers.serverId, ps.serverId));
+      await emitPartnerEvent(partner.id, 'server.deletion_soon', { ...eventServer(server, ps), deleteAt: new Date(lastUse + partner.deleteAfterIdleDays * 86_400_000).toISOString() }).catch(() => {});
+    }
   }
 
-  // Lange nicht gestartete Server löschen (je Lauf höchstens ein paar, damit das Panel nicht überlastet wird)
+  // Ohne aktive Sitzung muss ein Partner-Server aus sein – und zwar dauerhaft durchgesetzt, nicht mit einem einzelnen
+  // Stopp-Befehl: Ein Server, der „stop“ ignoriert (z. B. durch ein hochgeladenes Plugin), wird nach der Frist hart
+  // beendet. Der Stand kommt aus dem Power-Abgleich (jede Minute); bei unbekanntem Stand wird direkt nachgefragt.
+  const mustBeOff = await db
+    .select({ server: servers, ps: partnerServers })
+    .from(partnerServers)
+    .innerJoin(servers, eq(servers.id, partnerServers.serverId))
+    .where(
+      and(
+        eq(partnerServers.hostActive, false),
+        inArray(servers.status, ['active', 'suspended']),
+        isNotNull(servers.pteroIdentifier),
+        or(inArray(servers.powerState, ['running', 'starting', 'stopping']), and(eq(servers.powerState, 'unknown'), isNotNull(partnerServers.lastStartAt))),
+        or(sql`${partnerServers.lastStartAt} is null`, lt(partnerServers.lastStartAt, new Date(now.getTime() - 90_000))),
+      ),
+    )
+    .orderBy(desc(partnerServers.lastStopAt))
+    .limit(500);
+  const seen = new Set<string>();
+  const enforced = await mapLimit(mustBeOff, 8, async ({ server }) => {
+    seen.add(server.id);
+    let state: string = server.powerState;
+    if (state === 'unknown') {
+      state = (await pterodactyl().getResources(server.pteroIdentifier!)).state;
+      if (state !== 'running' && state !== 'starting' && state !== 'stopping') return;
+    }
+    const since = mustBeOffSince.get(server.id) ?? now.getTime();
+    mustBeOffSince.set(server.id, since);
+    if (now.getTime() - since >= freeHostingConfig.cycle.stopGraceSeconds * 1000) {
+      await pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'kill');
+      stats.killed++;
+    } else {
+      await pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'stop');
+      stats.strays++;
+    }
+  });
+  stats.failed += enforced.failed;
+  // Wer inzwischen aus ist (oder wieder eine Sitzung hat), fällt aus der Beobachtung
+  for (const id of mustBeOffSince.keys()) if (!seen.has(id)) mustBeOffSince.delete(id);
+
+  // Lange nicht gestartete Server löschen (je Lauf höchstens ein paar, damit das Panel nicht überlastet wird).
+  // Nicht während einer Wartung und kurz danach, und nicht bei deaktivierten Partnern – dort konnte niemand starten.
+  const mayDelete = await deletionsAllowed(now);
   for (const partner of all) {
-    if (partner.deleteAfterIdleDays <= 0) continue;
+    if (partner.deleteAfterIdleDays <= 0 || !partner.enabled || !mayDelete) continue;
     const before = new Date(now.getTime() - partner.deleteAfterIdleDays * 86_400_000);
     const idle = await db
-      .select({ server: servers })
+      .select({ server: servers, ps: partnerServers })
       .from(partnerServers)
       .innerJoin(servers, eq(servers.id, partnerServers.serverId))
       .where(and(eq(partnerServers.partnerId, partner.id), eq(partnerServers.hostActive, false), inArray(servers.status, ['active', 'provisioning_failed']), lt(servers.createdAt, before), or(sql`${partnerServers.lastStartAt} is null`, lt(partnerServers.lastStartAt, before))))
-      .limit(3);
-    for (const { server } of idle) {
+      .orderBy(sql`random()`)
+      .limit(10);
+    let deleted = 0;
+    for (const { server, ps } of idle) {
+      if (deleted >= 3) break;
       try {
+        if (server.pteroIdentifier) await purgePartnerBackups(server.pteroIdentifier);
         await hardDeleteServer(server);
+        await emitPartnerEvent(partner.id, 'server.deleted', { ...eventServer(server, ps), reason: 'idle' }).catch(() => {});
         await audit({ userId: partner.userId, serverId: server.id, actor: 'system', action: 'partner.server_idle_deleted', message: `Partner „${partner.name}“: Server „${server.name}“ nach ${partner.deleteAfterIdleDays} Tagen ohne Start gelöscht` });
         stats.idleDeleted++;
+        deleted++;
       } catch {
         /* Panel nicht erreichbar – beim nächsten Lauf */
       }
