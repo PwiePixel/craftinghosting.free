@@ -19,7 +19,7 @@ const dateTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('de
 const numberOf = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v.trim() !== '' ? Math.round(Number(v)) : fallback);
 const nodesOf = (v: string) => [...new Set(v.split(/[\s,;]+/).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
 
-const emptyInput = (planId: string): AdminPartnerInput => ({ name: '', planId, maxServers: 100, maxServersPerPlayer: 1, sessionMaxHours: 24, cooldownHours: 2, heartbeatTimeoutSeconds: 180, deleteAfterIdleDays: 30, nodeIds: [] });
+const emptyInput = (planId: string): AdminPartnerInput => ({ name: '', planId, maxServers: 100, maxServersPerPlayer: 1, sessionMaxHours: 24, cooldownHours: 2, heartbeatTimeoutSeconds: 180, deleteAfterIdleDays: 30, nodeIds: [], keepAliveWhilePlayers: false });
 
 function Fields({ value, set, plans }: { value: AdminPartnerInput; set: (patch: Partial<AdminPartnerInput>) => void; plans: Plan[] }) {
   const num = (key: keyof AdminPartnerInput, label: string, hint: string) => (
@@ -86,7 +86,7 @@ function PartnerCard({ partner, plans, onChange }: { partner: AdminPartnerDTO; p
   const [message, setMessage] = useState<Message>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [armed, setArmed] = useState<'key' | 'delete' | null>(null);
-  const body = (): AdminPartnerInput & { enabled: boolean } => ({ name: value.name, planId: value.planId, maxServers: value.maxServers, maxServersPerPlayer: value.maxServersPerPlayer, sessionMaxHours: value.sessionMaxHours, cooldownHours: value.cooldownHours, heartbeatTimeoutSeconds: value.heartbeatTimeoutSeconds, deleteAfterIdleDays: value.deleteAfterIdleDays, nodeIds: value.nodeIds, enabled: value.enabled });
+  const body = (): AdminPartnerInput & { enabled: boolean } => ({ name: value.name, planId: value.planId, maxServers: value.maxServers, maxServersPerPlayer: value.maxServersPerPlayer, sessionMaxHours: value.sessionMaxHours, cooldownHours: value.cooldownHours, heartbeatTimeoutSeconds: value.heartbeatTimeoutSeconds, deleteAfterIdleDays: value.deleteAfterIdleDays, nodeIds: value.nodeIds, keepAliveWhilePlayers: value.keepAliveWhilePlayers, enabled: value.enabled });
 
   async function run(kind: 'save' | 'key' | 'delete', action: () => Promise<string | null>) {
     setPending(kind);
@@ -154,7 +154,13 @@ function PartnerCard({ partner, plans, onChange }: { partner: AdminPartnerDTO; p
         </div>
       )}
       <Fields value={value} set={(patch) => setValue({ ...value, ...patch })} plans={plans} />
-      <div className="mt-5">
+      <div className="mt-5 space-y-4">
+        <Toggle
+          checked={value.keepAliveWhilePlayers}
+          onChange={(keepAliveWhilePlayers) => setValue({ ...value, keepAliveWhilePlayers })}
+          label="Weiterlaufen, solange Spieler online sind"
+          hint="Eingeschaltet bleibt ein Server an, wenn der Host seinen Launcher schließt, solange noch jemand darauf spielt. Er stoppt, sobald er leer ist. Die Laufzeit-Grenze gilt weiter."
+        />
         <Toggle checked={value.enabled} onChange={(enabled) => setValue({ ...value, enabled })} label="Zugang aktiv" hint="Ausgeschaltet wird der API-Key abgelehnt; laufende Server des Partners werden gestoppt. Daten bleiben erhalten." />
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-2">

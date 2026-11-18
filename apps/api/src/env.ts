@@ -115,6 +115,8 @@ const schema = z
 
     /** Adresse von YouTube (Kanalseiten und Feeds für den Social Ping). Nur für Tests ändern. */
     YOUTUBE_BASE_URL: z.string().url().default('https://www.youtube.com'),
+    /** Adresse der Modrinth-Schnittstelle (Mods über die Partner-API installieren). Nur für Tests ändern. */
+    MODRINTH_API_URL: z.string().url().default('https://api.modrinth.com/v2'),
     /** Adresse von TikTok (Profilseiten für den Social Ping). Nur für Tests ändern. */
     TIKTOK_BASE_URL: z.string().url().default('https://www.tiktok.com'),
     /** Nur für Tests: Feeds auch von lokalen Adressen abrufen */

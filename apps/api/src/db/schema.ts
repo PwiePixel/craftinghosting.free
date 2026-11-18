@@ -624,6 +624,8 @@ export const partners = sqliteTable(
     heartbeatTimeoutSeconds: integer('heartbeat_timeout_seconds').notNull().default(180),
     /** Lange nicht gestartete Server werden nach so vielen Tagen gelöscht (0 = nie) */
     deleteAfterIdleDays: integer('delete_after_idle_days').notNull().default(30),
+    /** Der Server läuft weiter, solange noch Spieler darauf sind – auch wenn der Launcher des Hosts schon zu ist */
+    keepAliveWhilePlayers: integer('keep_alive_while_players', { mode: 'boolean' }).notNull().default(false),
     /** Feste Nodes für die Server dieses Partners (leer = wie normale Minecraft-Server); private Nodes sind erlaubt */
     nodeIds: text('node_ids', { mode: 'json' }).$type<number[]>().notNull().default([]),
     lastUsedAt: ts('last_used_at'),

@@ -1118,6 +1118,8 @@ export interface AdminPartnerInput {
   deleteAfterIdleDays: number;
   /** Feste Nodes (leer = wie normale Minecraft-Server) */
   nodeIds: number[];
+  /** Server laufen weiter, solange noch Spieler darauf sind – auch ohne Lebenszeichen des Hosts */
+  keepAliveWhilePlayers: boolean;
 }
 
 export interface AdminPartnerDTO extends AdminPartnerInput {

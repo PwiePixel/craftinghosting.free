@@ -1,0 +1,1 @@
+ALTER TABLE `partners` ADD `keep_alive_while_players` integer DEFAULT false NOT NULL;

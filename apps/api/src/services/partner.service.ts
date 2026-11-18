@@ -19,6 +19,7 @@ import { partnerPlayers, partnerServers, partners, servers, users, type Partner,
 import { env } from '../env';
 import { pterodactylConfig } from '../config/pterodactyl.config';
 import { sha256, uuid } from '../lib/crypto';
+import { minecraftStatus } from '../lib/minecraft-ping';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
@@ -82,6 +83,7 @@ export async function listPartners(): Promise<AdminPartnerDTO[]> {
       heartbeatTimeoutSeconds: p.heartbeatTimeoutSeconds,
       deleteAfterIdleDays: p.deleteAfterIdleDays,
       nodeIds: p.nodeIds,
+      keepAliveWhilePlayers: p.keepAliveWhilePlayers,
       players: Number(players?.n ?? 0),
       servers: Number(total?.n ?? 0),
       running: Number(running?.n ?? 0),
@@ -133,6 +135,7 @@ function limitsOf(input: AdminPartnerInput) {
     heartbeatTimeoutSeconds: clamp(input.heartbeatTimeoutSeconds, 60, 3600),
     deleteAfterIdleDays: clamp(input.deleteAfterIdleDays, 0, 3650),
     nodeIds: [...new Set(input.nodeIds.filter((n) => Number.isInteger(n) && n > 0))].slice(0, 50),
+    keepAliveWhilePlayers: !!input.keepAliveWhilePlayers,
   };
 }
 
@@ -203,15 +206,19 @@ export interface PartnerServerDTO {
   player: { id: string; externalId: string; name: string | null };
   /** installing · offline · starting · running · stopping · failed · suspended */
   state: LiveState;
-  /** Adresse zum Verbinden (Host:Port) – null, solange der Server noch eingerichtet wird */
+  /** Adresse zum Verbinden (Host:Port) – null, solange der Server noch eingerichtet wird. Der Port bleibt gleich, solange es den Server gibt. */
   address: string | null;
+  host: string | null;
+  port: number | null;
   serverType: string;
   version: string;
   resources: { memoryMb: number; cpuPercent: number; diskMb: number };
   eulaAccepted: boolean;
   session: {
-    /** Der Host hat gestartet und meldet sich */
+    /** Die Sitzung läuft (der Server darf laufen) */
     active: boolean;
+    /** Der Launcher des Hosts meldet sich gerade (false = Server läuft nur noch, weil Spieler darauf sind) */
+    hostPresent: boolean;
     startedAt: string | null;
     lastHeartbeatAt: string | null;
     /** Ohne Lebenszeichen wird nach so vielen Sekunden gestoppt */
@@ -227,6 +234,8 @@ export interface PartnerServerDTO {
   };
   createdAt: string;
   lastStartAt: string | null;
+  /** Wird der Server nicht mehr gestartet, wird er zu diesem Zeitpunkt samt Daten gelöscht (null = nie) */
+  deleteAt: string | null;
 }
 
 const liveCache = new Map<string, { at: number; state: LiveState }>();
@@ -266,18 +275,23 @@ async function toDTO(partner: Partner, server: Server, ps: PartnerServer, player
   const max = partner.sessionMaxHours * 3600;
   const run = Math.min(max, runSecondsNow(ps, now));
   const cooling = ps.cooldownUntil && ps.cooldownUntil > now ? ps.cooldownUntil : null;
+  const [host, port] = server.address ? [server.address.slice(0, server.address.lastIndexOf(':')), Number(server.address.slice(server.address.lastIndexOf(':') + 1))] : [null, null];
+  const lastUse = Math.max(server.createdAt.getTime(), ps.lastStartAt?.getTime() ?? 0);
   return {
     id: server.id,
     name: server.name,
     player: { id: player.id, externalId: player.externalId, name: player.name },
     state: await liveState(server),
     address: server.address,
+    host,
+    port: port !== null && Number.isFinite(port) ? port : null,
     serverType: server.serverType,
     version: server.version,
     resources: { memoryMb: server.memoryMb, cpuPercent: server.cpuPercent, diskMb: server.diskMb },
     eulaAccepted: !!ps.eulaAcceptedAt,
     session: {
       active: ps.hostActive,
+      hostPresent: ps.hostActive && !!ps.heartbeatAt && now.getTime() - ps.heartbeatAt.getTime() <= partner.heartbeatTimeoutSeconds * 1000,
       startedAt: ps.hostActive ? (ps.sessionStartedAt?.toISOString() ?? null) : null,
       lastHeartbeatAt: ps.heartbeatAt?.toISOString() ?? null,
       heartbeatTimeoutSeconds: partner.heartbeatTimeoutSeconds,
@@ -289,6 +303,7 @@ async function toDTO(partner: Partner, server: Server, ps: PartnerServer, player
     },
     createdAt: server.createdAt.toISOString(),
     lastStartAt: ps.lastStartAt?.toISOString() ?? null,
+    deleteAt: partner.deleteAfterIdleDays > 0 ? new Date(lastUse + partner.deleteAfterIdleDays * 86_400_000).toISOString() : null,
   };
 }
 
@@ -325,7 +340,7 @@ export async function upsertPlayer(partner: Partner, externalId: string, name?: 
 
 /* ------------------------------------------------------------ Server */
 
-async function load(partner: Partner, serverId: string): Promise<{ server: Server; ps: PartnerServer; player: PartnerPlayer }> {
+export async function loadPartnerServer(partner: Partner, serverId: string): Promise<{ server: Server; ps: PartnerServer; player: PartnerPlayer }> {
   const [row] = await db
     .select({ server: servers, ps: partnerServers, player: partnerPlayers })
     .from(partnerServers)
@@ -380,7 +395,7 @@ export async function listPartnerServers(partner: Partner, opts: { playerExterna
 }
 
 export async function getPartnerServer(partner: Partner, id: string): Promise<PartnerServerDTO> {
-  const { server, ps, player } = await load(partner, id);
+  const { server, ps, player } = await loadPartnerServer(partner, id);
   return toDTO(partner, server, ps, player);
 }
 
@@ -479,7 +494,7 @@ async function endSession(partner: Partner, server: Server, ps: PartnerServer, r
  * schicken. Beim ersten Start muss der Spieler die Minecraft-EULA akzeptiert haben (`acceptEula: true`).
  */
 export async function startPartnerServer(partner: Partner, id: string, opts: { acceptEula?: boolean }, ip?: string): Promise<PartnerServerDTO> {
-  const { server, ps, player } = await load(partner, id);
+  const { server, ps, player } = await loadPartnerServer(partner, id);
   const now = new Date();
   if (player.blocked) throw Errors.forbidden(L('Dieser Spieler ist gesperrt.', 'This player is blocked.'));
   if (server.status !== 'active' || !server.pteroIdentifier) {
@@ -531,7 +546,7 @@ export async function startPartnerServer(partner: Partner, id: string, opts: { a
 
 /** Lebenszeichen des Launchers: Der Host ist noch da. Antwort enthält die verbleibende Laufzeit. */
 export async function heartbeatPartnerServer(partner: Partner, id: string): Promise<PartnerServerDTO> {
-  const { server, ps, player } = await load(partner, id);
+  const { server, ps, player } = await loadPartnerServer(partner, id);
   if (!ps.hostActive) {
     throw new ApiError(409, 'not_running', L('Für diesen Server läuft keine Sitzung (mehr). Bitte neu starten.', 'No session is running for this server (any more). Please start it again.'), { reason: ps.stopReason ?? 'not_started' });
   }
@@ -550,16 +565,33 @@ export async function heartbeatMany(partner: Partner, ids: string[]): Promise<{ 
   return { ok, notRunning: wanted.filter((id) => !ok.includes(id)) };
 }
 
-/** Der Host hat den Launcher geschlossen: Server herunterfahren – die Daten bleiben erhalten */
-export async function stopPartnerServer(partner: Partner, id: string): Promise<PartnerServerDTO> {
-  const { server, ps } = await load(partner, id);
+/** Spielerzahl eines laufenden Servers (null = antwortet nicht) */
+export async function playersOnline(server: Pick<Server, 'address'>): Promise<{ online: number; max: number } | null> {
+  if (!server.address) return null;
+  const at = server.address.lastIndexOf(':');
+  const status = await minecraftStatus(server.address.slice(0, at), Number(server.address.slice(at + 1)), 2500).catch(() => null);
+  return status ? { online: status.online, max: status.max } : null;
+}
+
+/**
+ * Der Host hat den Launcher geschlossen: Server herunterfahren – die Daten bleiben erhalten.
+ * Mit `whenEmpty` (und der Freigabe „weiterlaufen, solange Spieler online sind“) läuft der Server weiter,
+ * bis niemand mehr darauf ist.
+ */
+export async function stopPartnerServer(partner: Partner, id: string, opts: { whenEmpty?: boolean } = {}): Promise<PartnerServerDTO> {
+  const { server, ps } = await loadPartnerServer(partner, id);
+  if (opts.whenEmpty && partner.keepAliveWhilePlayers && ps.hostActive && ((await playersOnline(server))?.online ?? 0) > 0) {
+    // Der Host ist weg: kein Lebenszeichen mehr – der Hintergrund-Job stoppt, sobald der Server leer ist
+    await db.update(partnerServers).set({ heartbeatAt: new Date(0) }).where(eq(partnerServers.serverId, id));
+    return getPartnerServer(partner, id);
+  }
   await endSession(partner, server, ps, 'host_stopped', new Date());
   return getPartnerServer(partner, id);
 }
 
 /** Konsolenbefehl an den laufenden Server (z. B. `op <Name>` für den Host) */
 export async function commandPartnerServer(partner: Partner, id: string, command: string): Promise<void> {
-  const { server, ps } = await load(partner, id);
+  const { server, ps } = await loadPartnerServer(partner, id);
   if (!ps.hostActive || !server.pteroIdentifier) throw new ApiError(409, 'not_running', L('Der Server läuft nicht.', 'The server is not running.'));
   try {
     await pterodactyl().sendCommand(server.pteroIdentifier, command.replace(/^\//, '').replace(/[\r\n]+/g, ' ').slice(0, 200));
@@ -570,7 +602,7 @@ export async function commandPartnerServer(partner: Partner, id: string, command
 
 /** Server samt Daten löschen */
 export async function deletePartnerServer(partner: Partner, id: string, ip?: string): Promise<void> {
-  const { server } = await load(partner, id);
+  const { server } = await loadPartnerServer(partner, id);
   await hardDeleteServer(server);
   await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_deleted', message: `Partner „${partner.name}“: Server „${server.name}“ gelöscht`, ip });
 }
@@ -584,7 +616,7 @@ export async function deletePartnerServer(partner: Partner, id: string, ip?: str
  *  – löscht lange nicht gestartete Server
  */
 export async function runPartnerSessions(now = new Date()) {
-  const stats = { active: 0, timeouts: 0, limits: 0, warned: 0, strays: 0, idleDeleted: 0 };
+  const stats = { active: 0, timeouts: 0, limits: 0, warned: 0, strays: 0, idleDeleted: 0, keptAlive: 0 };
   const all = await db.select().from(partners);
   const byId = new Map(all.map((p) => [p.id, p]));
 
@@ -598,14 +630,18 @@ export async function runPartnerSessions(now = new Date()) {
     const silent = ps.heartbeatAt ? (now.getTime() - ps.heartbeatAt.getTime()) / 1000 : Infinity;
     if (!partner.enabled || server.status !== 'active') {
       await endSession(partner, server, ps, 'admin', now);
-    } else if (silent > partner.heartbeatTimeoutSeconds) {
-      // Der Launcher des Hosts meldet sich nicht mehr (geschlossen, abgestürzt, offline)
-      await endSession(partner, server, ps, 'host_timeout', now);
-      stats.timeouts++;
     } else if (run >= max) {
       if (server.pteroIdentifier) await pterodactyl().sendCommand(server.pteroIdentifier, `say Laufzeit-Grenze erreicht – der Server pausiert jetzt ${partner.cooldownHours} Stunden. / Runtime limit reached – the server now pauses for ${partner.cooldownHours} hours.`).catch(() => {});
       await endSession(partner, server, ps, 'session_limit', now);
       stats.limits++;
+    } else if (silent > partner.heartbeatTimeoutSeconds && partner.keepAliveWhilePlayers && ((await playersOnline(server))?.online ?? 0) > 0) {
+      // Der Host ist weg, aber es sind noch Spieler da: weiterlaufen lassen (die Laufzeit zählt weiter)
+      await db.update(partnerServers).set({ runSeconds: run, countedAt: now }).where(and(eq(partnerServers.serverId, ps.serverId), eq(partnerServers.hostActive, true)));
+      stats.keptAlive++;
+    } else if (silent > partner.heartbeatTimeoutSeconds) {
+      // Der Launcher des Hosts meldet sich nicht mehr (geschlossen, abgestürzt, offline)
+      await endSession(partner, server, ps, 'host_timeout', now);
+      stats.timeouts++;
     } else {
       // Laufzeit verbuchen und kurz vor der Grenze im Spiel Bescheid sagen (10 und 1 Minute)
       const leftMinutes = (max - run) / 60;

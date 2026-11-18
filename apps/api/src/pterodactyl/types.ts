@@ -26,6 +26,14 @@ export interface PteroServer {
   allocations: PteroAllocation[];
 }
 
+/** Eintrag in der Dateiliste eines Servers */
+export interface PteroFile {
+  name: string;
+  directory: boolean;
+  size: number;
+  modifiedAt: string;
+}
+
 /** Port (Allokation) im Panel */
 export interface PteroAllocation {
   id: number;
@@ -179,6 +187,24 @@ export interface PterodactylGateway {
   readFile(identifier: string, path: string): Promise<string | null>;
   /** Textdatei eines Servers schreiben (legt sie bei Bedarf an) */
   writeFile(identifier: string, path: string, content: string): Promise<void>;
+
+  /* ---- Dateien (für die Partner-API: Mods, Plugins, Welten, Einstellungen) ---- */
+  listFiles(identifier: string, directory: string): Promise<PteroFile[]>;
+  /** Datei mit beliebigem Inhalt schreiben (legt sie bei Bedarf an) */
+  writeFileRaw(identifier: string, path: string, content: Buffer): Promise<void>;
+  /** Dateien oder Ordner in einem Verzeichnis löschen */
+  deleteFiles(identifier: string, root: string, names: string[]): Promise<void>;
+  createFolder(identifier: string, root: string, name: string): Promise<void>;
+  /** Kurzlebige Adresse, an die eine Datei direkt hochgeladen wird (multipart, Feld „files“) */
+  fileUploadUrl(identifier: string): Promise<string>;
+  /** Kurzlebige Adresse zum Herunterladen einer Datei */
+  fileDownloadUrl(identifier: string, path: string): Promise<string>;
+  /** Archiv (zip, tar.gz …) an Ort und Stelle entpacken */
+  decompressFile(identifier: string, root: string, file: string): Promise<void>;
+  /** Datei von einer Adresse im Internet direkt auf den Server laden */
+  pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void>;
+  /** Server im Panel umbenennen */
+  renameServer(id: number, name: string): Promise<void>;
 
   /** Erreichbarkeit in ms */
   ping(): Promise<number>;

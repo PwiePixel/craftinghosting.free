@@ -120,6 +120,13 @@
       "when": 1795018839746,
       "tag": "0016_partner_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795021904015,
+      "tag": "0017_partner_keep_alive",
+      "breakpoints": true
     }
   ]
 }

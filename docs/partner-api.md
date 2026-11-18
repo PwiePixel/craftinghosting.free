@@ -46,6 +46,38 @@ Spieler erstellen im Launcher einen Server, der nicht auf ihrem PC läuft, sonde
 | `POST` | `/servers/{id}/command` | Konsolenbefehl, z. B. `{"command":"op Steve"}` |
 | `DELETE` | `/servers/{id}` | Server samt Daten löschen (auch `POST /servers/{id}/delete`) |
 
+### Weitere Endpunkte (Dateien, Mods, Konsole, Einstellungen, Live-Werte)
+
+| Methode | Pfad | Zweck |
+| --- | --- | --- |
+| `PATCH` | `/servers/{id}` | Umbenennen: `{"name":"…"}` (die Spieler-ID im Namen bleibt) |
+| `GET` | `/servers/{id}/stats` | CPU, Arbeitsspeicher, Speicherplatz, Netzwerk, Laufzeit, `players` (`{online,max}` oder `null`) |
+| `GET` | `/servers/{id}/logs?lines=100` | Die letzten Zeilen der Konsole (aus `logs/latest.log`, höchstens 1000) |
+| `GET` / `PATCH` | `/servers/{id}/settings` | `server.properties` lesen/setzen: `motd`, `maxPlayers` (1–100), `gamemode`, `difficulty`, `hardcore`, `pvp`, `whitelist`, `allowFlight`, `seed`, `levelType` (`normal`/`flat`/`large_biomes`/`amplified`), `spawnProtection` (0–64), `viewDistance`, `simulationDistance` (3–16) |
+| `GET` | `/servers/{id}/files?dir=/mods` | Dateien und Ordner auflisten |
+| `GET` / `PUT` | `/servers/{id}/files/content?path=…` | Textdatei lesen bzw. Datei schreiben (Inhalt = Körper der Anfrage, bis 10 MB) |
+| `POST` | `/servers/{id}/files/upload-url` | Adresse für den direkten Upload großer Dateien (`multipart/form-data`, Feld `files`, gilt 10 Minuten) |
+| `GET` | `/servers/{id}/files/download-url?path=…` | Adresse zum Herunterladen |
+| `POST` | `/servers/{id}/files/delete` | `{"paths":["/mods/alt.jar"]}` |
+| `POST` | `/servers/{id}/files/folder` | `{"path":"/config/neu"}` |
+| `POST` | `/servers/{id}/files/decompress` | Archiv entpacken: `{"path":"/welt.zip"}` |
+| `POST` | `/servers/{id}/files/pull` | Datei von einer https-Adresse laden: `{"url":"…","directory":"/mods"}` |
+| `POST` | `/servers/{id}/mods` | Modrinth: `{"project":"sodium"}` oder `{"version":"<Versions-ID>"}`; Pflicht-Abhängigkeiten kommen mit (`"dependencies":false` schaltet das ab) |
+
+Hinweise:
+
+- Dateien und Einstellungen lassen sich ändern, sobald der Server installiert ist – auch vor dem ersten Start. Wirksam
+  werden sie beim nächsten Start; `seed` und `levelType` nur für eine neu erzeugte Welt.
+- `POST /servers/{id}/stop` mit `{"whenEmpty":true}`: Ist für den Partner „Weiterlaufen, solange Spieler online sind“
+  eingeschaltet, läuft der Server weiter, bis niemand mehr darauf ist (`session.hostPresent` ist dann `false`).
+- Jede Server-Antwort enthält `host`, `port` (bleiben gleich, solange es den Server gibt – außer wir verlegen ihn auf
+  andere Hardware) und `deleteAt` (Löschung, wenn bis dahin nicht gestartet wird).
+- **Anfrage-Limit** je API-Key und Minute: `heartbeat` 12 000 · `GET /servers/{id}` und `stats` 6 000 · übrige
+  Lese-Endpunkte, `start`, `stop`, `command` 1 200 · Schreiben (Dateien, Mods, Einstellungen, Umbenennen, Löschen) und
+  `GET /me` 600 · `POST /servers` und `decompress` 300. Jede Antwort enthält `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining` und `X-RateLimit-Reset`; bei Überschreitung `429` mit `Retry-After`.
+- Die vollständige Beschreibung mit Beispielen steht für Partner-Konten unter `/docs/partner-api`.
+
 ### Server erstellen
 
 ```bash

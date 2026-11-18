@@ -9,6 +9,7 @@ import {
   type CreateServerSpec,
   type PteroAllocation,
   type PteroEgg,
+  type PteroFile,
   type PteroEggSummary,
   type PteroLocation,
   type PteroNode,
@@ -422,6 +423,59 @@ export class PterodactylHttpClient implements PterodactylGateway {
   async writeFile(identifier: string, path: string, content: string): Promise<void> {
     const res = await this.fileRequest('POST', identifier, 'write', path, content);
     if (!res.ok) throw new PterodactylError(`Pterodactyl POST files/write → ${res.status}`, res.status);
+  }
+
+  /* ---- Dateien ---- */
+
+  async listFiles(identifier: string, directory: string): Promise<PteroFile[]> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/files/list?directory=${encodeURIComponent(directory)}`);
+    return ((res.data ?? []) as Json[]).map((f) => ({ name: f.attributes.name, directory: !f.attributes.is_file, size: Number(f.attributes.size ?? 0), modifiedAt: f.attributes.modified_at }));
+  }
+
+  async writeFileRaw(identifier: string, path: string, content: Buffer): Promise<void> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/api/client/servers/${identifier}/files/write?file=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.opts.clientKey}`, Accept: 'Application/vnd.pterodactyl.v1+json', 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array(content),
+        signal: AbortSignal.timeout(Math.max(this.opts.timeoutMs, 60_000)),
+      });
+    } catch (err) {
+      throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
+    }
+    if (!res.ok) throw new PterodactylError(`Pterodactyl POST files/write → ${res.status}`, res.status);
+  }
+
+  async deleteFiles(identifier: string, root: string, names: string[]): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/delete`, { root, files: names });
+  }
+
+  async createFolder(identifier: string, root: string, name: string): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/create-folder`, { root, name });
+  }
+
+  async fileUploadUrl(identifier: string): Promise<string> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/files/upload`);
+    return res.attributes.url as string;
+  }
+
+  async fileDownloadUrl(identifier: string, path: string): Promise<string> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/files/download?file=${encodeURIComponent(path)}`);
+    return res.attributes.url as string;
+  }
+
+  async decompressFile(identifier: string, root: string, file: string): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/decompress`, { root, file });
+  }
+
+  async pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/pull`, { url, directory, filename, foreground: true });
+  }
+
+  async renameServer(id: number, name: string): Promise<void> {
+    const a = (await this.request('application', 'GET', `/servers/${id}`)).attributes as Json;
+    await this.request('application', 'PATCH', `/servers/${id}/details`, { name, user: a.user, external_id: a.external_id ?? undefined, description: a.description ?? '' });
   }
 
   async createBackupSchedule(identifier: string, spec: BackupScheduleSpec): Promise<number> {

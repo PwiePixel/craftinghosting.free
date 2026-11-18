@@ -18,6 +18,7 @@ import {
   type PteroResources,
   type PteroServer,
   type PteroAllocation,
+  type PteroFile,
   type PteroUser,
   type PterodactylGateway,
 } from './types';
@@ -458,6 +459,77 @@ export class PterodactylMockClient implements PterodactylGateway {
     if (!s) throw new PterodactylError('server not found', 404);
     s.files = { ...s.files, [path]: content };
     this.save(state);
+  }
+
+  /* ---- Dateien: Der Mock führt eine flache Liste „Pfad → Inhalt“ ---- */
+
+  private withFiles<T>(identifier: string, fn: (files: Record<string, string>) => T): T {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    const files = { ...(s.files ?? {}) };
+    const out = fn(files);
+    s.files = files;
+    this.save(state);
+    return out;
+  }
+
+  async listFiles(identifier: string, directory: string): Promise<PteroFile[]> {
+    const dir = directory.endsWith('/') ? directory : `${directory}/`;
+    return this.withFiles(identifier, (files) => {
+      const seen = new Map<string, PteroFile>();
+      for (const [path, content] of Object.entries(files)) {
+        if (!path.startsWith(dir)) continue;
+        const rest = path.slice(dir.length);
+        const name = rest.split('/')[0]!;
+        if (!name || name === '.keep') continue;
+        const isDir = rest.includes('/');
+        if (!seen.has(name) || isDir) seen.set(name, { name, directory: isDir, size: isDir ? 0 : content.length, modifiedAt: new Date(0).toISOString() });
+      }
+      return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    });
+  }
+
+  async writeFileRaw(identifier: string, path: string, content: Buffer): Promise<void> {
+    this.withFiles(identifier, (files) => void (files[path] = content.toString('utf8')));
+  }
+
+  async deleteFiles(identifier: string, root: string, names: string[]): Promise<void> {
+    const base = root.endsWith('/') ? root : `${root}/`;
+    this.withFiles(identifier, (files) => {
+      for (const name of names) for (const path of Object.keys(files)) if (path === base + name || path.startsWith(`${base}${name}/`)) delete files[path];
+    });
+  }
+
+  async createFolder(identifier: string, root: string, name: string): Promise<void> {
+    this.withFiles(identifier, (files) => void (files[`${root.endsWith('/') ? root : `${root}/`}${name}/.keep`] = ''));
+  }
+
+  async fileUploadUrl(identifier: string): Promise<string> {
+    return `https://node.mock.invalid/upload/file?token=mock-${identifier}`;
+  }
+
+  async fileDownloadUrl(identifier: string, path: string): Promise<string> {
+    if (this.withFiles(identifier, (files) => files[path]) === undefined) throw new PterodactylError('file not found', 404);
+    return `https://node.mock.invalid/download/file?token=mock-${identifier}&file=${encodeURIComponent(path)}`;
+  }
+
+  async decompressFile(identifier: string, root: string, file: string): Promise<void> {
+    const base = root.endsWith('/') ? root : `${root}/`;
+    this.withFiles(identifier, (files) => {
+      if (files[base + file] === undefined) throw new PterodactylError('file not found', 404);
+      files[`${base}${file.replace(/\.(zip|tar\.gz|tgz)$/i, '')}/level.dat`] = `entpackt aus ${file}`;
+    });
+  }
+
+  async pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void> {
+    this.withFiles(identifier, (files) => void (files[`${directory.endsWith('/') ? directory : `${directory}/`}${filename}`] = `geladen von ${url}`));
+  }
+
+  async renameServer(id: number, name: string): Promise<void> {
+    this.mutate(id, (s) => {
+      s.name = name;
+    });
   }
 
   async createBackupSchedule(identifier: string, _spec: BackupScheduleSpec): Promise<number> {

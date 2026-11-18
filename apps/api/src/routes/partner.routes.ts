@@ -32,11 +32,30 @@ import {
   updatePartner,
   upsertPlayer,
 } from '../services/partner.service';
+import {
+  createPartnerFolder,
+  decompressPartnerFile,
+  deletePartnerFiles,
+  getPartnerSettings,
+  installModrinth,
+  listPartnerFiles,
+  partnerDownloadUrl,
+  partnerLogs,
+  partnerStats,
+  partnerUploadUrl,
+  pullPartnerFile,
+  readPartnerFile,
+  renamePartnerServer,
+  setPartnerSettings,
+  writePartnerFile,
+} from '../services/partner-extras.service';
 import { getSettings } from '../services/settings.service';
 
 declare module 'fastify' {
   interface FastifyRequest {
     partner: Partner | null;
+    /** Unveränderter Inhalt der Anfrage (für Datei-Uploads über die Partner-API) */
+    rawBody: Buffer | null;
   }
 }
 
@@ -66,10 +85,18 @@ const playerSchema = z.object({ externalId: z.string().trim().min(1).max(80), na
 
 export async function partnerRoutes(app: FastifyInstance) {
   app.decorateRequest('partner', null);
+  app.decorateRequest('rawBody', null);
+  // Alles andere (Dateien beliebiger Art) kommt unverändert als Bytes an
+  app.addContentTypeParser('*', { parseAs: 'buffer' }, (request, body, done) => {
+    request.rawBody = Buffer.isBuffer(body) ? body : null;
+    done(null, body);
+  });
 
   // Viele Clients schicken POST-Anfragen ohne Inhalt, aber mit JSON-Kopfzeile (z. B. Lebenszeichen, Stopp) – das ist hier erlaubt
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
     const text = typeof body === 'string' ? body.trim() : '';
+    // Für Datei-Uploads bleibt der Inhalt so erhalten, wie er geschickt wurde (auch wenn es JSON ist)
+    _request.rawBody = typeof body === 'string' ? Buffer.from(body, 'utf8') : null;
     if (!text) return done(null, {});
     try {
       done(null, JSON.parse(text));
@@ -148,7 +175,10 @@ export async function partnerRoutes(app: FastifyInstance) {
   });
 
   /** Der Host hat den Launcher geschlossen */
-  app.post('/partner/servers/:id/stop', limit(1200), async (request) => ({ server: await stopPartnerServer(partnerOf(request), idOf(request)) }));
+  app.post('/partner/servers/:id/stop', limit(1200), async (request) => {
+    const body = z.object({ whenEmpty: z.boolean().optional() }).parse(request.body ?? {});
+    return { server: await stopPartnerServer(partnerOf(request), idOf(request), body) };
+  });
 
   /** Konsolenbefehl (z. B. „op Name“) */
   app.post('/partner/servers/:id/command', limit(1200), async (request) => {
@@ -156,6 +186,65 @@ export async function partnerRoutes(app: FastifyInstance) {
     await commandPartnerServer(partnerOf(request), idOf(request), command);
     return { ok: true };
   });
+
+  /** Server umbenennen: { "name": "…" } */
+  app.patch('/partner/servers/:id', limit(600), async (request) => {
+    const { name } = z.object({ name: z.string().max(60) }).parse(request.body);
+    return { server: await renamePartnerServer(partnerOf(request), idOf(request), name, request.ip) };
+  });
+
+  /* ---- Dateien: Mods, Plugins, Einstellungen, Welten ---- */
+  const pathQuery = z.object({ path: z.string().min(1).max(400) });
+
+  app.get('/partner/servers/:id/files', limit(1200), async (request) => {
+    const { dir } = z.object({ dir: z.string().max(400).default('/') }).parse(request.query);
+    return listPartnerFiles(partnerOf(request), idOf(request), dir);
+  });
+  /** Textdatei lesen */
+  app.get('/partner/servers/:id/files/content', limit(1200), async (request) => readPartnerFile(partnerOf(request), idOf(request), pathQuery.parse(request.query).path));
+  /** Datei schreiben: Inhalt als Körper der Anfrage (bis 10 MB) */
+  app.put('/partner/servers/:id/files/content', { ...limit(600), bodyLimit: 10 * 1024 * 1024 }, async (request) => {
+    const content = request.rawBody ?? (typeof request.body === 'string' ? Buffer.from(request.body) : null);
+    if (!content) throw new ApiError(400, 'validation_error', L('Der Inhalt der Datei fehlt.', 'The file content is missing.'));
+    return writePartnerFile(partnerOf(request), idOf(request), pathQuery.parse(request.query).path, content);
+  });
+  /** Adresse für den direkten Upload großer Dateien (multipart, Feld „files“) */
+  app.post('/partner/servers/:id/files/upload-url', limit(600), async (request) => {
+    const { directory } = z.object({ directory: z.string().max(400).default('/') }).parse(request.body ?? {});
+    return partnerUploadUrl(partnerOf(request), idOf(request), directory);
+  });
+  app.get('/partner/servers/:id/files/download-url', limit(1200), async (request) => partnerDownloadUrl(partnerOf(request), idOf(request), pathQuery.parse(request.query).path));
+  app.post('/partner/servers/:id/files/delete', limit(600), async (request) => {
+    const { paths } = z.object({ paths: z.array(z.string().min(1).max(400)).min(1).max(100) }).parse(request.body);
+    return deletePartnerFiles(partnerOf(request), idOf(request), paths);
+  });
+  app.post('/partner/servers/:id/files/folder', limit(600), async (request) => createPartnerFolder(partnerOf(request), idOf(request), pathQuery.parse(request.body).path));
+  /** Archiv entpacken (z. B. eine hochgeladene Welt) */
+  app.post('/partner/servers/:id/files/decompress', limit(300), async (request) => decompressPartnerFile(partnerOf(request), idOf(request), pathQuery.parse(request.body).path));
+  /** Datei von einer https-Adresse direkt auf den Server laden */
+  app.post('/partner/servers/:id/files/pull', limit(600), async (request) => {
+    const body = z.object({ url: z.string().min(8).max(2000), directory: z.string().max(400).default('/'), filename: z.string().max(120).optional() }).parse(request.body);
+    return pullPartnerFile(partnerOf(request), idOf(request), body);
+  });
+
+  /** Mod bzw. Plugin von Modrinth installieren: { "project": "sodium" } oder { "version": "<Versions-ID>" } */
+  app.post('/partner/servers/:id/mods', limit(600), async (request) => {
+    const body = z.object({ source: z.literal('modrinth').default('modrinth'), project: z.string().trim().min(1).max(80).optional(), version: z.string().trim().min(1).max(80).optional(), dependencies: z.boolean().optional() }).parse(request.body);
+    return installModrinth(partnerOf(request), idOf(request), body, request.ip);
+  });
+
+  /** Die letzten Zeilen der Konsole */
+  app.get('/partner/servers/:id/logs', limit(1200), async (request) => {
+    const { lines } = z.object({ lines: z.coerce.number().int().min(1).max(1000).default(100) }).parse(request.query);
+    return partnerLogs(partnerOf(request), idOf(request), lines);
+  });
+
+  /** Servereinstellungen (server.properties) lesen und setzen */
+  app.get('/partner/servers/:id/settings', limit(1200), async (request) => getPartnerSettings(partnerOf(request), idOf(request)));
+  app.patch('/partner/servers/:id/settings', limit(600), async (request) => setPartnerSettings(partnerOf(request), idOf(request), z.record(z.string(), z.unknown()).parse(request.body)));
+
+  /** Live-Werte: CPU, Arbeitsspeicher, Speicherplatz, Spielerzahl */
+  app.get('/partner/servers/:id/stats', limit(6000), async (request) => partnerStats(partnerOf(request), idOf(request)));
 
   /** Server samt Daten löschen (DELETE oder POST …/delete) */
   const remove = async (request: FastifyRequest) => {
@@ -179,6 +268,7 @@ export async function partnerAdminRoutes(app: FastifyInstance) {
     heartbeatTimeoutSeconds: z.number().int().min(60).max(3600).default(180),
     deleteAfterIdleDays: z.number().int().min(0).max(3650).default(30),
     nodeIds: z.array(z.number().int().positive()).max(50).default([]),
+    keepAliveWhilePlayers: z.boolean().default(false),
   });
   const idOf = (request: FastifyRequest) => idParam.parse(request.params).id;
 
