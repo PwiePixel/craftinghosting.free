@@ -10,7 +10,7 @@ import { lookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
-import { and, asc, count, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, lt, lte, or } from 'drizzle-orm';
 import { affectedRows, db } from '../db/client';
 import { partnerWebhookEvents, partners, type Partner } from '../db/schema';
 import { env } from '../env';
@@ -144,12 +144,13 @@ export async function clearPartnerWebhook(partner: Partner): Promise<void> {
 
 export async function partnerWebhookStatus(partner: Partner) {
   const [fresh] = await db.select({ url: partners.webhookUrl }).from(partners).where(eq(partners.id, partner.id)).limit(1);
-  const recent = await db.select().from(partnerWebhookEvents).where(eq(partnerWebhookEvents.partnerId, partner.id)).orderBy(asc(partnerWebhookEvents.createdAt)).limit(1000);
-  const last = recent.slice(-20).reverse();
+  const [pending] = await db.select({ n: count() }).from(partnerWebhookEvents).where(and(eq(partnerWebhookEvents.partnerId, partner.id), isNull(partnerWebhookEvents.deliveredAt), isNull(partnerWebhookEvents.failedAt)));
+  // Die neuesten zuerst
+  const last = await db.select().from(partnerWebhookEvents).where(eq(partnerWebhookEvents.partnerId, partner.id)).orderBy(desc(partnerWebhookEvents.createdAt)).limit(20);
   return {
     url: fresh?.url ?? null,
     events: ['server.installed', 'server.install_failed', 'server.running', 'server.stopped', 'server.cooldown_ended', 'server.deletion_soon', 'server.deleted'],
-    pending: recent.filter((e) => !e.deliveredAt && !e.failedAt).length,
+    pending: Number(pending?.n ?? 0),
     recent: last.map((e) => ({ id: e.id, type: e.type, createdAt: e.createdAt.toISOString(), status: e.deliveredAt ? 'delivered' : e.failedAt ? 'failed' : 'pending', attempts: e.attempts, lastError: e.lastError })),
   };
 }
@@ -169,19 +170,14 @@ export const signWebhook = (secret: string, timestamp: number, body: string) => 
 /** Fällige Ereignisse zustellen (Job, alle 15 Sekunden) und alte aufräumen */
 export async function deliverPartnerWebhooks(now = new Date()) {
   const stats = { delivered: 0, failed: 0, dropped: 0, postponed: 0 };
-  const due = await db
-    .select()
-    .from(partnerWebhookEvents)
-    .where(and(isNull(partnerWebhookEvents.deliveredAt), isNull(partnerWebhookEvents.failedAt), lte(partnerWebhookEvents.nextAttemptAt, now)))
-    .orderBy(asc(partnerWebhookEvents.createdAt))
-    .limit(1000);
-  // Je Partner getrennt und mehrere Partner gleichzeitig: Ein Empfänger, der hängt oder Fehler liefert, darf die
-  // Zustellung an alle anderen nicht aufhalten. Je Lauf und Partner höchstens PER_RUN Ereignisse.
-  const byPartner = new Map<string, (typeof due)[number][]>();
-  for (const event of due) {
-    const list = byPartner.get(event.partnerId) ?? [];
-    if (list.length < PER_RUN) list.push(event);
-    byPartner.set(event.partnerId, list);
+  // Je Partner getrennt und mehrere Partner gleichzeitig: Ein Empfänger, der hängt oder Fehler liefert (oder ein Partner
+  // mit tausenden wartenden Ereignissen), darf die Zustellung an alle anderen nicht aufhalten. Deshalb zuerst die
+  // Partner mit fälligen Ereignissen ermitteln und dann je Partner höchstens PER_RUN der ältesten laden.
+  const open = and(isNull(partnerWebhookEvents.deliveredAt), isNull(partnerWebhookEvents.failedAt), lte(partnerWebhookEvents.nextAttemptAt, now));
+  const waiting = await db.selectDistinct({ partnerId: partnerWebhookEvents.partnerId }).from(partnerWebhookEvents).where(open).limit(500);
+  const byPartner = new Map<string, (typeof partnerWebhookEvents.$inferSelect)[]>();
+  for (const { partnerId } of waiting) {
+    byPartner.set(partnerId, await db.select().from(partnerWebhookEvents).where(and(eq(partnerWebhookEvents.partnerId, partnerId), open)).orderBy(asc(partnerWebhookEvents.createdAt)).limit(PER_RUN));
   }
   await mapLimit([...byPartner.entries()], 4, async ([partnerId, events]) => {
     const [p] = await db.select({ url: partners.webhookUrl, secret: partners.webhookSecret, enabled: partners.enabled }).from(partners).where(eq(partners.id, partnerId)).limit(1);

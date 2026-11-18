@@ -373,22 +373,6 @@ export const freeHostingConfig: FreeHostingConfig = {
       defaultVersion: '1.20.1',
     },
     {
-      id: 'neoforge',
-      kind: 'minecraft',
-      name: 'NeoForge',
-      description: { de: 'Moderner Mod-Loader, Nachfolger von Forge für neue Versionen.', en: 'Modern mod loader, the successor of Forge for new versions.' },
-      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4'],
-      defaultVersion: 'latest',
-    },
-    {
-      id: 'quilt',
-      kind: 'minecraft',
-      name: 'Quilt',
-      description: { de: 'Mod-Loader, der auch die meisten Fabric-Mods lädt.', en: 'Mod loader that also loads most Fabric mods.' },
-      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'],
-      defaultVersion: 'latest',
-    },
-    {
       id: 'python',
       kind: 'discord',
       name: 'Python',
@@ -415,6 +399,32 @@ export function serverTypesOf(kind: ProductKind): ServerTypeConfig[] {
   return serverTypes.filter((t) => t.kind === kind);
 }
 
+/**
+ * Zusätzliche Minecraft-Typen, die es nur über die Partner-API gibt (dort richtet die API die Software selbst ein).
+ * Sie stehen bewusst NICHT in `serverTypes`: Auf der Website, in den Texten und im Admin-Bereich tauchen sie nicht auf.
+ */
+export const partnerServerTypes: readonly ServerTypeConfig[] = [
+  {
+    id: 'neoforge',
+    kind: 'minecraft',
+    name: 'NeoForge',
+    description: { de: 'Moderner Mod-Loader, Nachfolger von Forge für neue Versionen.', en: 'Modern mod loader, the successor of Forge for new versions.' },
+    versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4'],
+    defaultVersion: 'latest',
+  },
+  {
+    id: 'quilt',
+    kind: 'minecraft',
+    name: 'Quilt',
+    description: { de: 'Mod-Loader, der auch die meisten Fabric-Mods lädt.', en: 'Mod loader that also loads most Fabric mods.' },
+    versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'],
+    defaultVersion: 'latest',
+  },
+];
+
+/** Alle Typen für Partner: die der Website plus die zusätzlichen */
+export const allMinecraftTypesForPartners = (): ServerTypeConfig[] => [...serverTypes.filter((t) => t.kind === 'minecraft'), ...partnerServerTypes];
+
 export function getServerType(id: string): ServerTypeConfig | undefined {
-  return serverTypes.find((t) => t.id === id);
+  return serverTypes.find((t) => t.id === id) ?? partnerServerTypes.find((t) => t.id === id);
 }

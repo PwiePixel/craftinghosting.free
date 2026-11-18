@@ -10,19 +10,19 @@
  * Verzeichnis (nie vom Partner) und werden vor dem Ausführen geprüft. Paket, Arbeitsspeicher, CPU, Speicherplatz und
  * Ports des Servers werden dabei nie angefasst.
  */
-import { eq, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getServerType } from '@chfree/shared';
-import { db } from '../db/client';
+import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
-import { BASE_SERVER_TYPE, sharesBaseEgg } from '../config/pterodactyl.config';
-import { Errors, L } from '../lib/errors';
+import { BASE_SERVER_TYPE, getEggMapping, sharesBaseEgg } from '../config/pterodactyl.config';
+import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
 import { startupFor } from './provisioning.service';
-import { getSettings, serverTypeAvailable } from './settings.service';
+import { getSettings } from './settings.service';
 import type { SiteSettings } from '@chfree/shared';
 
 /** Unsere Servertypen → Bezeichnung im Verzeichnis */
@@ -35,7 +35,7 @@ export const installsViaDirectory = (serverType: string, settings: Pick<SiteSett
 export function partnerTypeAvailable(serverType: string, settings: SiteSettings): boolean {
   const type = getServerType(serverType);
   if (!type || type.kind !== 'minecraft') return false;
-  return installsViaDirectory(serverType, settings) || serverTypeAvailable(serverType, settings);
+  return installsViaDirectory(serverType, settings) || !!getEggMapping(serverType, settings);
 }
 
 interface DirectoryBuild {
@@ -156,21 +156,48 @@ export const newSoftwareJob = (software: ResolvedSoftware, waitInstall: boolean)
   error: null,
 });
 
-/** Passendes Java-Image aus den Images des Eggs: genau die benötigte Version, sonst die nächsthöhere */
-export function pickJavaImage(images: Record<string, string>, java: number | null): string | null {
+/**
+ * Passendes Java-Image aus den Images des Eggs: genau die benötigte Version, sonst die nächsthöhere.
+ * Rückgabe: das Image, `null` = nichts zu ändern (Java-Version oder Images unbekannt), `false` = das Egg kennt
+ * Java-Images, aber keines reicht für diese Minecraft-Version aus.
+ */
+export function pickJavaImage(images: Record<string, string>, java: number | null): string | null | false {
   if (!java) return null;
   const known = Object.entries(images)
     .map(([name, image]) => ({ image, version: Number(/java[ _-]?(\d{1,2})/i.exec(image)?.[1] ?? /java[ _-]?(\d{1,2})/i.exec(name)?.[1] ?? NaN) }))
     .filter((e) => Number.isFinite(e.version))
     .sort((a, b) => a.version - b.version);
-  return (known.find((e) => e.version === java) ?? known.find((e) => e.version > java))?.image ?? null;
+  if (known.length === 0) return null;
+  return (known.find((e) => e.version === java) ?? known.find((e) => e.version > java))?.image ?? false;
+}
+
+/** Höchstzahl gleichzeitig offener Einrichtungen je Partner (jede kostet regelmäßige Panel-Abfragen) */
+export const MAX_OPEN_INSTALLS = 10;
+
+/** Vor dem Anlegen einer neuen Einrichtung: Hat der Partner schon zu viele offene? */
+export async function assertInstallSlot(partnerId: string, exceptServerId?: string): Promise<void> {
+  const [open] = await db
+    .select({ n: count() })
+    .from(partnerServers)
+    .innerJoin(servers, eq(servers.id, partnerServers.serverId))
+    .where(and(eq(partnerServers.partnerId, partnerId), ne(servers.status, 'deleted'), sql`${partnerServers.softwareJob} is not null`, sql`json_extract(${partnerServers.softwareJob}, '$.error') is null`, ...(exceptServerId ? [ne(partnerServers.serverId, exceptServerId)] : [])));
+  if (Number(open?.n ?? 0) >= MAX_OPEN_INSTALLS) {
+    throw new ApiError(429, 'too_many_installs', L(`Es werden gerade schon ${MAX_OPEN_INSTALLS} Server eingerichtet. Bitte warten, bis einer fertig ist.`, `${MAX_OPEN_INSTALLS} servers are already being set up. Please wait until one has finished.`), { retryAfterSeconds: '30' });
+  }
 }
 
 /* ------------------------------------------------------------ Ausführung (Hintergrund-Job) */
 
 const PULL_TIMEOUT_MS = 15 * 60_000;
 const UNZIP_TIMEOUT_MS = 5 * 60_000;
-const MAX_ATTEMPTS = 5;
+const MAX_ATTEMPTS = 8;
+/** Gesamtfrist einer Einrichtung (inklusive der Grundinstallation im Panel) */
+const JOB_DEADLINE_MS = 60 * 60_000;
+/** Je Lauf höchstens so viele Einrichtungen anfassen – begrenzt die Panel-Aufrufe unabhängig von der Zahl offener Aufträge */
+const PER_RUN = 20;
+
+/** Abstand bis zur nächsten Abfrage: 5 s, 10 s, 20 s, dann 30 s */
+const pollDelay = (polls: number) => Math.min(30_000, 5_000 * 2 ** Math.min(polls, 3));
 
 /** Fortschritt für die API-Antwort */
 export function softwareProgress(ps: Pick<PartnerServer, 'softwareJob'>): { status: 'installing' | 'failed'; serverType: string; version: string; build: string; step: number; steps: number; error: string | null } | null {
@@ -181,100 +208,138 @@ export function softwareProgress(ps: Pick<PartnerServer, 'softwareJob'>): { stat
 
 async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'done' | 'failed' | 'waiting'> {
   const job = { ...ps.softwareJob! };
-  const save = () => db.update(partnerServers).set({ softwareJob: job }).where(eq(partnerServers.serverId, server.id));
-  const fail = async (message: string) => {
+  // Nur schreiben, solange es noch derselbe Auftrag ist (ein neuer Wechsel oder ein überlappender Lauf darf nicht mit
+  // einem alten Stand überschrieben werden)
+  const mine = and(eq(partnerServers.serverId, server.id), sql`json_extract(${partnerServers.softwareJob}, '$.startedAt') = ${job.startedAt}`);
+  class Replaced extends Error {}
+  const save = async () => {
+    if (affectedRows(await db.update(partnerServers).set({ softwareJob: job }).where(mine)) !== 1) throw new Replaced();
+  };
+  /** Später erneut nachsehen – mit wachsendem Abstand */
+  const wait = async () => {
+    job.polls = (job.polls ?? 0) + 1;
+    job.nextPollAt = now.getTime() + pollDelay(job.polls);
+    await save();
+    return 'waiting' as const;
+  };
+  /** `detail` (z. B. die Meldung des Panels) steht nur in unserem Protokoll, nicht in der Antwort an den Partner */
+  const fail = async (message: string, detail?: string) => {
     job.error = message.slice(0, 240);
     await save();
-    await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_failed', message: `Server-Software für „${server.name}“ konnte nicht eingerichtet werden (${job.serverType} ${job.resolvedVersion}): ${job.error}` });
+    await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_failed', message: `Server-Software für „${server.name}“ konnte nicht eingerichtet werden (${job.serverType} ${job.resolvedVersion}): ${job.error}${detail ? ` – ${detail.slice(0, 300)}` : ''}` });
     await emitPartnerEvent(ps.partnerId, 'server.install_failed', { serverId: server.id, name: server.name, playerId: ps.playerId, serverType: job.serverType, version: job.resolvedVersion, error: job.error }).catch(() => {});
     return 'failed' as const;
   };
-  if (server.status !== 'active' || !server.pteroIdentifier || !server.pteroServerId) return 'waiting'; // wird noch im Panel angelegt
-  const identifier = server.pteroIdentifier;
-  const ptero = pterodactyl();
   try {
-    if (job.waitInstall) {
-      const p = await ptero.getServer(server.pteroServerId);
-      if (p?.status === 'installing') return 'waiting';
-      if (p?.status === 'install_failed') return fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
-      job.waitInstall = false;
-      await save();
-    }
-    if (!job.prepared) {
-      // Startbefehl des Grund-Eggs, passende Java-Version, Startdatei „server.jar“ – Ressourcen bleiben unverändert
-      const base = await startupFor(BASE_SERVER_TYPE, 'latest', await getSettings());
-      const environment = { ...base.environment };
-      if ('SERVER_JARFILE' in environment) environment.SERVER_JARFILE = 'server.jar';
-      await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: pickJavaImage(base.dockerImages, job.java) ?? base.dockerImage, startup: base.startup, environment });
-      job.prepared = true;
-      await save();
-    }
-    while (job.pos < job.steps.length) {
-      const step = job.steps[job.pos]!;
-      if (step.type === 'download') {
-        if (!job.pullStartedAt) {
-          // Eine alte Datei gleichen Namens würde den Größenvergleich unten täuschen
-          await ptero.deleteFiles(identifier, '/', [step.file]).catch(() => {});
-          await ptero.pullFile(identifier, step.url, '/', step.file, true);
-          job.pullStartedAt = now.getTime();
-          job.pullSize = 0;
-          job.pullStable = 0;
-          await save();
-          return 'waiting';
-        }
-        const size = (await ptero.listFiles(identifier, '/')).find((f) => !f.directory && f.name === step.file)?.size ?? 0;
-        job.pullStable = size > 0 && size === job.pullSize ? job.pullStable + 1 : 0;
-        job.pullSize = size;
-        // Fertig, wenn die erwartete Größe erreicht ist – oder (Größe unbekannt/abweichend) die Datei längere Zeit nicht mehr wächst
-        const complete = size > 0 && (step.size ? size === step.size || job.pullStable >= 8 : job.pullStable >= 3);
-        if (!complete) {
-          const waited = now.getTime() - job.pullStartedAt;
-          if (waited > PULL_TIMEOUT_MS || (size === 0 && waited > 3 * 60_000)) return fail(`Der Download von „${step.file}“ ist nicht angekommen.`);
-          await save();
-          return 'waiting';
-        }
-        job.pullStartedAt = null;
-      } else if (step.type === 'unzip') {
-        await ptero.decompressFile(identifier, step.location === '.' ? '/' : `/${step.location}`, step.file, UNZIP_TIMEOUT_MS);
-      } else {
-        await ptero.deleteFiles(identifier, '/', [step.location]).catch(() => {});
+    if (now.getTime() - job.startedAt > JOB_DEADLINE_MS) return await fail('Die Einrichtung hat zu lange gedauert.');
+    if (server.status === 'provisioning_failed') return await fail('Der Server konnte im Panel nicht angelegt werden.');
+    if (server.status !== 'active' || !server.pteroIdentifier || !server.pteroServerId) return await wait(); // wird noch im Panel angelegt (oder ist gesperrt)
+    const identifier = server.pteroIdentifier;
+    const ptero = pterodactyl();
+    try {
+      if (job.waitInstall) {
+        const p = await ptero.getServer(server.pteroServerId);
+        if (p?.status === 'installing') return await wait();
+        if (p?.status === 'install_failed') return await fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
+        job.waitInstall = false;
+        job.polls = 0;
+        await save();
       }
-      job.pos++;
-      job.attempts = 0;
-      await save();
+      if (!job.prepared) {
+        // Startbefehl des Grund-Eggs, passende Java-Version, Startdatei „server.jar“ – Ressourcen bleiben unverändert
+        const base = await startupFor(BASE_SERVER_TYPE, 'latest', await getSettings());
+        const image = pickJavaImage(base.dockerImages, job.java);
+        if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`);
+        const environment = { ...base.environment };
+        if ('SERVER_JARFILE' in environment) environment.SERVER_JARFILE = 'server.jar';
+        await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: base.startup, environment });
+        job.prepared = true;
+        await save();
+      }
+      while (job.pos < job.steps.length) {
+        const step = job.steps[job.pos]!;
+        if (step.type === 'download') {
+          if (!job.pullStartedAt) {
+            // Eine alte Datei gleichen Namens würde den Größenvergleich unten täuschen
+            await ptero.deleteFiles(identifier, '/', [step.file]).catch(() => {});
+            await ptero.pullFile(identifier, step.url, '/', step.file, true);
+            job.pullStartedAt = now.getTime();
+            job.pullSize = 0;
+            job.pullStable = 0;
+            job.polls = 0;
+            return await wait();
+          }
+          const size = (await ptero.listFiles(identifier, '/')).find((f) => !f.directory && f.name === step.file)?.size ?? 0;
+          job.pullStable = size > 0 && size === job.pullSize ? job.pullStable + 1 : 0;
+          job.pullSize = size;
+          // Fertig, wenn die erwartete Größe erreicht ist – oder (Größe unbekannt/abweichend) die Datei längere Zeit nicht mehr wächst
+          const complete = size > 0 && (step.size ? size === step.size || job.pullStable >= 4 : job.pullStable >= 2);
+          if (!complete) {
+            const waited = now.getTime() - job.pullStartedAt;
+            if (waited > PULL_TIMEOUT_MS || (size === 0 && waited > 3 * 60_000)) return await fail(`Der Download von „${step.file}“ ist nicht angekommen.`);
+            return await wait();
+          }
+          job.pullStartedAt = null;
+        } else if (step.type === 'unzip') {
+          await ptero.decompressFile(identifier, step.location === '.' ? '/' : `/${step.location}`, step.file, UNZIP_TIMEOUT_MS);
+        } else {
+          await ptero.deleteFiles(identifier, '/', [step.location]).catch(() => {});
+        }
+        job.pos++;
+        job.attempts = 0;
+        job.polls = 0;
+        await save();
+      }
+    } catch (err) {
+      if (err instanceof Replaced) throw err;
+      job.attempts++;
+      if (job.attempts >= MAX_ATTEMPTS) return await fail(`Schritt ${job.pos + 1} von ${job.steps.length} ist fehlgeschlagen. Bitte später erneut versuchen.`, String((err as Error).message ?? err));
+      return await wait();
     }
+    // Fertig: Der Server gilt wieder als installiert (das Ereignis „server.installed“ folgt im Sitzungs-Job)
+    if (affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(mine)) !== 1) return 'waiting';
+    // Die tatsächlich installierte Version eintragen („latest“ wird zur konkreten Version) – der Launcher braucht sie,
+    // um mit dem passenden Spiel zu verbinden, und die Mod-Suche ebenso
+    await db.update(servers).set({ version: job.resolvedVersion, serverType: job.serverType }).where(eq(servers.id, server.id));
+    // Der gemerkte Zustand steht evtl. noch auf „installing“ (der Abgleich läuft nur jede Minute) – der Server ist jetzt fertig und aus
+    await db.update(servers).set({ powerState: 'offline', powerStateAt: now }).where(and(eq(servers.id, server.id), eq(servers.powerState, 'installing')));
+    await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_installed', message: `Server-Software für „${server.name}“ eingerichtet: ${job.serverType} ${job.resolvedVersion} (${job.build})${job.java ? `, Java ${job.java}` : ''}` });
+    return 'done';
   } catch (err) {
-    job.attempts++;
-    if (job.attempts >= MAX_ATTEMPTS) return fail(`Schritt ${job.pos + 1} von ${job.steps.length} ist fehlgeschlagen: ${String((err as Error).message ?? err)}`);
-    await save();
-    return 'waiting';
+    if (err instanceof Replaced) return 'waiting'; // inzwischen ersetzt oder entfernt – der neue Auftrag läuft für sich
+    throw err;
   }
-  // Fertig: Der Server gilt wieder als installiert (das Ereignis „server.installed“ folgt im Sitzungs-Job)
-  await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(eq(partnerServers.serverId, server.id));
-  // Die tatsächlich installierte Version eintragen („latest“ wird zur konkreten Version) – der Launcher braucht sie,
-  // um mit dem passenden Spiel zu verbinden, und die Mod-Suche ebenso
-  await db.update(servers).set({ version: job.resolvedVersion, serverType: job.serverType }).where(eq(servers.id, server.id));
-  await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_installed', message: `Server-Software für „${server.name}“ eingerichtet: ${job.serverType} ${job.resolvedVersion} (${job.build})${job.java ? `, Java ${job.java}` : ''}` });
-  return 'done';
 }
 
 /** Läuft alle paar Sekunden: bringt offene Einrichtungen einen Schritt weiter */
 export async function runSoftwareJobs(now = new Date()) {
   const stats = { open: 0, done: 0, failed: 0, waiting: 0 };
-  const rows = await db
+  // Aufträge gelöschter Server entfernen (egal, auf welchem Weg gelöscht wurde)
+  await db
+    .update(partnerServers)
+    .set({ softwareJob: null })
+    .where(and(sql`${partnerServers.softwareJob} is not null`, inArray(partnerServers.serverId, db.select({ id: servers.id }).from(servers).where(eq(servers.status, 'deleted')))));
+  // Nur offene Aufträge (fehlgeschlagene belegen kein Fenster), die fällig sind – die am längsten wartenden zuerst
+  const due = await db
     .select({ ps: partnerServers, server: servers, enabled: partners.enabled })
     .from(partnerServers)
     .innerJoin(servers, eq(servers.id, partnerServers.serverId))
     .innerJoin(partners, eq(partners.id, partnerServers.partnerId))
-    .where(sql`${partnerServers.softwareJob} is not null`)
-    .limit(200);
-  const open = rows.filter((r) => r.ps.softwareJob && !r.ps.softwareJob.error);
-  stats.open = open.length;
-  await mapLimit(open, 4, async ({ ps, server }) => {
-    if (server.status === 'deleted') {
-      await db.update(partnerServers).set({ softwareJob: null }).where(eq(partnerServers.serverId, server.id));
-      return;
-    }
+    .where(
+      and(
+        sql`${partnerServers.softwareJob} is not null`,
+        sql`json_extract(${partnerServers.softwareJob}, '$.error') is null`,
+        sql`coalesce(json_extract(${partnerServers.softwareJob}, '$.nextPollAt'), 0) <= ${now.getTime()}`,
+        ne(servers.status, 'deleted'),
+        // Deaktivierte Partner: ruht, bis der Zugang wieder aktiv ist (keine Panel-Aufrufe)
+        eq(partners.enabled, true),
+      ),
+    )
+    .orderBy(sql`coalesce(json_extract(${partnerServers.softwareJob}, '$.nextPollAt'), 0)`, sql`json_extract(${partnerServers.softwareJob}, '$.startedAt')`)
+    .limit(PER_RUN);
+  stats.open = due.length;
+  await mapLimit(due, 4, async ({ ps, server }) => {
+    if (!ps.softwareJob || ps.softwareJob.error) return;
     stats[await advance(server, ps, now)]++;
   });
   return stats;

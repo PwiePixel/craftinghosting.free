@@ -2,18 +2,18 @@
  * Partner-API, zweiter Teil: alles, was ein Launcher ohne Panel-Zugang braucht –
  * Dateien (Mods, Plugins, Welten), Mods von Modrinth, Konsolen-Ausgabe, Servereinstellungen, Live-Werte, Umbenennen.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { findPlan, freeHostingConfig, getServerType, versionsFor } from '@chfree/shared';
-import { db } from '../db/client';
+import { affectedRows, db } from '../db/client';
 import { partnerServers, servers, type Partner, type Server } from '../db/schema';
 import { env } from '../env';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
-import { forgetLiveState, stillInstalling, getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
+import { confirmedState, forgetLiveState, stillInstalling, getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
 import { startupFor } from './provisioning.service';
-import { installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
+import { assertInstallSlot, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
 import { getSettings } from './settings.service';
 
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
@@ -93,6 +93,13 @@ export async function writePartnerFile(partner: Partner, id: string, path: strin
   const server = await ready(partner, id);
   const file = cleanPath(path);
   if (file === '/') throw Errors.badRequest('invalid_path', L('Bitte einen Dateinamen angeben.', 'Please specify a file name.'));
+  // Einstellungsdateien gleich beim Speichern auf die erlaubten Bereiche bringen – so kann ein ehrliches Bearbeiten
+  // nie als Verstoß gelten (vor dem Start wird ohnehin noch einmal begrenzt)
+  if (file === '/server.properties' || file === '/spigot.yml') {
+    const text = content.toString('utf8');
+    const fixed = file === '/spigot.yml' ? capSpigotYaml(text) : capProperties(text);
+    if (fixed !== text) content = Buffer.from(fixed, 'utf8');
+  }
   try {
     await pterodactyl().writeFileRaw(server.pteroIdentifier, file, content);
     return { path: file, size: content.length };
@@ -544,7 +551,12 @@ export function capProperties(text: string): string {
  */
 export function capSpigotYaml(text: string): string {
   const max = SERVER_SETTINGS.viewDistance!.max!;
-  return text.replace(/((?:view|simulation)-distance["']?[ \t]*:[ \t]*["']?)(\d+)/g, (all, head: string, num: string) => (Number(num) > max ? `${head}${max}` : all));
+  // Der Wert hinter dem Schlüssel: „default“ und einfache Zahlen bis zum Höchstwert bleiben, alles andere (größere
+  // Zahlen, aber auch Schreibweisen wie 0x20, 3_2, 32.0 oder +32) wird durch den Höchstwert ersetzt
+  return text.replace(/((?:view|simulation)-distance["']?[ \t]*:[ \t]*)(["']?)([^\s"'#,}\]]+)\2/g, (all, head: string, _quote: string, value: string) => {
+    if (value === 'default' || (/^\d{1,2}$/.test(value) && Number(value) <= max)) return all;
+    return `${head}${max}`;
+  });
 }
 
 /** Servertypen, die zusätzlich die spigot.yml auswerten */
@@ -597,9 +609,6 @@ export async function checkSettingsCaps(identifier: string, serverType: string):
   return violation ? 'violation' : 'ok';
 }
 
-/** Höchstwert für die Spielerzahl (für den Abgleich mit dem, was der laufende Server selbst meldet) */
-export const MAX_PLAYERS_CAP = SERVER_SETTINGS.maxPlayers!.max!;
-
 /* ------------------------------------------------------------ Backups */
 
 /**
@@ -632,14 +641,23 @@ async function oneAtATime<T>(serverId: string, fn: () => Promise<T>): Promise<T>
 }
 
 /** Alle Backups eines Servers löschen (vor dem Löschen des Servers – sonst blieben sie auf dem Node liegen) */
-export async function purgePartnerBackups(identifier: string): Promise<void> {
-  // Schlägt etwas fehl, wird der Server NICHT gelöscht (der Aufrufer bricht ab) – sonst blieben Backups ungezählt liegen
+export async function purgePartnerBackups(identifier: string, force = false): Promise<void> {
+  // Schlägt etwas fehl, wird der Server NICHT gelöscht (der Aufrufer bricht ab) – sonst blieben Backups ungezählt liegen.
+  // Ausnahmen: Den Server gibt es im Panel nicht mehr (404). Und mit `force` (Löschung durch uns: Admin, ungenutzte
+  // Server) hält ein gesperrter oder nicht bereiter Server (409) das Löschen nicht auf.
+  const skip = (err: unknown) => err instanceof PterodactylError && (err.status === 404 || (force && err.status === 409));
   for (let round = 0; round < 5; round++) {
-    const list = await pterodactyl().listBackups(identifier);
+    let list;
+    try {
+      list = await pterodactyl().listBackups(identifier);
+    } catch (err) {
+      if (skip(err)) return;
+      throw err;
+    }
     if (list.length === 0) return;
     for (const backup of list) {
       await pterodactyl().deleteBackup(identifier, backup.uuid).catch((err) => {
-        if (!(err instanceof PterodactylError && err.status === 404)) throw err;
+        if (!skip(err)) throw err;
       });
     }
   }
@@ -701,16 +719,20 @@ export async function partnerBackupDownloadUrl(partner: Partner, id: string, bac
 }
 
 /** Server muss aus sein und darf keine laufende Sitzung haben (Einspielen, Typwechsel, Neuinstallation) */
-async function assertOffline(partner: Partner, id: string) {
+async function assertOffline(partner: Partner, id: string, allowFailed = false) {
   const { server, ps } = await loadPartnerServer(partner, id);
+  if (server.status === 'suspended') throw new ApiError(409, 'server_suspended', L('Dieser Server ist gesperrt.', 'This server is suspended.'));
+  if (server.status !== 'active' || !server.pteroIdentifier || !server.pteroServerId) throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet.', 'The server is still being set up.'));
   if (ps.softwareJob && !ps.softwareJob.error) throw new ApiError(409, 'server_installing', L('Die Server-Software wird noch eingerichtet. Bitte gleich noch einmal versuchen.', 'The server software is still being set up. Please try again shortly.'));
-  forgetLiveState(id);
-  const state = ps.softwareJob ? 'offline' : (await getPartnerServer(partner, id)).state;
-  if (ps.hostActive || state !== 'offline') {
+  // Immer frisch im Panel nachsehen – auch nach einer fehlgeschlagenen Einrichtung (der Server könnte trotzdem laufen)
+  const state = await confirmedState(server);
+  const failedOk = allowFailed && state === 'failed';
+  if (ps.hostActive || !(state === 'offline' || failedOk)) {
+    if (state === 'installing') throw new ApiError(409, 'server_installing', L('Der Server wird noch installiert. Bitte gleich noch einmal versuchen.', 'The server is still being installed. Please try again shortly.'));
+    if (state === 'failed') throw new ApiError(409, 'server_failed', L('Die Installation des Servers ist fehlgeschlagen. Bitte neu installieren (POST /reinstall).', 'Installing the server failed. Please reinstall (POST /reinstall).'));
     throw new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
   }
-  if (!server.pteroIdentifier || !server.pteroServerId) throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet.', 'The server is still being set up.'));
-  return server as Server & { pteroIdentifier: string; pteroServerId: number };
+  return { ...(server as Server & { pteroIdentifier: string; pteroServerId: number }), panelInstallFailed: state === 'failed' };
 }
 
 export async function restorePartnerBackup(partner: Partner, id: string, backup: string, truncate: boolean, ip?: string) {
@@ -745,7 +767,8 @@ export async function deletePartnerBackup(partner: Partner, id: string, backup: 
  * und Versionen wie beim Erstellen; Paket, Ressourcen und Laufzeit-Stand des Servers bleiben unverändert.
  */
 export async function changePartnerServer(partner: Partner, id: string, input: { serverType?: string; version?: string }, ip?: string): Promise<PartnerServerDTO> {
-  const server = await assertOffline(partner, id);
+  // Auch nach einer fehlgeschlagenen Installation erlaubt – genau dafür ist die Neuinstallation da
+  const server = await assertOffline(partner, id, true);
   const settings = await getSettings();
   const serverType = input.serverType ?? server.serverType;
   const version = input.version ?? (input.serverType && input.serverType !== server.serverType ? 'latest' : server.version);
@@ -762,11 +785,27 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
   // Typen ohne eigenes Egg: Die Software kommt aus dem Verzeichnis – vorab nachschlagen, damit ein Tippfehler nichts anstößt
   const software = installsViaDirectory(serverType, settings) ? await resolveSoftware(serverType, version) : null;
   throttle(`reinstall:${id}`, 3, 60 * 60_000, { de: 'Dieser Server wurde gerade erst mehrfach neu installiert.', en: 'This server has been reinstalled several times just now.' });
+  // Nur umstellen, wenn inzwischen keine Sitzung begonnen hat (ein gleichzeitiger Start hätte sonst einen laufenden
+  // Server, dem die Software unter den Füßen ausgetauscht wird)
+  const idle = and(eq(partnerServers.serverId, id), eq(partnerServers.hostActive, false));
+  const busy = () => new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
   if (software) {
-    // Kein Neuaufsetzen im Panel: Der Software-Job tauscht die Server-Software aus (Welt und übrige Dateien bleiben)
+    await assertInstallSlot(partner.id, id);
+    // Kein Neuaufsetzen im Panel: Der Software-Job tauscht die Server-Software aus (Welt und übrige Dateien bleiben).
+    // Ausnahme: Die Grundinstallation im Panel war fehlgeschlagen – dann zuerst diese wiederholen.
+    if (affectedRows(await db.update(partnerServers).set({ softwareJob: newSoftwareJob(software, server.panelInstallFailed), installedNotified: false }).where(idle)) !== 1) throw busy();
     await db.update(servers).set({ serverType, version }).where(eq(servers.id, id));
-    await db.update(partnerServers).set({ softwareJob: newSoftwareJob(software, false), installedNotified: false }).where(eq(partnerServers.serverId, id));
+    if (server.panelInstallFailed) {
+      try {
+        await pterodactyl().reinstallServer(server.pteroServerId);
+      } catch (err) {
+        await db.update(partnerServers).set({ softwareJob: null }).where(eq(partnerServers.serverId, id));
+        panelFailure(err);
+      }
+      await db.update(servers).set({ powerState: 'installing' }).where(eq(servers.id, id));
+    }
   } else {
+    if (affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(idle)) !== 1) throw busy();
     try {
       await pterodactyl().updateServerStartup(server.pteroServerId, await startupFor(serverType, version, settings));
       await pterodactyl().reinstallServer(server.pteroServerId);
@@ -774,7 +813,6 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
       panelFailure(err);
     }
     await db.update(servers).set({ serverType, version, powerState: 'installing' }).where(eq(servers.id, id));
-    await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(eq(partnerServers.serverId, id));
   }
   forgetLiveState(id);
   statsCache.delete(id);

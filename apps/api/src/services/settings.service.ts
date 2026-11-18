@@ -22,6 +22,7 @@ import {
   type PublicSiteDTO,
   type SiteSettings,
   type WaitlistBlock,
+  partnerServerTypes,
 } from '@chfree/shared';
 import { getEggMapping } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
@@ -279,6 +280,8 @@ export async function capacityState(
  * (Admin → Pterodactyl), damit sie nie auf den Minecraft-Nodes landen.
  */
 export function serverTypeAvailable(serverType: string, settings: SiteSettings): boolean {
+  // Typen, die es nur über die Partner-API gibt, stehen auf der Website nie zur Wahl
+  if (partnerServerTypes.some((t) => t.id === serverType)) return false;
   if (!getEggMapping(serverType, settings)) return false;
   const kind = serverTypesOf('discord').some((t) => t.id === serverType) ? 'discord' : 'minecraft';
   return kind === 'minecraft' || env.PTERODACTYL_MODE === 'mock' || settings.products.discord.nodeIds.length > 0;

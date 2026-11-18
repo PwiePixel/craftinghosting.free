@@ -138,7 +138,7 @@ Antwort (`201`):
 
 `state`: `installing` · `offline` · `starting` · `running` · `stopping` · `failed` · `suspended`
 `session.lastStopReason`: `host_stopped` (Launcher hat gestoppt) · `host_timeout` (kein Lebenszeichen) ·
-`session_limit` (Laufzeit-Grenze) · `admin`
+`session_limit` (Laufzeit-Grenze) · `settings_limit` (Einstellungen über den Grenzen) · `admin`
 
 ### Starten, Lebenszeichen, Stoppen
 
@@ -172,6 +172,11 @@ Version-Changer im Panel tut:
 So lange ist `state` = `installing` und `install` in der Server-Antwort zeigt den Fortschritt; bei einem Fehlschlag
 `state` = `failed` mit `install.error` (erneut versuchen: `POST /servers/{id}/reinstall`). Hat ein Typ ein **eigenes
 Egg**, läuft alles wie bisher über dieses Egg (Wechsel = Egg umstellen und im Panel neu installieren).
+
+Grenzen der Einrichtung: höchstens 10 gleichzeitig je Partner (`429 too_many_installs`), Abfragen beim Panel mit
+wachsendem Abstand (5 bis 30 s), Gesamtfrist 60 Minuten. Bietet das Paper-Egg kein Java-Image, das für die Version
+reicht, schlägt die Einrichtung mit einem klaren Hinweis fehl (statt mit falschem Java zu starten) – dann das Image im
+Egg ergänzen.
 
 Voraussetzungen: Der API-Server erreicht `mcjars.app`; die Nodes erreichen die Download-Adressen (u. a.
 `*.mcjars.app`, `piston-data.mojang.com`, `fill-data.papermc.io`, `api.purpurmc.org`). Typ und Version kommen immer aus
@@ -209,10 +214,10 @@ X-CHF-Signature: sha256=<HMAC-SHA256 über "<Timestamp>.<Körper>" mit dem Gehei
 | --- | --- |
 | Höchstzahl Server (gesamt / je Spieler) | Prüfen und Anlegen in einer Schreib-Transaktion – gleichzeitige Anfragen können die Grenze nicht überschreiten |
 | Laufzeit-Grenze und Pflichtpause | Stand wird beim Löschen auf den Spieler übertragen und beim neu Erstellen übernommen. Gelöschte Server anderer Spieler mit offener Pause/Laufzeit belegen ihren Platz weiter (neue Spieler-Kennung hilft also nicht). Ein neuer Start geht erst, wenn der Server wirklich aus ist (`server_stopping`); ein fehlgeschlagener Start setzt nichts zurück |
-| „Server läuft nur mit Sitzung“ | Der Job `partner-sessions` (alle 30 s) stoppt jeden Partner-Server ohne Sitzung und beendet ihn nach 2 Minuten hart (`kill`), falls er den Stopp ignoriert |
+| „Server läuft nur mit Sitzung“ | Der Job `partner-sessions` (alle 30 s) stoppt jeden Partner-Server ohne Sitzung und beendet ihn nach 2 Minuten hart (`kill`), falls er den Stopp ignoriert. Die Zeit bis dahin zählt als Laufzeit; wird dabei die Laufzeit-Grenze erreicht, folgt sofort `kill` und die Pflichtpause |
 | Lebenszeichen | Konsolen-Stream, Webhooks, Backups zählen nicht als Lebenszeichen; „Weiterlaufen mit Spielern“ höchstens 2 Stunden |
 | Paket-Ressourcen, Servertypen, Versionen | Typ-/Versionswechsel nimmt Egg, Image und Startbefehl nur aus unserer Konfiguration; Ressourcen werden nie geändert |
-| Grenzen der Einstellungen | Vor jedem Start: Die begrenzten Werte der `server.properties` stehen in einem eigenen Block am Dateiende (der letzte Eintrag gilt – unabhängig davon, wie die Datei darüber geschrieben ist); bei Paper/Purpur wird zusätzlich die Sichtweite in der `spigot.yml` gekappt. Nachprüfung eine Minute nach dem Start und dann alle 5 Minuten (Datei und die vom Server gemeldete Spielerzahl); bei Verstoß Stopp mit `settings_limit` und Pflichtpause |
+| Grenzen der Einstellungen | Vor jedem Start: Die begrenzten Werte der `server.properties` stehen in einem eigenen Block am Dateiende (der letzte Eintrag gilt – unabhängig davon, wie die Datei darüber geschrieben ist); bei Paper/Purpur wird zusätzlich die Sichtweite in der `spigot.yml` gekappt. Beim Speichern über die API werden beide Dateien sofort begrenzt. Nachprüfung eine Minute nach dem Start: Stehen dann Werte über den Grenzen in der Datei (ausgetauscht zwischen Prüfung und Hochfahren), Stopp mit `settings_limit`; spätere Änderungen bei laufendem Server werden nur korrigiert |
 | Backups | Höchstzahl laut Paket (von uns und vom Panel geprüft), ein Vorgang zugleich je Server, werden mit dem Server gelöscht |
 | Anfragebegrenzung | je Partner (nicht je Key – ein neuer oder erfundener Key bringt kein neues Kontingent), dazu das Panel-Kontingent |
 | Daemon-Zugang | Die Live-Konsole wird von unserer API gelesen und weitergereicht; Adresse und Token des Daemons verlassen den Server nie |

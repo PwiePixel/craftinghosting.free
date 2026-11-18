@@ -33,6 +33,8 @@ interface MockServer {
   userId: number;
   suspended: boolean;
   installedAt: number;
+  /** Zum Testen: Die Installation ist fehlgeschlagen (bis zur nächsten Neuinstallation) */
+  installFailed?: boolean;
   state: 'offline' | 'starting' | 'running' | 'stopping';
   since: number;
   target: 'running' | 'offline' | null;
@@ -126,7 +128,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       description: s.description ?? '',
       userId: s.userId,
       suspended: s.suspended,
-      status: s.suspended ? 'suspended' : installing ? 'installing' : null,
+      status: s.suspended ? 'suspended' : s.installFailed ? 'install_failed' : installing ? 'installing' : null,
       allocation: { ip: '203.0.113.10', alias, port },
       nodeId,
       allocations: [port, ...extra].map((p): PteroAllocation => ({ id: nodeId * 100_000 + p, ip: '203.0.113.10', alias, port: p })),
@@ -389,7 +391,7 @@ export class PterodactylMockClient implements PterodactylGateway {
     const empty = { memoryBytes: 0, cpuAbsolute: 0, networkRxBytes: 0, networkTxBytes: 0, uptimeMs: 0 };
     const diskBytes = Math.round(1.3 * 1024 ** 3);
     if (s.suspended) return { state: 'offline', isSuspended: true, diskBytes, ...empty };
-    if (now < s.installedAt) return { state: 'installing', isSuspended: false, diskBytes: 0, ...empty };
+    if (now < s.installedAt || s.installFailed) return { state: 'installing', isSuspended: false, diskBytes: 0, ...empty };
     const current: PowerState = s.target === 'running' ? 'starting' : s.target === 'offline' ? 'stopping' : s.state;
     if (current === 'offline') return { state: 'offline', isSuspended: false, diskBytes, ...empty };
     const wobble = (Math.sin(now / 17_000) + 1) / 2;
@@ -598,6 +600,7 @@ export class PterodactylMockClient implements PterodactylGateway {
   async reinstallServer(id: number): Promise<void> {
     this.mutate(id, (s) => {
       s.installedAt = Date.now() + INSTALL_MS;
+      s.installFailed = false;
       s.state = 'offline';
       s.target = null;
       s.transitionAt = null;

@@ -686,6 +686,9 @@ export interface SoftwareJob {
   pullSize: number;
   pullStable: number;
   attempts: number;
+  /** Abfragen in Folge ohne Fortschritt und Zeitpunkt der nächsten (wachsender Abstand) */
+  polls?: number;
+  nextPollAt?: number;
   startedAt: number;
   error: string | null;
 }
