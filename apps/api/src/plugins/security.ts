@@ -25,6 +25,7 @@ declare module 'fastify' {
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+export const isPartnerApi = (url: string) => /^\/api\/v1\/partner(\/|$|\?)/.test(url);
 
 /**
  * CSRF-Schutz für zustandsändernde Anfragen:
@@ -40,6 +41,8 @@ export const securityPlugin = fp(async function securityPlugin(app: FastifyInsta
     request.lang = isLocale(header) ? header : localeFromAcceptLanguage(request.headers['accept-language']);
 
     if (SAFE_METHODS.has(request.method)) return;
+    // Partner-API: Zugriff nur mit API-Key (kein Cookie) – der Schutz gegen untergeschobene Browser-Anfragen entfällt dort
+    if (isPartnerApi(request.url)) return;
     const origin = request.headers.origin;
     if (origin && !(await originAllowed(origin))) {
       throw Errors.forbidden(L('Ungültiger Ursprung der Anfrage.', 'Invalid request origin.'));

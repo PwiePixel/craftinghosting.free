@@ -180,6 +180,8 @@ export const servers = sqliteTable(
     transferNodeId: integer('transfer_node_id'),
     transferStartedAt: ts('transfer_started_at'),
     transferMode: text('transfer_mode', { enum: ['api', 'manual'] }),
+    /** Server eines Partners (Partner-API, z. B. ein Minecraft-Launcher) – null = normaler Server der Website */
+    partnerId: text('partner_id'),
     /** Frist für eine offene Anfrage, die auf die Discord-Verbindung wartet – danach wird sie gelöscht (gesetzt mit der Erinnerungsmail) */
     pendingDeadlineAt: ts('pending_deadline_at'),
     /** Warteliste (Early Access): Platz wird bei der E-Mail-Bestätigung vergeben */
@@ -198,6 +200,7 @@ export const servers = sqliteTable(
     index('servers_user_idx').on(t.userId),
     index('servers_status_idx').on(t.status),
     index('servers_kind_idx').on(t.kind),
+    index('servers_partner_idx').on(t.partnerId),
     index('servers_cycle_idx').on(t.status, t.cycleEndsAt),
     uniqueIndex('servers_ptero_server_uq').on(t.pteroServerId),
     uniqueIndex('servers_waitlist_position_uq').on(t.waitlistPosition),
@@ -585,3 +588,95 @@ export type ServerSession = typeof serverSessions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type InviteReward = typeof inviteRewards.$inferSelect;
 export type DiscordBoost = typeof discordBoosts.$inferSelect;
+
+/* ------------------------------------------------------------ Partner-API (z. B. Minecraft-Launcher) */
+
+/**
+ * Partner mit Zugang zur Partner-API. Zu jedem Partner gehört ein eigenes Konto (users), unter dem alle seine
+ * Server laufen. Der API-Key wird nur als SHA-256 gespeichert.
+ */
+export const partners = sqliteTable(
+  'partners',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    keyHash: text('key_hash').notNull(),
+    /** Anfang des Keys – nur zur Wiedererkennung im Admin-Bereich */
+    keyPrefix: text('key_prefix').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    /** Paket, das Server dieses Partners bekommen */
+    planId: text('plan_id').notNull(),
+    maxServers: integer('max_servers').notNull().default(100),
+    maxServersPerPlayer: integer('max_servers_per_player').notNull().default(1),
+    /** Laufzeit, nach der eine Pause fällig ist – und die Länge der Pause */
+    sessionMaxHours: integer('session_max_hours').notNull().default(24),
+    cooldownHours: integer('cooldown_hours').notNull().default(2),
+    /** Ohne Lebenszeichen des Launchers wird der Server nach so vielen Sekunden gestoppt */
+    heartbeatTimeoutSeconds: integer('heartbeat_timeout_seconds').notNull().default(180),
+    /** Lange nicht gestartete Server werden nach so vielen Tagen gelöscht (0 = nie) */
+    deleteAfterIdleDays: integer('delete_after_idle_days').notNull().default(30),
+    /** Feste Nodes für die Server dieses Partners (leer = wie normale Minecraft-Server); private Nodes sind erlaubt */
+    nodeIds: text('node_ids', { mode: 'json' }).$type<number[]>().notNull().default([]),
+    lastUsedAt: ts('last_used_at'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
+  },
+  (t) => [uniqueIndex('partners_key_uq').on(t.keyHash), uniqueIndex('partners_user_uq').on(t.userId)],
+);
+
+/** Spieler eines Partners: unsere kurze ID (steht im Servernamen) zur Kennung des Nutzers beim Partner */
+export const partnerPlayers = sqliteTable(
+  'partner_players',
+  {
+    id: text('id').primaryKey(),
+    partnerId: text('partner_id')
+      .notNull()
+      .references(() => partners.id, { onDelete: 'cascade' }),
+    externalId: text('external_id').notNull(),
+    name: text('name'),
+    blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    lastSeenAt: ts('last_seen_at'),
+  },
+  (t) => [uniqueIndex('partner_players_external_uq').on(t.partnerId, t.externalId)],
+);
+
+/** Sitzungsdaten eines Partner-Servers: läuft nur, solange der Launcher des Hosts sich meldet */
+export const partnerServers = sqliteTable(
+  'partner_servers',
+  {
+    serverId: text('server_id')
+      .primaryKey()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    partnerId: text('partner_id')
+      .notNull()
+      .references(() => partners.id, { onDelete: 'cascade' }),
+    playerId: text('player_id')
+      .notNull()
+      .references(() => partnerPlayers.id, { onDelete: 'cascade' }),
+    /** Der Host hat gestartet und meldet sich – der Server darf laufen */
+    hostActive: integer('host_active', { mode: 'boolean' }).notNull().default(false),
+    heartbeatAt: ts('heartbeat_at'),
+    sessionStartedAt: ts('session_started_at'),
+    /** Angerechnete Laufzeit seit der letzten vollständigen Pause (Sekunden) – und bis wann sie gezählt ist */
+    runSeconds: integer('run_seconds').notNull().default(0),
+    countedAt: ts('counted_at'),
+    lastStartAt: ts('last_start_at'),
+    lastStopAt: ts('last_stop_at'),
+    /** host_stopped · host_timeout · session_limit · admin */
+    stopReason: text('stop_reason'),
+    /** Pflichtpause nach Erreichen der Laufzeit-Grenze */
+    cooldownUntil: ts('cooldown_until'),
+    /** Hinweis im Spiel kurz vor der Grenze schon geschickt? (verbleibende Minuten der letzten Warnung) */
+    warnedMinutes: integer('warned_minutes'),
+    eulaAcceptedAt: ts('eula_accepted_at'),
+  },
+  (t) => [index('partner_servers_partner_idx').on(t.partnerId), index('partner_servers_player_idx').on(t.playerId), index('partner_servers_active_idx').on(t.hostActive)],
+);
+
+export type Partner = typeof partners.$inferSelect;
+export type PartnerPlayer = typeof partnerPlayers.$inferSelect;
+export type PartnerServer = typeof partnerServers.$inferSelect;

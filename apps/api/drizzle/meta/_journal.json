@@ -92,6 +92,13 @@
       "when": 1794930167964,
       "tag": "0012_stay_signed_in_password",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795017014391,
+      "tag": "0013_partner_api",
+      "breakpoints": true
     }
   ]
 }

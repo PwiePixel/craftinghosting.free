@@ -91,7 +91,8 @@ export const enforceFairUseJob: JobDefinition = {
       .innerJoin(users, eq(users.id, servers.userId))
       .where(and(eq(servers.status, 'active'), or(inArray(servers.powerState, ['starting', 'running', 'stopping']), isNotNull(servers.pausedUntil))));
     // Produkte ohne Fair-Use-System (z. B. Discord-Bots im Dauerbetrieb) werden übersprungen – offene Pausen laufen aber noch aus
-    const rows = all.filter(({ server }) => settings.products[server.kind].fairUse || server.pausedUntil !== null);
+    // Server der Partner-API haben eigene Laufzeit-Regeln (partner-sessions) und sind hier ausgenommen
+    const rows = all.filter(({ server }) => !server.partnerId && (settings.products[server.kind].fairUse || server.pausedUntil !== null));
 
     const stats = { checked: 0, sessionLimit: 0, weeklyOffline: 0, pauseViolations: 0, warnings: 0, chat: 0, pausesCleared: 0 };
 

@@ -1095,3 +1095,40 @@ export interface AdminChatDTO {
   lastError: { at: string; message: string } | null;
   conversations: { id: string; startedAt: string; updatedAt: string; messages: number; status: ChatConversationDTO['status']; firstMessage: string; ai: number }[];
 }
+
+/* ------------------------------------------------------------ Partner-API (Admin-Bereich) */
+
+/** Einstellungen eines Partners der Partner-API */
+export interface AdminPartnerInput {
+  name: string;
+  /** Minecraft-Paket, das Server dieses Partners bekommen (auch nicht öffentliche Pakete) */
+  planId: string;
+  maxServers: number;
+  maxServersPerPlayer: number;
+  /** Laufzeit, nach der eine Pause fällig ist – und die Länge der Pause (Stunden) */
+  sessionMaxHours: number;
+  cooldownHours: number;
+  /** Ohne Lebenszeichen des Launchers wird der Server nach so vielen Sekunden gestoppt */
+  heartbeatTimeoutSeconds: number;
+  /** Lange nicht gestartete Server werden nach so vielen Tagen gelöscht (0 = nie) */
+  deleteAfterIdleDays: number;
+  /** Feste Nodes (leer = wie normale Minecraft-Server) */
+  nodeIds: number[];
+}
+
+export interface AdminPartnerDTO extends AdminPartnerInput {
+  id: string;
+  /** Automatisch angelegtes Konto, unter dem alle Server des Partners laufen */
+  accountEmail: string;
+  panelUsername: string | null;
+  /** Anfang des API-Keys (der ganze Key ist nur beim Anlegen sichtbar) */
+  keyPrefix: string;
+  enabled: boolean;
+  planName: string;
+  players: number;
+  servers: number;
+  /** Server mit laufender Sitzung */
+  running: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+}

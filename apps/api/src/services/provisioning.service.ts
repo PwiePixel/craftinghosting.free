@@ -7,6 +7,7 @@
  *  – Ein Versuch wird über `provisioning_attempts` optimistisch "geclaimt",
  *    parallele Läufe (API + Worker) überspringen sich gegenseitig.
  */
+import { partnerNodeIds } from './partner-nodes';
 import { and, eq, inArray } from 'drizzle-orm';
 import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
 import { getEggMapping, pterodactylConfig } from '../config/pterodactyl.config';
@@ -53,6 +54,9 @@ async function pickAllocation(server: Server, settings: SiteSettings): Promise<n
   const ptero = pterodactyl();
   const privateNodes = settings.privateNodeIds;
   let nodeIds = settings.products[server.kind].nodeIds.filter((id) => !privateNodes.includes(id));
+  // Server der Partner-API: feste Nodes des Partners haben Vorrang – dort sind auch private Nodes erlaubt
+  const partnerNodes = server.partnerId ? await partnerNodeIds(server.partnerId) : [];
+  if (partnerNodes.length) nodeIds = partnerNodes;
   let nodes: PteroNode[] | null = null;
   // Automatisch verteilte Server: Hier prüfte bisher das Panel, ob die Node noch Platz hat – das übernehmen wir
   let checkRoom = false;

@@ -7,6 +7,7 @@ import { discordSyncJob } from './discord-sync.job';
 import { enforceFairUseJob } from './enforce-fair-use.job';
 import { newsletterJob } from './newsletter.job';
 import { notificationEmailsJob } from './notification-emails.job';
+import { partnerSessionsJob } from './partner-sessions.job';
 import { provisioningJob } from './provisioning.job';
 import { serverTransfersJob } from './server-transfers.job';
 import { syncPanelJob } from './sync-panel.job';
@@ -21,6 +22,7 @@ export const allJobs: JobDefinition[] = [
   cycleJob,
   provisioningJob,
   serverTransfersJob,
+  partnerSessionsJob,
   syncPanelJob,
   notificationEmailsJob,
   newsletterJob,

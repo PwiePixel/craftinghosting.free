@@ -15,6 +15,7 @@ import { discordAdminRoutes, discordRoutes } from './routes/discord.routes';
 import { domainAdminRoutes } from './routes/domains.routes';
 import { metaRoutes } from './routes/meta.routes';
 import { newsletterAdminRoutes, newsletterRoutes } from './routes/newsletter.routes';
+import { partnerAdminRoutes, partnerRoutes } from './routes/partner.routes';
 import { serverRoutes } from './routes/servers.routes';
 
 export async function buildApp() {
@@ -62,6 +63,8 @@ export async function buildApp() {
       await api.register(discordAdminRoutes);
       await api.register(chatRoutes);
       await api.register(chatAdminRoutes);
+      await api.register(partnerRoutes);
+      await api.register(partnerAdminRoutes);
     },
     { prefix: '/api/v1' },
   );

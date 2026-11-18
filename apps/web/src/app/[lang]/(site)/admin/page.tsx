@@ -10,6 +10,7 @@ import {
   type AdminAuditDTO,
   type AdminChatDTO,
   type AdminAbuseDTO,
+  type AdminPartnerDTO,
   type AdminDiscordDTO,
   type AdminDiscordWaitingDTO,
   type PendingReason,
@@ -36,6 +37,8 @@ import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
 import { ChatAdmin } from '@/components/admin/admin-chat';
 import { AbuseManager, AdminMessageForm, DiscordReminder } from '@/components/admin/admin-mails';
+import { site } from '@/lib/site';
+import { PartnerManager } from '@/components/admin/admin-partners';
 import { DiscordAdmin } from '@/components/admin/admin-discord';
 import { IncidentForm, IncidentList } from '@/components/admin/admin-status';
 import { StatusPageEditor } from '@/components/admin/admin-status-page';
@@ -81,6 +84,7 @@ const TABS = [
   { id: 'logs', label: 'Protokoll' },
   { id: 'mails', label: 'E-Mails' },
   { id: 'abuse', label: 'Abuse' },
+  { id: 'partners', label: 'Partner-API' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
@@ -856,6 +860,14 @@ export default async function AdminPage({ params, searchParams }: Props) {
     failed = !res.ok;
     const waiting = await apiServer<AdminDiscordWaitingDTO>('/admin/mails/discord-waiting', lang);
     if (res.ok) content = <MailsTab list={res.data.mails} me={user.email} o={overview?.ok ? overview.data.overview : null} fmt={fmt} waiting={waiting.ok ? waiting.data : null} />;
+  }
+  if (tab === 'partners') {
+    const [res, settingsRes] = await Promise.all([apiServer<{ partners: AdminPartnerDTO[] }>('/admin/partners', lang), apiServer<{ settings: SiteSettings }>('/admin/settings', lang)]);
+    failed = !res.ok || !settingsRes.ok;
+    if (res.ok && settingsRes.ok) {
+      const plans = settingsRes.data.settings.products.minecraft.plans.map((pl) => ({ id: pl.id, name: pl.name, memoryMb: pl.memoryMb, enabled: pl.enabled }));
+      content = <PartnerManager initial={res.data.partners} plans={plans} apiBase={`${site.url}/api/v1/partner`} />;
+    }
   }
   if (tab === 'abuse') {
     const res = await apiServer<{ abuse: AdminAbuseDTO }>('/admin/abuse', lang);

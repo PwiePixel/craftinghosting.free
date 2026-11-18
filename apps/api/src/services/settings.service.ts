@@ -3,7 +3,7 @@
  * Gespeichert als JSON in der Tabelle `settings`; kurzer Cache, damit API und Worker
  * Änderungen nach wenigen Sekunden übernehmen.
  */
-import { and, count, eq, gte, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from 'drizzle-orm';
 import {
   applyRuntimeConfig,
   blockSpotsBefore,
@@ -250,7 +250,8 @@ export async function capacityState(
   const rows = await db
     .select({ kind: servers.kind, planId: servers.planId, n: count() })
     .from(servers)
-    .where(inArray(servers.status, [...CAPACITY_STATUSES]))
+    // Server der Partner-API zählen nicht gegen die Plätze der Website – Partner haben eine eigene Obergrenze
+    .where(and(inArray(servers.status, [...CAPACITY_STATUSES]), isNull(servers.partnerId)))
     .groupBy(servers.kind, servers.planId);
   const products = {} as Record<ProductKind, ProductCapacity>;
   const plans: (PlanAvailabilityDTO & { kind: ProductKind })[] = [];

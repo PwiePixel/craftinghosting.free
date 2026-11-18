@@ -1,3 +1,4 @@
+import { isPartnerAccount } from './partner-nodes';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { NotificationDTO } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
@@ -24,6 +25,8 @@ export interface NotifyInput {
  * @returns true, wenn die Benachrichtigung neu angelegt wurde.
  */
 export async function notify(input: NotifyInput): Promise<boolean> {
+  // Konten von Partnern (Partner-API) sind nur Besitzer der Server – sie bekommen keine Benachrichtigungen
+  if (await isPartnerAccount(input.userId)) return false;
   const locale = await getUserLocale(input.userId);
   const result = await db
     .insert(notifications)
