@@ -8,6 +8,7 @@ import { enforceFairUseJob } from './enforce-fair-use.job';
 import { newsletterJob } from './newsletter.job';
 import { notificationEmailsJob } from './notification-emails.job';
 import { partnerSessionsJob } from './partner-sessions.job';
+import { partnerSoftwareJob } from './partner-software.job';
 import { partnerWebhooksJob } from './partner-webhooks.job';
 import { provisioningJob } from './provisioning.job';
 import { serverTransfersJob } from './server-transfers.job';
@@ -25,6 +26,7 @@ export const allJobs: JobDefinition[] = [
   serverTransfersJob,
   partnerSessionsJob,
   partnerWebhooksJob,
+  partnerSoftwareJob,
   syncPanelJob,
   notificationEmailsJob,
   newsletterJob,

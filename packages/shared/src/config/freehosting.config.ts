@@ -373,6 +373,22 @@ export const freeHostingConfig: FreeHostingConfig = {
       defaultVersion: '1.20.1',
     },
     {
+      id: 'neoforge',
+      kind: 'minecraft',
+      name: 'NeoForge',
+      description: { de: 'Moderner Mod-Loader, Nachfolger von Forge für neue Versionen.', en: 'Modern mod loader, the successor of Forge for new versions.' },
+      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'quilt',
+      kind: 'minecraft',
+      name: 'Quilt',
+      description: { de: 'Mod-Loader, der auch die meisten Fabric-Mods lädt.', en: 'Mod loader that also loads most Fabric mods.' },
+      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'],
+      defaultVersion: 'latest',
+    },
+    {
       id: 'python',
       kind: 'discord',
       name: 'Python',

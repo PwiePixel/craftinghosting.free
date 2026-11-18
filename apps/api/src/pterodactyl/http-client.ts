@@ -43,6 +43,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
     path: string,
     body?: unknown,
     attempt = 0,
+    timeoutMs = this.opts.timeoutMs,
   ): Promise<T> {
     const key = api === 'application' ? this.opts.appKey : this.opts.clientKey;
     let res: Response;
@@ -55,19 +56,19 @@ export class PterodactylHttpClient implements PterodactylGateway {
           'Content-Type': 'application/json',
         },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.opts.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       if (method === 'GET' && attempt < 2) {
         await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
-        return this.request(api, method, path, body, attempt + 1);
+        return this.request(api, method, path, body, attempt + 1, timeoutMs);
       }
       throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
     }
 
     if ((res.status === 429 || res.status >= 500) && method === 'GET' && attempt < 2) {
       await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-      return this.request(api, method, path, body, attempt + 1);
+      return this.request(api, method, path, body, attempt + 1, timeoutMs);
     }
 
     if (res.status === 204) return undefined as T;
@@ -276,6 +277,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
     return {
       id: a.id,
       dockerImage: a.docker_image ?? images[0] ?? '',
+      dockerImages: a.docker_images && typeof a.docker_images === 'object' ? (a.docker_images as Record<string, string>) : {},
       startup: a.startup,
       variables: ((a.relationships?.variables?.data ?? []) as Json[]).map((v) => ({
         envVariable: v.attributes.env_variable,
@@ -466,12 +468,12 @@ export class PterodactylHttpClient implements PterodactylGateway {
     return res.attributes.url as string;
   }
 
-  async decompressFile(identifier: string, root: string, file: string): Promise<void> {
-    await this.request('client', 'POST', `/servers/${identifier}/files/decompress`, { root, file });
+  async decompressFile(identifier: string, root: string, file: string, timeoutMs?: number): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/decompress`, { root, file }, 0, timeoutMs);
   }
 
-  async pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void> {
-    await this.request('client', 'POST', `/servers/${identifier}/files/pull`, { url, directory, filename, foreground: true });
+  async pullFile(identifier: string, url: string, directory: string, filename: string, background = false): Promise<void> {
+    await this.request('client', 'POST', `/servers/${identifier}/files/pull`, { url, directory, filename, foreground: !background });
   }
 
   async renameServer(id: number, name: string): Promise<void> {

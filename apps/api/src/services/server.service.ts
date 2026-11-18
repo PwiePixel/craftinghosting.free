@@ -491,10 +491,15 @@ export async function deleteServer(user: User, id: string, confirmName: string, 
 
 export async function hardDeleteServer(server: Server): Promise<void> {
   let pteroServerId = server.pteroServerId;
-  if (!pteroServerId) {
-    // Noch keine Panel-ID bei uns eingetragen (Einrichtung lief gerade oder ist fehlgeschlagen): im Panel nachsehen,
-    // damit dort kein Server ohne Eintrag bei uns zurückbleibt
-    pteroServerId = (await pterodactyl().findServerByExternalId(`${pterodactylConfig.externalIdPrefix.server}${server.id}`).catch(() => null))?.id ?? null;
+  if (!pteroServerId && (server.status === 'provisioning' || server.status === 'provisioning_failed')) {
+    // Noch keine Panel-ID bei uns eingetragen, obwohl die Einrichtung lief oder fehlgeschlagen ist: im Panel nachsehen,
+    // damit dort kein Server ohne Eintrag bei uns zurückbleibt. Lässt sich das gerade nicht klären, wird NICHT gelöscht.
+    try {
+      pteroServerId = (await pterodactyl().findServerByExternalId(`${pterodactylConfig.externalIdPrefix.server}${server.id}`))?.id ?? null;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(503, 'panel_unavailable', L('Der Server konnte im Panel nicht gelöscht werden. Bitte versuche es später erneut.', 'The server could not be deleted in the panel. Please try again later.'));
+    }
   }
   if (pteroServerId) {
     try {

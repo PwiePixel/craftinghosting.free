@@ -134,6 +134,13 @@
       "when": 1795023623487,
       "tag": "0018_partner_webhooks_carry",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1795030963616,
+      "tag": "0019_partner_software",
+      "breakpoints": true
     }
   ]
 }

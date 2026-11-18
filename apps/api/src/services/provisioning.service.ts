@@ -10,7 +10,7 @@
 import { partnerNodeIds } from './partner-nodes';
 import { and, eq, inArray } from 'drizzle-orm';
 import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
-import { getEggMapping, pterodactylConfig } from '../config/pterodactyl.config';
+import { BASE_SERVER_TYPE, getEggMapping, pterodactylConfig, sharesBaseEgg } from '../config/pterodactyl.config';
 import { env, panelPublicUrl } from '../env';
 import { affectedRows, db } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
@@ -113,7 +113,7 @@ async function getEggCached(nestId: number, eggId: number): Promise<PteroEgg> {
 }
 
 /** Egg, Image, Startbefehl und Variablen für einen Servertyp in einer Version (auch für den späteren Wechsel) */
-export async function startupFor(serverType: string, version: string, settings: SiteSettings): Promise<{ eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }> {
+export async function startupFor(serverType: string, version: string, settings: SiteSettings): Promise<{ eggId: number; dockerImage: string; dockerImages: Record<string, string>; startup: string; environment: Record<string, string> }> {
   const egg = getEggMapping(serverType, settings);
   if (!getServerType(serverType) || !egg) throw new Error(`Für den Servertyp „${serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
   const eggInfo = await getEggCached(egg.nestId, egg.eggId);
@@ -121,7 +121,7 @@ export async function startupFor(serverType: string, version: string, settings: 
   for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
   Object.assign(environment, egg.environment ?? {});
   if (egg.versionVariable) environment[egg.versionVariable] = version;
-  return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, startup: eggInfo.startup, environment };
+  return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, dockerImages: eggInfo.dockerImages ?? {}, startup: eggInfo.startup, environment };
 }
 
 function errorFields(err: PterodactylError): string {
@@ -221,7 +221,10 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     const settings = await getSettings();
     const plan = findPlan(settings, server.planId);
     const type = getServerType(server.serverType);
-    const egg = getEggMapping(server.serverType, settings);
+    // Partner-Server: Typen ohne eigenes Egg (bzw. mit dem Egg des Grundtyps) werden mit dem Grund-Egg in dessen
+    // Standardversion angelegt; die gewünschte Software richtet danach der Software-Job ein.
+    const viaDirectory = !!server.partnerId && sharesBaseEgg(server.serverType, settings);
+    const egg = viaDirectory ? getEggMapping(BASE_SERVER_TYPE, settings) : getEggMapping(server.serverType, settings);
     if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
 
     const ptero = pterodactyl();
@@ -235,7 +238,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
       for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
       Object.assign(environment, egg.environment ?? {});
       // Minecraft: Version setzen · Discord-Bots: Standardwerte des Eggs (Startdatei, requirements.txt …)
-      if (egg.versionVariable) environment[egg.versionVariable] = server.version;
+      if (egg.versionVariable && !viaDirectory) environment[egg.versionVariable] = server.version;
       const allocationId = await pickAllocation(server, settings);
 
       pServer = await ptero.createServer({

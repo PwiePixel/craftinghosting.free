@@ -11,18 +11,23 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { and, asc, count, eq, isNull, lt, lte, or } from 'drizzle-orm';
-import { db } from '../db/client';
+import { affectedRows, db } from '../db/client';
 import { partnerWebhookEvents, partners, type Partner } from '../db/schema';
 import { env } from '../env';
 import { decryptField, encryptField, uuid } from '../lib/crypto';
 import { Errors, L } from '../lib/errors';
+import { mapLimit } from '../jobs/types';
 
-export type WebhookEvent = 'server.installed' | 'server.running' | 'server.stopped' | 'server.cooldown_ended' | 'server.deletion_soon' | 'server.deleted' | 'webhook.test';
+export type WebhookEvent = 'server.installed' | 'server.install_failed' | 'server.running' | 'server.stopped' | 'server.cooldown_ended' | 'server.deletion_soon' | 'server.deleted' | 'webhook.test';
 
 const MAX_ATTEMPTS = 6;
 /** Abstand vor dem nächsten Versuch (Sekunden) */
 const BACKOFF = [30, 120, 600, 3600, 6 * 3600];
 const MAX_PENDING = 5000;
+/** Zeitgrenze je Zustellung, Ereignisse je Partner und Lauf, Dauer der Reservierung während des Sendens */
+const TIMEOUT_MS = 5000;
+const PER_RUN = 25;
+const CLAIM_MS = 120_000;
 const SECRET_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
 
 /** Adresse im eigenen oder einem privaten Netz? (IPv4 und IPv6) */
@@ -74,11 +79,14 @@ async function assertPublicHttps(raw: string): Promise<{ url: URL; address: stri
   if (!test && url.protocol !== 'https:') throw invalid('Nur https-Adressen sind erlaubt.', 'Only https URLs are allowed.');
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw invalid('Nur https-Adressen sind erlaubt.', 'Only https URLs are allowed.');
   if (!test && url.port && url.port !== '443') throw invalid('Nur der Standard-Port 443 ist erlaubt.', 'Only the default port 443 is allowed.');
-  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
   if (!test && ownHosts().has(host)) throw invalid('Diese Adresse ist nicht erlaubt.', 'This URL is not allowed.');
   let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host, { all: true });
+    // Auch die Namensauflösung bekommt eine Frist – ein hängender DNS-Server darf die Zustellung nicht aufhalten
+    addresses = isIP(host)
+      ? [{ address: host, family: isIP(host) }]
+      : await Promise.race([lookup(host, { all: true }), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DNS-Zeitüberschreitung')), 3000).unref())]);
   } catch {
     throw invalid('Der Host dieser Adresse lässt sich nicht auflösen.', 'The host of this URL cannot be resolved.');
   }
@@ -96,7 +104,12 @@ function postPinned(target: { url: URL; address: string; family: 4 | 6 }, header
         method: 'POST',
         headers: { ...headers, 'Content-Length': String(Buffer.byteLength(body)) },
         // Immer die geprüfte IP – der Hostname dient nur noch für Zertifikat und Host-Kopfzeile
-        lookup: (_host, _options, callback) => (callback as (err: Error | null, address: string, family: number) => void)(null, target.address, target.family),
+        // (Node fragt je nach Version nach einer einzelnen Adresse oder – mit „all“ – nach einer Liste)
+        lookup: (_host, options, callback) => {
+          const cb = callback as (err: Error | null, address: string | Array<{ address: string; family: number }>, family?: number) => void;
+          if (typeof options === 'object' && options && (options as { all?: boolean }).all) cb(null, [{ address: target.address, family: target.family }]);
+          else cb(null, target.address, target.family);
+        },
         agent: false,
       },
       (res) => {
@@ -135,7 +148,7 @@ export async function partnerWebhookStatus(partner: Partner) {
   const last = recent.slice(-20).reverse();
   return {
     url: fresh?.url ?? null,
-    events: ['server.installed', 'server.running', 'server.stopped', 'server.cooldown_ended', 'server.deletion_soon', 'server.deleted'],
+    events: ['server.installed', 'server.install_failed', 'server.running', 'server.stopped', 'server.cooldown_ended', 'server.deletion_soon', 'server.deleted'],
     pending: recent.filter((e) => !e.deliveredAt && !e.failedAt).length,
     recent: last.map((e) => ({ id: e.id, type: e.type, createdAt: e.createdAt.toISOString(), status: e.deliveredAt ? 'delivered' : e.failedAt ? 'failed' : 'pending', attempts: e.attempts, lastError: e.lastError })),
   };
@@ -155,62 +168,81 @@ export const signWebhook = (secret: string, timestamp: number, body: string) => 
 
 /** Fällige Ereignisse zustellen (Job, alle 15 Sekunden) und alte aufräumen */
 export async function deliverPartnerWebhooks(now = new Date()) {
-  const stats = { delivered: 0, failed: 0, dropped: 0 };
+  const stats = { delivered: 0, failed: 0, dropped: 0, postponed: 0 };
   const due = await db
     .select()
     .from(partnerWebhookEvents)
     .where(and(isNull(partnerWebhookEvents.deliveredAt), isNull(partnerWebhookEvents.failedAt), lte(partnerWebhookEvents.nextAttemptAt, now)))
     .orderBy(asc(partnerWebhookEvents.createdAt))
-    .limit(100);
-  const cache = new Map<string, { url: string; secret: string } | null>();
+    .limit(1000);
+  // Je Partner getrennt und mehrere Partner gleichzeitig: Ein Empfänger, der hängt oder Fehler liefert, darf die
+  // Zustellung an alle anderen nicht aufhalten. Je Lauf und Partner höchstens PER_RUN Ereignisse.
+  const byPartner = new Map<string, (typeof due)[number][]>();
   for (const event of due) {
-    if (!cache.has(event.partnerId)) {
-      const [p] = await db.select({ url: partners.webhookUrl, secret: partners.webhookSecret, enabled: partners.enabled }).from(partners).where(eq(partners.id, event.partnerId)).limit(1);
-      const secret = decryptField(p?.secret) || '';
-      cache.set(event.partnerId, p?.enabled && p.url && secret ? { url: p.url, secret } : null);
-    }
-    const target = cache.get(event.partnerId);
-    if (!target) {
-      await db.update(partnerWebhookEvents).set({ failedAt: now, lastError: 'Kein Webhook eingerichtet' }).where(eq(partnerWebhookEvents.id, event.id));
-      stats.dropped++;
-      continue;
-    }
-    const timestamp = Math.floor(now.getTime() / 1000);
-    const body = JSON.stringify({ id: event.id, type: event.type, createdAt: event.createdAt.toISOString(), data: event.payload });
-    let error: string | null = null;
-    try {
-      // Bei jeder Zustellung neu prüfen: Der Host darf nicht (inzwischen) in ein privates Netz zeigen
-      const checked = await assertPublicHttps(target.url);
-      const status = await postPinned(
-        checked,
-        {
-          'Content-Type': 'application/json',
-          'User-Agent': 'CraftingHosting-Webhooks/1',
-          'X-CHF-Event': event.type,
-          'X-CHF-Delivery': event.id,
-          'X-CHF-Timestamp': String(timestamp),
-          'X-CHF-Signature': `sha256=${signWebhook(target.secret, timestamp, body)}`,
-        },
-        body,
-        8000,
-      );
-      if (status < 200 || status >= 300) error = `HTTP ${status}`;
-    } catch (err) {
-      error = String((err as Error).message ?? err).slice(0, 200);
-    }
-    if (!error) {
-      await db.update(partnerWebhookEvents).set({ deliveredAt: now, attempts: event.attempts + 1, lastError: null }).where(eq(partnerWebhookEvents.id, event.id));
-      stats.delivered++;
-      continue;
-    }
-    const attempts = event.attempts + 1;
-    const final = attempts >= MAX_ATTEMPTS;
-    await db
-      .update(partnerWebhookEvents)
-      .set({ attempts, lastError: error, ...(final ? { failedAt: now } : { nextAttemptAt: new Date(now.getTime() + (BACKOFF[attempts - 1] ?? 21_600) * 1000) }) })
-      .where(eq(partnerWebhookEvents.id, event.id));
-    stats.failed++;
+    const list = byPartner.get(event.partnerId) ?? [];
+    if (list.length < PER_RUN) list.push(event);
+    byPartner.set(event.partnerId, list);
   }
+  await mapLimit([...byPartner.entries()], 4, async ([partnerId, events]) => {
+    const [p] = await db.select({ url: partners.webhookUrl, secret: partners.webhookSecret, enabled: partners.enabled }).from(partners).where(eq(partners.id, partnerId)).limit(1);
+    const secret = decryptField(p?.secret) || '';
+    const target = p?.enabled && p.url && secret ? { url: p.url, secret } : null;
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i]!;
+      if (!target) {
+        await db.update(partnerWebhookEvents).set({ failedAt: now, lastError: 'Kein Webhook eingerichtet' }).where(eq(partnerWebhookEvents.id, event.id));
+        stats.dropped++;
+        continue;
+      }
+      // Reservieren, bevor gesendet wird: Überschneiden sich zwei Läufe, stellt nur einer zu
+      const claimed = await db
+        .update(partnerWebhookEvents)
+        .set({ nextAttemptAt: new Date(now.getTime() + CLAIM_MS) })
+        .where(and(eq(partnerWebhookEvents.id, event.id), isNull(partnerWebhookEvents.deliveredAt), isNull(partnerWebhookEvents.failedAt), lte(partnerWebhookEvents.nextAttemptAt, now)));
+      if (affectedRows(claimed) !== 1) continue;
+      const timestamp = Math.floor(Date.now() / 1000);
+      const body = JSON.stringify({ id: event.id, type: event.type, createdAt: event.createdAt.toISOString(), data: event.payload });
+      let error: string | null = null;
+      try {
+        // Bei jeder Zustellung neu prüfen: Der Host darf nicht (inzwischen) in ein privates Netz zeigen
+        const checked = await assertPublicHttps(target.url);
+        const status = await postPinned(
+          checked,
+          {
+            'Content-Type': 'application/json',
+            'User-Agent': 'CraftingHosting-Webhooks/1',
+            'X-CHF-Event': event.type,
+            'X-CHF-Delivery': event.id,
+            'X-CHF-Timestamp': String(timestamp),
+            'X-CHF-Signature': `sha256=${signWebhook(target.secret, timestamp, body)}`,
+          },
+          body,
+          TIMEOUT_MS,
+        );
+        if (status < 200 || status >= 300) error = `HTTP ${status}`;
+      } catch (err) {
+        const e = err as { message?: unknown; code?: unknown };
+        error = String((typeof e.message === 'string' && e.message) || e.code || err).slice(0, 200);
+      }
+      if (!error) {
+        await db.update(partnerWebhookEvents).set({ deliveredAt: new Date(), attempts: event.attempts + 1, lastError: null }).where(eq(partnerWebhookEvents.id, event.id));
+        stats.delivered++;
+        continue;
+      }
+      const attempts = event.attempts + 1;
+      const final = attempts >= MAX_ATTEMPTS;
+      const retryAt = new Date(now.getTime() + (BACKOFF[attempts - 1] ?? 21_600) * 1000);
+      await db
+        .update(partnerWebhookEvents)
+        .set({ attempts, lastError: error, ...(final ? { failedAt: now } : { nextAttemptAt: retryAt }) })
+        .where(eq(partnerWebhookEvents.id, event.id));
+      stats.failed++;
+      // Der Empfänger ist gerade nicht erreichbar: die übrigen Ereignisse dieses Partners in diesem Lauf gar nicht erst
+      // versuchen (sie bleiben fällig und kommen in der richtigen Reihenfolge nach, sobald er wieder antwortet)
+      stats.postponed += events.length - i - 1;
+      break;
+    }
+  });
   // Erledigte und aufgegebene Ereignisse nach sieben Tagen entfernen
   const old = new Date(now.getTime() - 7 * 86_400_000);
   await db.delete(partnerWebhookEvents).where(and(lt(partnerWebhookEvents.createdAt, old), or(lte(partnerWebhookEvents.deliveredAt, now), lte(partnerWebhookEvents.failedAt, now))));

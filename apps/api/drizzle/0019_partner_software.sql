@@ -1,0 +1,1 @@
+ALTER TABLE `partner_servers` ADD `software_job` text;

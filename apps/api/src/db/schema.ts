@@ -663,6 +663,33 @@ export const partnerPlayers = sqliteTable(
 );
 
 /** Sitzungsdaten eines Partner-Servers: läuft nur, solange der Launcher des Hosts sich meldet */
+/** Ein Schritt beim Einrichten der Server-Software */
+export type SoftwareStep = { type: 'download'; url: string; file: string; size: number | null } | { type: 'unzip'; file: string; location: string } | { type: 'remove'; location: string };
+
+export interface SoftwareJob {
+  serverType: string;
+  /** Gewünschte Version (wie angefragt) und die tatsächlich installierte (bei „latest“ aufgelöst) */
+  version: string;
+  resolvedVersion: string;
+  build: string;
+  /** Benötigte Java-Version (null = unbekannt, Image bleibt) */
+  java: number | null;
+  steps: SoftwareStep[];
+  /** Nächster Schritt */
+  pos: number;
+  /** Erst warten, bis das Panel die Grundinstallation abgeschlossen hat (direkt nach dem Erstellen) */
+  waitInstall: boolean;
+  /** Java-Image und Startdatei sind gesetzt */
+  prepared: boolean;
+  /** Laufender Download: Beginn, zuletzt gesehene Größe und wie oft sie unverändert war */
+  pullStartedAt: number | null;
+  pullSize: number;
+  pullStable: number;
+  attempts: number;
+  startedAt: number;
+  error: string | null;
+}
+
 export const partnerServers = sqliteTable(
   'partner_servers',
   {
@@ -696,6 +723,11 @@ export const partnerServers = sqliteTable(
     runningNotified: integer('running_notified', { mode: 'boolean' }).notNull().default(false),
     cooldownNotified: integer('cooldown_notified', { mode: 'boolean' }).notNull().default(true),
     deletionWarnedAt: ts('deletion_warned_at'),
+    /**
+     * Laufende Installation der Server-Software (Typ-/Versionswechsel über das Software-Verzeichnis): die Schritte,
+     * der Fortschritt und ggf. der Fehler. null = nichts offen.
+     */
+    softwareJob: text('software_job', { mode: 'json' }).$type<SoftwareJob | null>(),
   },
   (t) => [index('partner_servers_partner_idx').on(t.partnerId), index('partner_servers_player_idx').on(t.playerId), index('partner_servers_active_idx').on(t.hostActive)],
 );

@@ -311,6 +311,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       return {
         id: eggId,
         dockerImage: 'ghcr.io/parkervcp/yolks:python_3.13',
+        dockerImages: { 'Python 3.13': 'ghcr.io/parkervcp/yolks:python_3.13' },
         startup: 'python /home/container/{{PY_FILE}}',
         variables: [
           { envVariable: 'PY_FILE', defaultValue: 'app.py' },
@@ -322,6 +323,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       return {
         id: eggId,
         dockerImage: 'ghcr.io/parkervcp/yolks:nodejs_22',
+        dockerImages: { 'Node.js 22': 'ghcr.io/parkervcp/yolks:nodejs_22' },
         startup: 'node /home/container/{{MAIN_FILE}}',
         variables: [{ envVariable: 'MAIN_FILE', defaultValue: 'index.js' }],
       };
@@ -329,6 +331,7 @@ export class PterodactylMockClient implements PterodactylGateway {
     return {
       id: eggId,
       dockerImage: 'ghcr.io/pterodactyl/yolks:java_21',
+      dockerImages: { 'Java 25': 'ghcr.io/pterodactyl/yolks:java_25', 'Java 21': 'ghcr.io/pterodactyl/yolks:java_21', 'Java 17': 'ghcr.io/pterodactyl/yolks:java_17', 'Java 8': 'ghcr.io/pterodactyl/yolks:java_8' },
       startup: 'java -Xms128M -XX:MaxRAMPercentage=95.0 -jar {{SERVER_JARFILE}}',
       variables: [
         { envVariable: 'SERVER_JARFILE', defaultValue: 'server.jar' },
@@ -519,7 +522,7 @@ export class PterodactylMockClient implements PterodactylGateway {
     return `https://node.mock.invalid/download/file?token=mock-${identifier}&file=${encodeURIComponent(path)}`;
   }
 
-  async decompressFile(identifier: string, root: string, file: string): Promise<void> {
+  async decompressFile(identifier: string, root: string, file: string, _timeoutMs?: number): Promise<void> {
     const base = root.endsWith('/') ? root : `${root}/`;
     this.withFiles(identifier, (files) => {
       if (files[base + file] === undefined) throw new PterodactylError('file not found', 404);
@@ -527,7 +530,7 @@ export class PterodactylMockClient implements PterodactylGateway {
     });
   }
 
-  async pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void> {
+  async pullFile(identifier: string, url: string, directory: string, filename: string, _background?: boolean): Promise<void> {
     this.withFiles(identifier, (files) => void (files[`${directory.endsWith('/') ? directory : `${directory}/`}${filename}`] = `geladen von ${url}`));
   }
 
@@ -572,6 +575,7 @@ export class PterodactylMockClient implements PterodactylGateway {
   async restoreBackup(identifier: string, uuid: string, _truncate: boolean): Promise<void> {
     this.withServer(identifier, (s) => {
       if (!(s.backups ?? []).some((b) => b.uuid === uuid)) throw new PterodactylError('backup not found', 404);
+      this.settle(s);
       if (s.state !== 'offline') throw new PterodactylError('server must be offline', 400);
       s.files = { ...(s.files ?? {}), '/restored-from.txt': uuid };
     });
@@ -587,7 +591,7 @@ export class PterodactylMockClient implements PterodactylGateway {
   async updateServerStartup(id: number, spec: { eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }): Promise<void> {
     this.mutate(id, (s) => {
       s.eggId = spec.eggId;
-      s.files = { ...(s.files ?? {}), '/.startup-env.json': JSON.stringify(spec.environment) };
+      s.files = { ...(s.files ?? {}), '/.startup-env.json': JSON.stringify(spec.environment), '/.docker-image': spec.dockerImage };
     });
   }
 

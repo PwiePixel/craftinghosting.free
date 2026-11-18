@@ -48,6 +48,8 @@ const versionVariables: Record<string, string> = {
   vanilla: 'VANILLA_VERSION',
   fabric: 'MC_VERSION',
   forge: 'MC_VERSION',
+  neoforge: 'MC_VERSION',
+  quilt: 'MC_VERSION',
 };
 
 function fromEnv(type: string): EggMapping | null | undefined {
@@ -85,6 +87,21 @@ export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 
   return defaults[serverType] ?? null;
 }
 
+/** Servertyp, dessen Egg als Grundlage für alle Minecraft-Typen ohne eigenes Egg dient */
+export const BASE_SERVER_TYPE = 'paper';
+
+/**
+ * Hat dieser Minecraft-Typ kein eigenes Egg – oder dasselbe wie der Grundtyp? Dann installiert das Panel nur den
+ * Grundtyp, und die eigentliche Software muss nachträglich eingerichtet werden (services/partner-software.service.ts).
+ */
+export function sharesBaseEgg(serverType: string, settings?: Pick<SiteSettings, 'products'>): boolean {
+  if (serverType === BASE_SERVER_TYPE || getServerType(serverType)?.kind !== 'minecraft') return false;
+  const base = getEggMapping(BASE_SERVER_TYPE, settings);
+  if (!base) return false;
+  const own = getEggMapping(serverType, settings);
+  return !own || (own.nestId === base.nestId && own.eggId === base.eggId);
+}
+
 /** Erkennt passende Eggs anhand ihres Namens (Vorschlag für den Admin-Bereich) */
 const eggPatterns: Record<string, RegExp[]> = {
   paper: [/^paper$/i, /paper/i],
@@ -92,6 +109,8 @@ const eggPatterns: Record<string, RegExp[]> = {
   vanilla: [/vanilla/i],
   fabric: [/fabric/i],
   forge: [/^forge/i, /(?<!neo)forge/i],
+  neoforge: [/neoforge/i],
+  quilt: [/quilt/i],
   python: [/discord.*py|py.*discord/i, /generic.*python|python.*generic/i, /python/i],
   nodejs: [/discord.*(js|node)/i, /generic.*node|node.*generic/i, /node\.?js/i],
 };

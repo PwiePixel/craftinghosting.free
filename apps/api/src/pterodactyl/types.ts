@@ -67,6 +67,8 @@ export interface PteroResources {
 export interface PteroEgg {
   id: number;
   dockerImage: string;
+  /** Alle Images des Eggs (Anzeigename → Image), z. B. „Java 21“ → ghcr.io/…:java_21 */
+  dockerImages: Record<string, string>;
   startup: string;
   variables: { envVariable: string; defaultValue: string }[];
 }
@@ -211,9 +213,11 @@ export interface PterodactylGateway {
   /** Kurzlebige Adresse zum Herunterladen einer Datei */
   fileDownloadUrl(identifier: string, path: string): Promise<string>;
   /** Archiv (zip, tar.gz …) an Ort und Stelle entpacken */
-  decompressFile(identifier: string, root: string, file: string): Promise<void>;
+  /** `timeoutMs`: große Archive brauchen länger als die übliche Frist */
+  decompressFile(identifier: string, root: string, file: string, timeoutMs?: number): Promise<void>;
   /** Datei von einer Adresse im Internet direkt auf den Server laden */
-  pullFile(identifier: string, url: string, directory: string, filename: string): Promise<void>;
+  /** `background`: nicht auf das Ende des Ladens warten (für große Dateien – der Fortschritt zeigt sich an der Dateigröße) */
+  pullFile(identifier: string, url: string, directory: string, filename: string, background?: boolean): Promise<void>;
   /** Server im Panel umbenennen */
   renameServer(id: number, name: string): Promise<void>;
 

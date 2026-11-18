@@ -5,7 +5,7 @@
 import { expireDiscordWaiting } from '../services/admin-mail.service';
 import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm';
 import { affectedRows, db } from '../db/client';
-import { auditLogs, consentLogs, dedupeMarks, emailTokens, jobRuns, notifications, serverSessions, servers, users } from '../db/schema';
+import { auditLogs, consentLogs, dedupeMarks, emailTokens, jobRuns, notifications, partners, serverSessions, servers, users } from '../db/schema';
 import { deleteExpiredSessions } from '../services/session.service';
 import { pruneChats } from '../chat/service';
 import { pruneStatusChecks } from '../services/status.service';
@@ -39,6 +39,11 @@ export const cleanupJob: JobDefinition = {
               and(isNotNull(users.loginPasswordHash), lt(users.createdAt, ago(30)), or(isNull(users.lastLoginAt), lt(users.lastLoginAt, ago(30)))),
             ),
             notExists(db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, users.id), isNotNull(servers.waitlistPosition)))),
+            // Konten von API-Partnern haben weder Passwort noch bestätigte E-Mail – sie dürfen hier NIE verschwinden:
+            // Mit dem Konto gingen Partner, Spieler und Sitzungsdaten verloren, die Server liefen im Panel unverwaltet weiter.
+            notExists(db.select({ id: partners.id }).from(partners).where(eq(partners.userId, users.id))),
+            // Grundsätzlich: kein Konto löschen, dem noch ein im Panel eingerichteter Server gehört
+            notExists(db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, users.id), isNotNull(servers.pteroServerId)))),
           ),
         ),
     );

@@ -13,7 +13,8 @@ import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
 import { forgetLiveState, stillInstalling, getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
 import { startupFor } from './provisioning.service';
-import { getSettings, serverTypeAvailable } from './settings.service';
+import { installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
+import { getSettings } from './settings.service';
 
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
 
@@ -21,8 +22,9 @@ const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
 
 /** Server muss fertig eingerichtet sein, damit sich Dateien und Einstellungen ändern lassen */
 async function ready(partner: Partner, id: string): Promise<Server & { pteroIdentifier: string }> {
-  const { server } = await loadPartnerServer(partner, id);
-  if (server.status !== 'active' || !server.pteroIdentifier || (await stillInstalling(server))) {
+  const { server, ps } = await loadPartnerServer(partner, id);
+  // Während die Server-Software eingerichtet wird, bleiben die Dateien unangetastet (nach einem Fehlschlag sind sie wieder zugänglich)
+  if (server.status !== 'active' || !server.pteroIdentifier || (ps.softwareJob && !ps.softwareJob.error) || (await stillInstalling(server))) {
     throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet. Bitte gleich noch einmal versuchen.', 'The server is still being set up. Please try again shortly.'));
   }
   return server as Server & { pteroIdentifier: string };
@@ -153,6 +155,10 @@ export async function decompressPartnerFile(partner: Partner, id: string, path: 
   const server = await ready(partner, id);
   const file = cleanPath(path);
   try {
+    // Das Panel meldet eine fehlende Datei beim Entpacken nur als allgemeinen Fehler – deshalb vorher nachsehen
+    const listing = await pterodactyl().listFiles(server.pteroIdentifier, split(file).root);
+    const entry = listing.find((f) => f.name === split(file).name);
+    if (!entry || entry.directory) throw new ApiError(404, 'file_not_found', L('Diese Datei gibt es nicht.', 'This file does not exist.'));
     await pterodactyl().decompressFile(server.pteroIdentifier, split(file).root, split(file).name);
     return { path: file, extractedTo: split(file).root };
   } catch (err) {
@@ -359,20 +365,20 @@ export async function setPartnerSettings(partner: Partner, id: string, input: Re
   if (Object.keys(fields).length) throw Errors.badRequest('validation_error', L('Bitte prüfe die Einstellungen.', 'Please check the settings.'), fields);
   if (changes.size === 0) throw Errors.badRequest('validation_error', L('Es wurde keine Einstellung angegeben.', 'No setting was specified.'));
   try {
-    const text = (await pterodactyl().readFile(server.pteroIdentifier, '/server.properties')) ?? '';
-    // Vorhandene Zeilen ändern, Kommentare und unbekannte Einträge unangetastet lassen, neue Schlüssel anhängen
-    const open = new Map(changes);
+    const text = stripLimitsBlock((await pterodactyl().readFile(server.pteroIdentifier, '/server.properties')) ?? '');
+    // Vorhandene Zeilen ändern (alle Vorkommen eines Schlüssels), Kommentare und unbekannte Einträge unangetastet
+    // lassen, neue Schlüssel anhängen. „\“ leitet in dieser Datei ein Sonderzeichen ein und wird deshalb verdoppelt.
+    const open = new Set(changes.keys());
     const lines = text.split(/\r?\n/).map((line) => {
       const at = line.indexOf('=');
       const key = at > 0 && !line.trimStart().startsWith('#') ? line.slice(0, at).trim() : null;
-      if (key === null || !open.has(key)) return line;
-      const value = open.get(key)!;
+      if (key === null || !changes.has(key)) return line;
       open.delete(key);
-      return `${key}=${value}`;
+      return `${key}=${changes.get(key)!.replace(/\\/g, '\\\\')}`;
     });
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
-    for (const [key, value] of open) lines.push(`${key}=${value}`);
-    const next = `${lines.join('\n')}\n`;
+    for (const key of open) lines.push(`${key}=${changes.get(key)!.replace(/\\/g, '\\\\')}`);
+    const next = capProperties(`${lines.join('\n')}\n`);
     await pterodactyl().writeFile(server.pteroIdentifier, '/server.properties', next);
     return { settings: settingsFrom(parseProperties(next)), note: 'Changes take effect after the next server start. seed and levelType only apply to a newly generated world.' };
   } catch (err) {
@@ -439,69 +445,160 @@ export async function renamePartnerServer(partner: Partner, id: string, nameRaw:
 
 /* ------------------------------------------------------------ Grenzen der Einstellungen beim Start durchsetzen */
 
-/**
- * Vor jedem Start: Werte in der server.properties auf die erlaubten Bereiche zurückführen. So lassen sich die
- * Grenzen des Einstellungs-Endpunkts nicht über einen direkten Datei-Upload oder ein eingespieltes Backup umgehen.
- */
-export async function enforceSettingsCaps(identifier: string): Promise<void> {
-  const text = await pterodactyl().readFile(identifier, '/server.properties');
-  if (text === null) return;
-  const fixed = capProperties(text);
-  if (fixed !== text) await pterodactyl().writeFile(identifier, '/server.properties', fixed);
-}
-
 /** Schlüssel bzw. Wert einer .properties-Zeile entschlüsseln (\uXXXX, \t, \n …) – so wie Java es beim Laden tut */
 const unescapeProperty = (v: string) =>
   v.replace(/\\u([0-9a-fA-F]{4})|\\(.)/gs, (_m, hex: string | undefined, ch: string | undefined) => (hex ? String.fromCharCode(parseInt(hex, 16)) : ch === 't' ? '\t' : ch === 'n' ? '\n' : ch === 'r' ? '\r' : ch === 'f' ? '\f' : (ch ?? '')));
 
+const CAPS = () => Object.values(SERVER_SETTINGS).filter((s) => s.kind === 'int');
+/** Standardwerte von Minecraft für die begrenzten Einstellungen (falls sie in der Datei fehlen) */
+const CAP_DEFAULTS: Record<string, number> = { 'max-players': 20, 'spawn-protection': 16, 'view-distance': 10, 'simulation-distance': 10 };
+const LIMITS_MARK = '#chf-limits';
+const LIMITS_BLOCK = new RegExp(`\\n*${LIMITS_MARK}\\n(?:[a-z-]+=-?\\d+\\n)*$`);
+
+/** Unseren Block am Dateiende entfernen (z. B. bevor Einstellungen geändert werden) */
+export const stripLimitsBlock = (text: string) => text.replace(LIMITS_BLOCK, '\n');
+
 /**
- * Begrenzte Einstellungen in einer server.properties auf den erlaubten Bereich bringen. Gelesen wird nach den Regeln
- * von Java (Trennzeichen „=“, „:“ oder Leerraum, Fortsetzungszeilen, maskierte Zeichen, der letzte Eintrag gewinnt) –
- * sonst ließe sich die Prüfung mit einer anderen Schreibweise desselben Schlüssels umgehen.
+ * Liest eine .properties-Datei so gut wie möglich nach den Regeln von Java (Trennzeichen „=“, „:“ oder Leerraum,
+ * Fortsetzungszeilen, maskierte Zeichen, der letzte Eintrag gewinnt). Für Dateien, die Minecraft selbst geschrieben
+ * hat, ist das exakt. Bei von Hand gebauten Sonderfällen kann es von Java abweichen (die Java-Versionen sind sich da
+ * selbst nicht einig) – deshalb verlässt sich die Begrenzung unten nicht auf dieses Lesen.
  */
-export function capProperties(text: string): string {
-  const caps = new Map(Object.values(SERVER_SETTINGS).filter((s) => s.kind === 'int').map((s) => [s.key, s]));
+function javaProperties(text: string): Map<string, string> {
+  const map = new Map<string, string>();
   const physical = text.split(/\r\n|\n|\r/);
-  // Logische Zeilen: Endet eine Zeile mit einer ungeraden Zahl von „\“, gehört die nächste dazu
-  const logical: Array<{ from: number; to: number; key: string | null; value: string }> = [];
   for (let i = 0; i < physical.length; i++) {
-    const from = i;
     let line = physical[i]!.replace(/^[ \t\f]+/, '');
-    if (line === '' || line.startsWith('#') || line.startsWith('!')) {
-      logical.push({ from, to: i, key: null, value: '' });
-      continue;
-    }
+    if (line === '' || line.startsWith('#') || line.startsWith('!')) continue;
     while (/(?:^|[^\\])(?:\\\\)*\\$/.test(line) && i + 1 < physical.length) {
       i++;
       line = line.slice(0, -1) + physical[i]!.replace(/^[ \t\f]+/, '');
     }
-    // Schlüssel: bis zum ersten nicht maskierten „=“, „:“ oder Leerraum
     let end = 0;
     while (end < line.length && !/[=: \t\f]/.test(line[end]!)) end += line[end] === '\\' ? 2 : 1;
-    const key = unescapeProperty(line.slice(0, end));
-    const rest = line.slice(end).replace(/^[ \t\f]*[=:]?[ \t\f]*/, '');
-    logical.push({ from, to: i, key, value: unescapeProperty(rest) });
+    map.set(unescapeProperty(line.slice(0, end)), unescapeProperty(line.slice(end).replace(/^[ \t\f]*[=:]?[ \t\f]*/, '')));
   }
-  const last = new Map<string, number>();
-  logical.forEach((l, index) => {
-    if (l.key !== null && caps.has(l.key)) last.set(l.key, index);
-  });
-  if (last.size === 0) return text;
-  const out: string[] = [];
-  logical.forEach((l, index) => {
-    const cap = l.key !== null ? caps.get(l.key) : undefined;
-    if (!cap) return void out.push(...physical.slice(l.from, l.to + 1));
-    // Frühere Einträge desselben Schlüssels entfallen – es zählt ohnehin nur der letzte
-    if (last.get(l.key!) !== index) return;
-    const plain = /^[+-]?\d{1,9}$/.test(l.value.trim());
-    const value = plain ? Number(l.value.trim()) : NaN;
-    const clamped = Number.isFinite(value) ? Math.min(cap.max!, Math.max(cap.min!, value)) : cap.max!;
-    const wanted = `${cap.key}=${clamped}`;
-    // Unverändert lassen, wenn die Zeile schon genau so dasteht (dann wird die Datei nicht neu geschrieben)
-    out.push(l.from === l.to && clamped === value && physical[l.from]!.trim() === wanted ? physical[l.from]! : wanted);
-  });
-  return out.join('\n');
+  return map;
 }
+
+const plainInt = (value: string | undefined) => (value !== undefined && /^[+-]?\d{1,9}$/.test(value.trim()) ? Number(value.trim()) : NaN);
+
+/** Liegt eine begrenzte Einstellung außerhalb des erlaubten Bereichs? (Für die Nachprüfung bei laufendem Server) */
+export function propertiesViolation(text: string): boolean {
+  // Mit Fortsetzungszeilen (eine Zeile endet auf „\“) lesen verschiedene Java-Versionen dieselbe Datei unterschiedlich.
+  // Minecraft schreibt solche Zeilen nie selbst. Dann zählt nur, ob unser Block am Ende die Werte festlegt.
+  if (text.split(/\r\n|\n|\r/).some((line) => /(?:^|[^\\])(?:\\\\)*\\$/.test(line))) return capProperties(text) !== text;
+  const props = javaProperties(text);
+  return CAPS().some((cap) => {
+    const raw = props.get(cap.key);
+    if (raw === undefined) return false;
+    const value = plainInt(raw);
+    // Keine gültige Zahl: Minecraft nimmt dann seinen Standardwert – der liegt innerhalb der Grenzen
+    return Number.isFinite(value) && (value < cap.min! || value > cap.max!);
+  });
+}
+
+/**
+ * Begrenzte Einstellungen einer server.properties auf den erlaubten Bereich bringen – so, dass es nicht darauf ankommt,
+ * ob wir die Datei genauso lesen wie Java:
+ *  – Einfache Dateien (ohne „\“ und ohne Wagenrücklauf) kennen keine Fortsetzungszeilen und keine maskierten Zeichen.
+ *    Sie lassen sich eindeutig lesen; sind alle Werte im Rahmen, bleibt die Datei unverändert.
+ *  – In allen anderen Fällen hängen wir die begrenzten Werte in einem eigenen Block ans Ende. Java übernimmt bei
+ *    doppelten Schlüsseln immer den letzten Eintrag, und die Leerzeilen davor beenden jede offene Fortsetzungszeile –
+ *    der Block gilt also unabhängig davon, was weiter oben steht oder wie trickreich es geschrieben ist.
+ */
+export function capProperties(text: string): string {
+  const caps = CAPS();
+  if (!/[\\\r]/.test(text)) {
+    // Eindeutig lesbar: je Zeile Schlüssel bis zum ersten „=“, „:“ oder Leerraum; der letzte Eintrag gewinnt
+    const last = new Map<string, string>();
+    for (const raw of text.split('\n')) {
+      const line = raw.replace(/^[ \t\f]+/, '');
+      if (line === '' || line.startsWith('#') || line.startsWith('!')) continue;
+      const m = /^([^=: \t\f]*)[ \t\f]*[=:]?[ \t\f]*(.*)$/.exec(line);
+      if (m) last.set(m[1]!, m[2]!);
+    }
+    const fine = caps.every((cap) => {
+      const raw = last.get(cap.key);
+      if (raw === undefined) return true;
+      const value = plainInt(raw);
+      return Number.isFinite(value) && value >= cap.min! && value <= cap.max!;
+    });
+    if (fine) return text;
+  }
+  const props = javaProperties(text);
+  const block = caps
+    .map((cap) => {
+      const value = plainInt(props.get(cap.key));
+      const wanted = Number.isFinite(value) ? value : (CAP_DEFAULTS[cap.key] ?? cap.min!);
+      return `${cap.key}=${Math.min(cap.max!, Math.max(cap.min!, wanted))}\n`;
+    })
+    .join('');
+  return `${stripLimitsBlock(text).replace(/\n+$/, '')}\n\n\n${LIMITS_MARK}\n${block}`;
+}
+
+/**
+ * Sichtweite in der spigot.yml begrenzen (Paper/Purpur lesen sie von dort je Welt und übergehen damit die
+ * server.properties). Bewusst einfach gehalten: Jede Zahl hinter „view-distance“ bzw. „simulation-distance“ wird
+ * auf den Höchstwert gekappt; „default“ bleibt.
+ */
+export function capSpigotYaml(text: string): string {
+  const max = SERVER_SETTINGS.viewDistance!.max!;
+  return text.replace(/((?:view|simulation)-distance["']?[ \t]*:[ \t]*["']?)(\d+)/g, (all, head: string, num: string) => (Number(num) > max ? `${head}${max}` : all));
+}
+
+/** Servertypen, die zusätzlich die spigot.yml auswerten */
+const BUKKIT_TYPES = new Set(['paper', 'purpur']);
+
+/**
+ * Vor jedem Start: Werte auf die erlaubten Bereiche zurückführen. So lassen sich die Grenzen des
+ * Einstellungs-Endpunkts nicht über einen direkten Datei-Upload oder ein eingespieltes Backup umgehen.
+ */
+export async function enforceSettingsCaps(identifier: string, serverType?: string): Promise<void> {
+  const text = await pterodactyl().readFile(identifier, '/server.properties');
+  if (text !== null) {
+    const fixed = capProperties(text);
+    if (fixed !== text) await pterodactyl().writeFile(identifier, '/server.properties', fixed);
+  }
+  if (serverType && BUKKIT_TYPES.has(serverType)) {
+    const yaml = await pterodactyl().readFile(identifier, '/spigot.yml');
+    if (yaml !== null) {
+      const fixed = capSpigotYaml(yaml);
+      if (fixed !== yaml) await pterodactyl().writeFile(identifier, '/spigot.yml', fixed);
+    }
+  }
+}
+
+/**
+ * Nachprüfung bei laufendem Server. Rückgabe: 'ok', 'violation' (Werte über den Grenzen – die Dateien sind dann
+ * bereits korrigiert) oder 'unreadable' (die Datei lässt sich nicht lesen, obwohl das Panel antwortet).
+ * Wirft, wenn das Panel gerade nicht erreichbar ist.
+ */
+export async function checkSettingsCaps(identifier: string, serverType: string): Promise<'ok' | 'violation' | 'unreadable'> {
+  let violation = false;
+  try {
+    const text = await pterodactyl().readFile(identifier, '/server.properties');
+    if (text !== null && propertiesViolation(text)) {
+      violation = true;
+      await pterodactyl().writeFile(identifier, '/server.properties', capProperties(text)).catch(() => {});
+    }
+    if (BUKKIT_TYPES.has(serverType)) {
+      const yaml = await pterodactyl().readFile(identifier, '/spigot.yml');
+      if (yaml !== null && capSpigotYaml(yaml) !== yaml) {
+        violation = true;
+        await pterodactyl().writeFile(identifier, '/spigot.yml', capSpigotYaml(yaml)).catch(() => {});
+      }
+    }
+  } catch (err) {
+    // 4xx vom Panel (z. B. Datei zu groß zum Lesen): Der Partner hat die Datei unprüfbar gemacht
+    if (err instanceof PterodactylError && err.status >= 400 && err.status < 500 && err.status !== 429 && err.status !== 409) return 'unreadable';
+    throw err;
+  }
+  return violation ? 'violation' : 'ok';
+}
+
+/** Höchstwert für die Spielerzahl (für den Abgleich mit dem, was der laufende Server selbst meldet) */
+export const MAX_PLAYERS_CAP = SERVER_SETTINGS.maxPlayers!.max!;
 
 /* ------------------------------------------------------------ Backups */
 
@@ -536,8 +633,16 @@ async function oneAtATime<T>(serverId: string, fn: () => Promise<T>): Promise<T>
 
 /** Alle Backups eines Servers löschen (vor dem Löschen des Servers – sonst blieben sie auf dem Node liegen) */
 export async function purgePartnerBackups(identifier: string): Promise<void> {
-  const list = await pterodactyl().listBackups(identifier).catch(() => []);
-  for (const backup of list) await pterodactyl().deleteBackup(identifier, backup.uuid).catch(() => {});
+  // Schlägt etwas fehl, wird der Server NICHT gelöscht (der Aufrufer bricht ab) – sonst blieben Backups ungezählt liegen
+  for (let round = 0; round < 5; round++) {
+    const list = await pterodactyl().listBackups(identifier);
+    if (list.length === 0) return;
+    for (const backup of list) {
+      await pterodactyl().deleteBackup(identifier, backup.uuid).catch((err) => {
+        if (!(err instanceof PterodactylError && err.status === 404)) throw err;
+      });
+    }
+  }
 }
 
 const backupDTO = (b: { uuid: string; name: string; bytes: number; completedAt: string | null; successful: boolean; createdAt: string }) => ({ id: b.uuid, name: b.name, bytes: b.bytes, state: b.completedAt ? (b.successful ? 'ready' : 'failed') : 'creating', createdAt: b.createdAt, completedAt: b.completedAt });
@@ -598,8 +703,10 @@ export async function partnerBackupDownloadUrl(partner: Partner, id: string, bac
 /** Server muss aus sein und darf keine laufende Sitzung haben (Einspielen, Typwechsel, Neuinstallation) */
 async function assertOffline(partner: Partner, id: string) {
   const { server, ps } = await loadPartnerServer(partner, id);
-  const dto = await getPartnerServer(partner, id);
-  if (ps.hostActive || dto.state !== 'offline') {
+  if (ps.softwareJob && !ps.softwareJob.error) throw new ApiError(409, 'server_installing', L('Die Server-Software wird noch eingerichtet. Bitte gleich noch einmal versuchen.', 'The server software is still being set up. Please try again shortly.'));
+  forgetLiveState(id);
+  const state = ps.softwareJob ? 'offline' : (await getPartnerServer(partner, id)).state;
+  if (ps.hostActive || state !== 'offline') {
     throw new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
   }
   if (!server.pteroIdentifier || !server.pteroServerId) throw new ApiError(409, 'server_installing', L('Der Server wird noch eingerichtet.', 'The server is still being set up.'));
@@ -643,25 +750,34 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
   const serverType = input.serverType ?? server.serverType;
   const version = input.version ?? (input.serverType && input.serverType !== server.serverType ? 'latest' : server.version);
   const type = getServerType(serverType);
-  if (!type || type.kind !== 'minecraft' || !serverTypeAvailable(serverType, settings)) {
+  if (!type || type.kind !== 'minecraft' || !partnerTypeAvailable(serverType, settings)) {
     const msg = L('Dieser Servertyp ist nicht verfügbar.', 'This server type is not available.');
     throw Errors.badRequest('server_type_unavailable', msg, { serverType: msg });
   }
-  if (!versionsFor(settings, type.id).includes(version)) {
+  // Unverändert neu installieren geht immer – auch wenn „latest“ inzwischen eine Version bezeichnet, die nicht einzeln zur Auswahl steht
+  if (!(serverType === server.serverType && version === server.version) && !versionsFor(settings, type.id).includes(version)) {
     const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
     throw Errors.badRequest('version_unavailable', msg, { version: msg });
   }
+  // Typen ohne eigenes Egg: Die Software kommt aus dem Verzeichnis – vorab nachschlagen, damit ein Tippfehler nichts anstößt
+  const software = installsViaDirectory(serverType, settings) ? await resolveSoftware(serverType, version) : null;
   throttle(`reinstall:${id}`, 3, 60 * 60_000, { de: 'Dieser Server wurde gerade erst mehrfach neu installiert.', en: 'This server has been reinstalled several times just now.' });
-  try {
-    await pterodactyl().updateServerStartup(server.pteroServerId, await startupFor(serverType, version, settings));
-    await pterodactyl().reinstallServer(server.pteroServerId);
-  } catch (err) {
-    panelFailure(err);
+  if (software) {
+    // Kein Neuaufsetzen im Panel: Der Software-Job tauscht die Server-Software aus (Welt und übrige Dateien bleiben)
+    await db.update(servers).set({ serverType, version }).where(eq(servers.id, id));
+    await db.update(partnerServers).set({ softwareJob: newSoftwareJob(software, false), installedNotified: false }).where(eq(partnerServers.serverId, id));
+  } else {
+    try {
+      await pterodactyl().updateServerStartup(server.pteroServerId, await startupFor(serverType, version, settings));
+      await pterodactyl().reinstallServer(server.pteroServerId);
+    } catch (err) {
+      panelFailure(err);
+    }
+    await db.update(servers).set({ serverType, version, powerState: 'installing' }).where(eq(servers.id, id));
+    await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(eq(partnerServers.serverId, id));
   }
-  await db.update(servers).set({ serverType, version, powerState: 'installing' }).where(eq(servers.id, id));
   forgetLiveState(id);
   statsCache.delete(id);
-  await db.update(partnerServers).set({ installedNotified: false }).where(eq(partnerServers.serverId, id));
   await audit({ userId: partner.userId, serverId: id, actor: 'system', action: 'partner.server_reinstalled', message: `Partner „${partner.name}“: „${server.name}“ neu installiert (${serverType} ${version}${serverType !== server.serverType || version !== server.version ? `, vorher ${server.serverType} ${server.version}` : ''})`, ip });
   return getPartnerServer(partner, id);
 }

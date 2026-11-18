@@ -156,9 +156,31 @@ Ablauf im Launcher:
 4. Antwortet `heartbeat` mit `not_running`, ist die Sitzung beendet (Grund steht in `fields.reason`) – dem Spieler
    Bescheid sagen und ggf. `start` anbieten.
 
+## Servertypen und Versionen (Software-Einrichtung)
+
+Angeboten werden `paper`, `purpur`, `vanilla`, `fabric`, `forge`, `neoforge` und `quilt`. Im Panel braucht nicht jeder
+Typ ein eigenes Egg: Hat ein Typ **kein eigenes Egg** (oder ist ihm dasselbe Egg wie Paper zugeordnet), legt das Panel
+den Server mit dem Paper-Egg an und die API richtet die gewünschte Software danach selbst ein – so wie es sonst der
+Version-Changer im Panel tut:
+
+1. Typ und Version werden im Verzeichnis **MCJars** nachgeschlagen (`MCJARS_API_URL`, Standard `https://mcjars.app/api/v2`).
+2. Der Job `partner-software` (alle 5 s) führt die dort genannten Schritte aus: Dateien über den Node direkt auf den
+   Server laden, entpacken, alte Dateien entfernen.
+3. Das Java-Image wird passend zur Minecraft-Version aus den Images des Paper-Eggs gewählt (genau diese Version, sonst
+   die nächsthöhere), die Startdatei auf `server.jar` gesetzt. Ressourcen, Node und Ports bleiben unverändert.
+
+So lange ist `state` = `installing` und `install` in der Server-Antwort zeigt den Fortschritt; bei einem Fehlschlag
+`state` = `failed` mit `install.error` (erneut versuchen: `POST /servers/{id}/reinstall`). Hat ein Typ ein **eigenes
+Egg**, läuft alles wie bisher über dieses Egg (Wechsel = Egg umstellen und im Panel neu installieren).
+
+Voraussetzungen: Der API-Server erreicht `mcjars.app`; die Nodes erreichen die Download-Adressen (u. a.
+`*.mcjars.app`, `piston-data.mojang.com`, `fill-data.papermc.io`, `api.purpurmc.org`). Typ und Version kommen immer aus
+unserer festen Auswahl; Adressen und Dateinamen der Schritte kommen aus dem Verzeichnis, nie vom Partner, und werden vor
+dem Ausführen geprüft (nur einfache relative Pfade, nur https).
+
 ## Webhooks
 
-Je Partner eine Adresse (`PUT /webhook`). Ereignisse: `server.installed`, `server.running`, `server.stopped`
+Je Partner eine Adresse (`PUT /webhook`). Ereignisse: `server.installed`, `server.install_failed`, `server.running`, `server.stopped`
 (`reason`: `host_stopped`, `host_timeout`, `session_limit`, `settings_limit`, `admin`; `cooldownUntil`),
 `server.cooldown_ended`, `server.deletion_soon` (`deleteAt`), `server.deleted`, `webhook.test`.
 
@@ -175,7 +197,9 @@ X-CHF-Signature: sha256=<HMAC-SHA256 über "<Timestamp>.<Körper>" mit dem Gehei
 - Nur `https` auf Port 443, öffentlich erreichbar, keine Zugangsdaten in der Adresse. Der Host wird bei jeder
   Zustellung neu geprüft und es wird genau an die geprüfte IP zugestellt; Weiterleitungen werden nicht verfolgt.
   Unsere eigenen Hosts (Website, Panel) sind als Ziel gesperrt.
-- Erwartet wird ein 2xx-Status innerhalb von 8 Sekunden. Wiederholungen nach 30 s, 2 min, 10 min, 1 h, 6 h.
+- Erwartet wird ein 2xx-Status innerhalb von 5 Sekunden. Wiederholungen nach 30 s, 2 min, 10 min, 1 h, 6 h.
+- Zugestellt wird je Partner getrennt (höchstens 25 Ereignisse je Lauf); antwortet ein Empfänger nicht, warten nur
+  dessen eigene Ereignisse.
 - Das Geheimnis liegt verschlüsselt in der Datenbank und wird nur beim Setzen einmal ausgegeben.
 - Webhooks sind reine Benachrichtigungen – die Antwort des Empfängers ändert nichts am Server.
 
@@ -184,11 +208,11 @@ X-CHF-Signature: sha256=<HMAC-SHA256 über "<Timestamp>.<Körper>" mit dem Gehei
 | Regel | Wie sie durchgesetzt wird |
 | --- | --- |
 | Höchstzahl Server (gesamt / je Spieler) | Prüfen und Anlegen in einer Schreib-Transaktion – gleichzeitige Anfragen können die Grenze nicht überschreiten |
-| Laufzeit-Grenze und Pflichtpause | Stand wird beim Löschen auf den Spieler übertragen und beim neu Erstellen übernommen; ein fehlgeschlagener Start setzt nichts zurück |
+| Laufzeit-Grenze und Pflichtpause | Stand wird beim Löschen auf den Spieler übertragen und beim neu Erstellen übernommen. Gelöschte Server anderer Spieler mit offener Pause/Laufzeit belegen ihren Platz weiter (neue Spieler-Kennung hilft also nicht). Ein neuer Start geht erst, wenn der Server wirklich aus ist (`server_stopping`); ein fehlgeschlagener Start setzt nichts zurück |
 | „Server läuft nur mit Sitzung“ | Der Job `partner-sessions` (alle 30 s) stoppt jeden Partner-Server ohne Sitzung und beendet ihn nach 2 Minuten hart (`kill`), falls er den Stopp ignoriert |
 | Lebenszeichen | Konsolen-Stream, Webhooks, Backups zählen nicht als Lebenszeichen; „Weiterlaufen mit Spielern“ höchstens 2 Stunden |
 | Paket-Ressourcen, Servertypen, Versionen | Typ-/Versionswechsel nimmt Egg, Image und Startbefehl nur aus unserer Konfiguration; Ressourcen werden nie geändert |
-| Grenzen der Einstellungen | `server.properties` wird vor jedem Start nach Java-Regeln gelesen und begrenzt; Nachprüfung bei laufendem Server (alle 5 Minuten), bei Verstoß Stopp mit `settings_limit` |
+| Grenzen der Einstellungen | Vor jedem Start: Die begrenzten Werte der `server.properties` stehen in einem eigenen Block am Dateiende (der letzte Eintrag gilt – unabhängig davon, wie die Datei darüber geschrieben ist); bei Paper/Purpur wird zusätzlich die Sichtweite in der `spigot.yml` gekappt. Nachprüfung eine Minute nach dem Start und dann alle 5 Minuten (Datei und die vom Server gemeldete Spielerzahl); bei Verstoß Stopp mit `settings_limit` und Pflichtpause |
 | Backups | Höchstzahl laut Paket (von uns und vom Panel geprüft), ein Vorgang zugleich je Server, werden mit dem Server gelöscht |
 | Anfragebegrenzung | je Partner (nicht je Key – ein neuer oder erfundener Key bringt kein neues Kontingent), dazu das Panel-Kontingent |
 | Daemon-Zugang | Die Live-Konsole wird von unserer API gelesen und weitergereicht; Adresse und Token des Daemons verlassen den Server nie |
@@ -217,6 +241,7 @@ Fehler kommen mit passendem HTTP-Status und diesem Aufbau:
 | 409 | `cooldown` | Pflichtpause läuft noch (`fields.cooldownUntil`) |
 | 409 | `not_running` | Keine laufende Sitzung (bei `heartbeat` und `command`) |
 | 409 | `server_failed`, `server_suspended` | Einrichtung fehlgeschlagen bzw. Server gesperrt |
+| 409 | `server_stopping` | Der Server fährt aus der vorigen Sitzung noch herunter – in ein paar Sekunden erneut starten |
 | 409 | `server_running` | Dafür muss der Server aus sein (Backup einspielen, Typ/Version wechseln, neu installieren) |
 | 409 | `state_changed` | Der Stand hat sich im selben Moment geändert – noch einmal versuchen |
 | 409 / 404 | `backup_limit`, `backup_busy`, `backup_rejected`, `backup_not_found` | Höchstzahl erreicht, Vorgang läuft schon, vom Panel abgelehnt bzw. Backup gibt es nicht |

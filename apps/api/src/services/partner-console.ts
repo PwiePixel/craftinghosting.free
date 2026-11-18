@@ -61,12 +61,19 @@ export async function streamPartnerConsole(partner: Partner, server: { id: strin
     }
     bump(open.partner, partner.id, -1);
     bump(open.server, server.id, -1);
-    if (!raw.writableEnded) {
-      send('end', { reason });
+    if (!raw.writableEnded && !raw.destroyed) {
+      if (reason !== 'slow_client') raw.write(`event: end\ndata: ${JSON.stringify({ reason })}\n\n`);
       raw.end();
     }
+    // Die Verbindung nicht offen stehen lassen, bis der Empfänger irgendwann liest: kurz danach hart schließen
+    if (reason === 'slow_client') raw.destroy();
+    else setTimeout(() => raw.destroy(), 5000).unref();
   };
-  const ping = setInterval(() => raw.write(': ping\n\n'), 20_000);
+  const ping = setInterval(() => {
+    if (raw.destroyed) return close('client_closed');
+    if (raw.writableLength > 1024 * 1024) return close('slow_client');
+    raw.write(': ping\n\n');
+  }, 20_000);
   // Regelmäßig neu prüfen: Wird der Key getauscht, der Partner deaktiviert oder der Server gelöscht/gesperrt, endet der Stream
   const recheck = setInterval(() => {
     void (async () => {
@@ -81,7 +88,10 @@ export async function streamPartnerConsole(partner: Partner, server: { id: strin
   }, 30_000);
   const limit = setTimeout(() => close('max_duration'), MAX_DURATION_MS);
   request.raw.on('close', () => close('client_closed'));
+  raw.on('close', () => close('client_closed'));
   raw.on('error', () => close('client_closed'));
+  // Hat der Empfänger schon aufgelegt, bevor wir zuhören konnten, käme kein „close“ mehr – dann sofort beenden
+  if (request.raw.destroyed || raw.destroyed) return close('client_closed');
 
   /** Ersatz ohne Daemon-Verbindung: das Protokoll regelmäßig lesen und neue Zeilen weiterreichen */
   const startPolling = () => {
