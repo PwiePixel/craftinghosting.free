@@ -62,6 +62,8 @@ export function toUserDTO(user: User): UserDTO {
     panelUsername: user.pteroUsername,
     role: isAdmin(user) ? 'admin' : 'user',
     beta: canUseBeta(user),
+    // Partner-Konto (oder Admin): darf die Partner-Dokumentation sehen
+    partner: user.partner || isAdmin(user),
     locale: user.locale,
     discord: user.discordId ? { id: user.discordId, username: user.discordUsername ?? '' } : null,
     createdAt: user.createdAt.toISOString(),

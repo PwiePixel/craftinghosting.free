@@ -35,6 +35,8 @@ export const users = sqliteTable(
     /** IP bei der Registrierung bzw. beim letzten Login – verschlüsselt (encryptField) */
     /** Beta-Zugang: darf die Beta-Instanz nutzen (Admin → Nutzer) */
     beta: integer('beta', { mode: 'boolean' }).notNull().default(false),
+    /** Partner-Konto: sieht die Partner-Dokumentation (/docs/partner-api). Wird im Admin-Bereich vergeben – nur mit bestätigter E-Mail-Adresse */
+    partner: integer('partner', { mode: 'boolean' }).notNull().default(false),
     registrationIp: text('registration_ip'),
     lastLoginIp: text('last_login_ip'),
     /** Verknüpftes Discord-Konto (ein Discord-Konto gehört zu höchstens einem Account) */

@@ -8,6 +8,7 @@ import { site } from '@/lib/site';
 export function SiteFooter({ lang, donate = false, newsletter = false, logo }: { lang: Locale; donate?: boolean; newsletter?: boolean; logo?: CustomLogo }) {
   const t = getDict(lang);
   const links = [
+    { href: localePath(lang, 'docs'), label: t.nav.docs },
     { href: localePath(lang, 'faq'), label: t.nav.faq },
     { href: localePath(lang, 'status'), label: t.nav.status },
     // Spenden-Link nur, wenn die Spenden-Seite im Admin-Bereich aktiviert ist

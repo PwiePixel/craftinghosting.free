@@ -54,6 +54,8 @@ export const routes = {
   register: { en: '/register', de: '/de/registrieren', internal: 'registrieren' },
   myServers: { en: '/my-servers', de: '/de/meine-server', internal: 'meine-server' },
   faq: { en: '/faq', de: '/de/faq', internal: 'faq' },
+  /** Dokumentation; Unterseiten liegen unter /docs/<Seite> (die Partner-API nur für Partner-Konten) */
+  docs: { en: '/docs', de: '/de/docs', internal: 'docs' },
   status: { en: '/status', de: '/de/status', internal: 'status' },
   imprint: { en: '/imprint', de: '/de/impressum', internal: 'impressum' },
   privacy: { en: '/privacy', de: '/de/datenschutz', internal: 'datenschutz' },

@@ -69,6 +69,7 @@ return {
     rules: 'Rules',
     discord: 'Discord bots',
     faq: 'FAQ',
+    docs: 'Docs',
     status: 'Status',
     donate: 'Donate',
     main: 'Main navigation',
@@ -367,6 +368,20 @@ return {
     submit: 'Create access & server',
   },
 
+  docs: {
+    metaTitle: 'Documentation',
+    metaDescription: 'Guides for CraftingHosting.free: account, creating servers, Minecraft, Discord bots, runtime and rules.',
+    title: 'Documentation',
+    intro: 'Everything you need to know: from your account and first server to runtime, Discord and rules.',
+    back: 'Back to overview',
+    read: 'Read',
+    partnerBadge: 'Partners only',
+    partnerCard: 'Technical description of the Partner API – visible to partner accounts only.',
+    noAccessTitle: 'Partners only',
+    noAccessText: 'This area is reserved for Crafting Hosting partners. Your account is not a partner account. If you would like to become a partner, confirm your email address under “My servers” and open a ticket on our Discord server.',
+    noAccessBack: 'Go to the documentation',
+    more: 'Still have questions? The FAQ and the support chat are there to help.',
+  },
   register: {
     metaTitle: 'Sign up',
     metaDescription: 'Create a free CraftingHosting.free account with your email address and a password.',

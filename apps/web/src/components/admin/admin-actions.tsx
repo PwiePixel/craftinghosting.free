@@ -116,6 +116,8 @@ export function UserActions({ user, self }: { user: AdminUserDTO; self: boolean 
       {user.role === 'admin' ? <ActionButton label="Admin entfernen" confirm="Sicher?" run={act('remove-admin')} /> : <ActionButton label="Zum Admin" confirm="Sicher?" run={act('make-admin')} />}
       {/* Beta-Zugang: Admins dürfen immer auf die Beta-Instanz – für alle anderen wird er hier vergeben */}
       {user.role !== 'admin' && (user.beta ? <ActionButton label="Beta entziehen" run={act('revoke-beta')} /> : <ActionButton label="Beta-Zugang geben" run={act('grant-beta')} />)}
+      {/* Partner: sieht die Partner-Dokumentation unter /docs/partner-api (nur mit bestätigter E-Mail-Adresse möglich) */}
+      {user.partner ? <ActionButton label="Partner entziehen" confirm="Sicher?" run={act('revoke-partner')} /> : <ActionButton label="Zum Partner machen" run={act('grant-partner')} />}
       {/* Handy verloren oder Passwort vergessen: Danach genügt wieder der Code aus der E-Mail */}
       {user.twoFactor && <ActionButton label="2. Stufe zurücksetzen" confirm="Zweite Stufe der Anmeldung für dieses Konto ausschalten? Nur tun, wenn sicher ist, dass die Anfrage vom Besitzer kommt." run={act('reset-two-factor')} />}
     </Actions>

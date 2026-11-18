@@ -58,6 +58,7 @@ export function SiteHeader({
     // „Ablauf“ erscheint in der Desktop-Leiste erst ab sehr breiten Fenstern – sonst wird es zu eng
     { href: sectionPath(lang, 'how'), label: t.nav.how, wide: true },
     { href: sectionPath(lang, 'rules'), label: t.nav.rules },
+    { href: localePath(lang, 'docs'), label: t.nav.docs },
     { href: localePath(lang, 'faq'), label: t.nav.faq },
     { href: localePath(lang, 'status'), label: t.nav.status },
   ];

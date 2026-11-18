@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `partner` integer DEFAULT false NOT NULL;

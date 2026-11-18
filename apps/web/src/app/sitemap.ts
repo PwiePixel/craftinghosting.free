@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ['home', 1, 'weekly'],
     ['start', 0.9, 'monthly'],
     ['faq', 0.8, 'monthly'],
+    ['docs', 0.7, 'monthly'],
     ['status', 0.5, 'daily'],
     ['login', 0.3, 'yearly'],
     ['register', 0.6, 'monthly'],

@@ -92,6 +92,7 @@ return {
     rules: 'Regeln',
     discord: 'Discord-Bots',
     faq: 'FAQ',
+    docs: 'Doku',
     status: 'Status',
     donate: 'Spenden',
     main: 'Hauptnavigation',
@@ -394,6 +395,20 @@ return {
     submit: 'Zugang anlegen & Server erstellen',
   },
 
+  docs: {
+    metaTitle: 'Dokumentation',
+    metaDescription: 'Anleitungen zu CraftingHosting.free: Konto, Server erstellen, Minecraft, Discord-Bots, Laufzeit und Regeln.',
+    title: 'Dokumentation',
+    intro: 'Alles, was du wissen musst: vom Konto über den ersten Server bis zu Laufzeit, Discord und Regeln.',
+    back: 'Zur Übersicht',
+    read: 'Lesen',
+    partnerBadge: 'Nur für Partner',
+    partnerCard: 'Technische Beschreibung der Partner-API – sichtbar nur für Partner-Konten.',
+    noAccessTitle: 'Nur für Partner',
+    noAccessText: 'Dieser Bereich ist Partnern von Crafting Hosting vorbehalten. Dein Konto ist kein Partner-Konto. Wenn du Partner werden möchtest, bestätige deine E-Mail-Adresse unter „Meine Server“ und öffne ein Ticket auf unserem Discord-Server.',
+    noAccessBack: 'Zur Dokumentation',
+    more: 'Noch Fragen? In den FAQ und im Support-Chat helfen wir weiter.',
+  },
   register: {
     metaTitle: 'Registrieren',
     metaDescription: 'Kostenloses Konto bei CraftingHosting.free anlegen – mit E-Mail-Adresse und Passwort.',

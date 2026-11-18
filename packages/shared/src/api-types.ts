@@ -34,6 +34,8 @@ export interface UserDTO {
   role: 'user' | 'admin';
   /** Darf die Beta-Instanz nutzen (vom Admin freigeschaltet – Admins immer) */
   beta: boolean;
+  /** Partner-Konto: sieht die Partner-Dokumentation */
+  partner: boolean;
   /** Sprache für E-Mails und Hinweise im Panel */
   locale: 'de' | 'en';
   /** Verknüpftes Discord-Konto (null = nicht verknüpft) */
@@ -414,6 +416,8 @@ export interface AdminUserDTO {
   lastLoginAt: string | null;
   /** Beta-Zugang freigeschaltet */
   beta: boolean;
+  /** Partner-Konto: sieht die Partner-Dokumentation */
+  partner: boolean;
   /** Zweite Stufe bei der Anmeldung (null = aus) */
   twoFactor: TwoFactorMethod | null;
   /** IP-Adressen (verschlüsselt gespeichert, nur im Admin-Bereich sichtbar) */

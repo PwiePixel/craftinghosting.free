@@ -311,6 +311,7 @@ export async function listUsersAdmin(
     servers: Number(n),
     lastLoginAt: iso(u.lastLoginAt),
     beta: u.beta,
+    partner: u.partner,
     twoFactor: u.twoFactorMethod ?? null,
     registrationIp: decryptField(u.registrationIp),
     lastLoginIp: decryptField(u.lastLoginIp),
@@ -625,7 +626,7 @@ export async function getPanelInfo(): Promise<AdminPanelDTO> {
   return result;
 }
 
-export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin' | 'grant-beta' | 'revoke-beta' | 'reset-two-factor';
+export type UserAction = 'lock' | 'unlock' | 'make-admin' | 'remove-admin' | 'grant-beta' | 'revoke-beta' | 'grant-partner' | 'revoke-partner' | 'reset-two-factor';
 
 /**
  * Konten löschen (einzeln oder mehrere). Übersprungen werden das eigene Konto und Admins
@@ -714,6 +715,18 @@ export async function userAction(admin: User, id: string, action: UserAction, ip
     case 'reset-two-factor':
       // z. B. Handy verloren oder Passwort vergessen – danach genügt wieder der Code aus der E-Mail
       await resetSecondFactor(user.id, admin, ip);
+      return;
+    case 'grant-partner':
+      // Partner kann nur werden, wer seine E-Mail-Adresse bestätigt hat
+      if (!user.emailVerifiedAt) {
+        throw Errors.conflict('email_not_verified', L('Partner kann nur ein Konto mit bestätigter E-Mail-Adresse werden. Der Nutzer bestätigt sie unter „Meine Server“.', 'Only an account with a confirmed email address can become a partner.'));
+      }
+      await db.update(users).set({ partner: true }).where(eq(users.id, id));
+      await log('admin.partner_granted', `${user.email} ist jetzt Partner (sieht die Partner-Dokumentation)`);
+      return;
+    case 'revoke-partner':
+      await db.update(users).set({ partner: false }).where(eq(users.id, id));
+      await log('admin.partner_revoked', `Partner-Status von ${user.email} entzogen`);
       return;
     case 'grant-beta':
       await db.update(users).set({ beta: true }).where(eq(users.id, id));

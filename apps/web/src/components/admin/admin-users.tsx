@@ -311,6 +311,7 @@ export function UsersTable({
                   <p className="text-gray-100">{u.email}</p>
                   <p className="text-[11px] text-subtle">
                     {u.emailVerified ? 'bestätigt' : 'nicht bestätigt'} · {u.locale.toUpperCase()}
+                    {u.partner && <span className="ml-1.5 rounded bg-violet-500/70 px-1 py-px text-[11px] font-semibold text-white">Partner</span>}
                     {u.emailUndeliverable && <span className="ml-1.5 rounded bg-red-500/80 px-1 py-px text-[11px] font-semibold text-white">Mail nicht erreichbar</span>}
                   </p>
                 </td>
