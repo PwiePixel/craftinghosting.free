@@ -1,7 +1,7 @@
 import { clearPanelWebLogin, getPanelWebLogin, notePanelWebCheck, panelWebLoginStatus, savePanelWebLogin } from '../services/panel-web.store';
 import { testPanelWebLogin } from '../pterodactyl/web-transfer';
 import { adminUpgradeServer, cancelServerTransfer, checkServerTransfers, upgradeOptions } from '../services/admin-upgrade.service';
-import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders } from '../services/admin-mail.service';
+import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders, setAbuseSource, setServerAbuseSource } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -80,6 +80,8 @@ export async function adminRoutes(app: FastifyInstance) {
     note: localizedMail(3000).default({ de: '', en: '' }),
     suspend: z.boolean().default(false),
     serverId: z.string().uuid().nullable().optional(),
+    // Wer den Verstoß festgestellt hat – ohne Angabe: das System
+    source: z.enum(['system', 'manual']).default('system'),
   });
   app.post('/admin/abuse', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (request) => {
     return { ...(await sendAbuseMail(currentUser(request), abuseSchema.parse(request.body), request.ip)), abuse: await listAbuse() };
@@ -90,6 +92,20 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/admin/abuse/servers', async (request) => {
     const { email } = z.object({ email: emailSchema }).parse(request.query);
     return { servers: await listAbuseServers(email) };
+  });
+  /** Kennzeichnung einer Abuse-Meldung umschalten: vom System oder von Hand festgestellt */
+  app.post('/admin/abuse/mail/:id/source', async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { source } = z.object({ source: z.enum(['system', 'manual']) }).parse(request.body);
+    await setAbuseSource(currentUser(request), id, source, request.ip);
+    return { abuse: await listAbuse() };
+  });
+  /** Dasselbe für einen markierten Server (wird dem Nutzer unter „Meine Server“ angezeigt) */
+  app.post('/admin/abuse/:id/source', async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { source } = z.object({ source: z.enum(['system', 'manual']) }).parse(request.body);
+    await setServerAbuseSource(currentUser(request), id, source, request.ip);
+    return { abuse: await listAbuse() };
   });
   /** Abuse-Markierung eines Servers aufheben */
   app.post('/admin/abuse/:id/clear', async (request) => {

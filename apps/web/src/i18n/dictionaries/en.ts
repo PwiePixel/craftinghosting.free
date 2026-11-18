@@ -507,6 +507,8 @@ return {
     abuseBadge: 'Abuse',
     abuseText: (date: string) => `On ${date} we found a violation of our rules on this server. Please open a ticket on our Discord server so that we can sort this out together. Until then the server stays marked.`,
     abuseTicket: 'Open a ticket on Discord',
+    abuseSourceSystem: 'Detected by our system (automatic detection).',
+    abuseSourceManual: 'Detected by our team.',
     email: {
       title: 'Email address',
       verified: 'Confirmed',

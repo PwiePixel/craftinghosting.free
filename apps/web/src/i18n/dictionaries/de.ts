@@ -536,6 +536,8 @@ return {
     abuseBadge: 'Abuse',
     abuseText: (date: string) => `Auf diesem Server haben wir am ${date} einen Verstoß gegen unsere Regeln festgestellt. Bitte öffne ein Ticket auf unserem Discord-Server, damit wir das gemeinsam klären können. Bis dahin bleibt der Server markiert.`,
     abuseTicket: 'Ticket auf Discord öffnen',
+    abuseSourceSystem: 'Festgestellt von unserem System (automatische Erkennung).',
+    abuseSourceManual: 'Festgestellt von unserem Team.',
     email: {
       title: 'E-Mail-Adresse',
       verified: 'Bestätigt',

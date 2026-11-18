@@ -1,0 +1,1 @@
+ALTER TABLE `notifications` ADD `abuse_source` text;

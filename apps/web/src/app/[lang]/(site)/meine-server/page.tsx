@@ -118,6 +118,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
             {s.abuse.reason[lang]}
           </p>
           <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-red-100/90">{t.abuseText(fmt.date(s.abuse.at))}</p>
+          <p className="mt-1.5 text-[13px] text-red-100/80">{s.abuse.source === 'manual' ? t.abuseSourceManual : t.abuseSourceSystem}</p>
           {discordUrl && (
             <a href={discordUrl} target="_blank" rel="noopener noreferrer" className={buttonClasses('danger', 'sm', 'mt-3 border-red-300/50 text-red-100')}>
               <DiscordIcon className="size-4" /> {t.abuseTicket}

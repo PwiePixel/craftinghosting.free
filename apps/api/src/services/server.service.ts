@@ -71,7 +71,7 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     version: server.version,
     status: server.status,
     pendingDeadlineAt: server.status === 'pending' && server.pendingDeadlineAt ? server.pendingDeadlineAt.toISOString() : null,
-    abuse: server.abuseAt ? { at: server.abuseAt.toISOString(), reason: abuseReasonTitle(server.abuseReason) } : null,
+    abuse: server.abuseAt ? { at: server.abuseAt.toISOString(), reason: abuseReasonTitle(server.abuseReason), source: server.abuseSource ?? 'system' } : null,
     suspensionReason: server.suspensionReason,
     powerState: server.powerState,
     address: server.address,

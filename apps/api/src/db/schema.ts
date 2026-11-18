@@ -171,6 +171,8 @@ export const servers = sqliteTable(
     /** Abuse-Markierung: Zeitpunkt und Grund (ID aus services/abuse-reasons) – gesetzt mit einer Abuse-Mail, aufgehoben im Admin-Bereich */
     abuseAt: ts('abuse_at'),
     abuseReason: text('abuse_reason'),
+    /** Wer den Verstoß festgestellt hat: system (Standard) oder manual = vom Team – wird dem Nutzer angezeigt */
+    abuseSource: text('abuse_source', { enum: ['system', 'manual'] }),
     /** Node im Panel, auf der der Server liegt (null = noch nicht bekannt) */
     nodeId: integer('node_id'),
     /** Vom Team als Upgrade markiert: Zeitpunkt und optionaler Hinweis für den Kunden */
@@ -252,6 +254,8 @@ export const notifications = sqliteTable(
     emailAttempts: integer('email_attempts').notNull().default(0),
     emailLastError: text('email_last_error'),
     emailSentAt: ts('email_sent_at'),
+    /** Abuse-Meldungen: wer den Verstoß festgestellt hat (system = automatisch erkannt, manual = vom Team) – null = aus der Art der Meldung abgeleitet */
+    abuseSource: text('abuse_source', { enum: ['system', 'manual'] }),
     /** Dieselbe Nachricht als Discord-Direktnachricht: Zeitpunkt des Versuchs (null = noch nicht versucht) */
     dmSentAt: ts('dm_sent_at'),
     readAt: ts('read_at'),

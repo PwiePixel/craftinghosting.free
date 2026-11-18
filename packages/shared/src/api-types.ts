@@ -85,7 +85,7 @@ export interface ServerDTO {
   /** Offene Anfrage, die auf die Discord-Verbindung wartet: Zeitpunkt, zu dem sie gelöscht wird (null = keine Frist) */
   pendingDeadlineAt: string | null;
   /** Abuse-Markierung: Auf diesem Server wurde ein Regelverstoß festgestellt (null = keine) */
-  abuse: { at: string; reason: Localized } | null;
+  abuse: { at: string; reason: Localized; /** Festgestellt von unserem System (automatisch) oder von unserem Team */ source: 'system' | 'manual' } | null;
   /** Minecraft-Server oder Discord-Bot */
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
@@ -442,7 +442,7 @@ export interface AdminDiscordWaitingDTO {
 export interface AdminAbuseDTO {
   reasons: { id: string; label: string }[];
   /** Server, die gerade als Abuse markiert sind */
-  flagged: { id: string; name: string; ownerEmail: string; reason: string; at: string; status: string }[];
+  flagged: { id: string; name: string; ownerEmail: string; reason: string; /** Festgestellt vom System oder von Hand */ source: 'system' | 'manual'; at: string; status: string }[];
   mails: { id: string; createdAt: string; userEmail: string; type: string; manual: boolean; title: string; body: string; emailStatus: string; emailLastError: string | null; serverName: string | null }[];
 }
 

@@ -177,6 +177,9 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
   const [reason, setReason] = useState(initial.reasons[0]?.id ?? 'other');
   const [note, setNote] = useState({ de: '', en: '' });
   const [suspend, setSuspend] = useState(false);
+  // Wer den Verstoß festgestellt hat – Standard: das System
+  const [source, setSource] = useState<'system' | 'manual'>('system');
+  const [toggling, setToggling] = useState<string | null>(null);
   const [serverId, setServerId] = useState('');
   const [servers, setServers] = useState<AbuseServer[] | null>(null);
   const [preview, setPreview] = useState<AbusePreview | null>(null);
@@ -232,7 +235,7 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
     setPending(true);
     setMessage(null);
     try {
-      const res = await api<{ suspended: number; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend, serverId: serverId || null } });
+      const res = await api<{ suspended: number; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend, serverId: serverId || null, source } });
       setData(res.abuse);
       setMessage({ ok: true, text: `Abuse-Mail wird versendet${target ? ' – Server ist als Abuse markiert' : ''}${res.suspended ? ` – ${res.suspended} Server gesperrt` : ''}.` });
       setNote({ de: '', en: '' });
@@ -304,6 +307,16 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
             <Labeled label="Eigener Text (Englisch) – optional" hint="Leer = der deutsche Text geht auch an englischsprachige Nutzer.">
               <textarea className="input min-h-[84px] py-2.5 leading-relaxed" rows={3} value={note.en} maxLength={3000} onChange={(e) => setNote({ ...note, en: e.target.value })} />
             </Labeled>
+            <Labeled label="Festgestellt" hint="Steht so in der Liste unten und lässt sich dort nachträglich umschalten.">
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Festgestellt">
+                {(['system', 'manual'] as const).map((v) => (
+                  <label key={v} className={cn('cursor-pointer rounded-lg border px-3 py-2 text-center text-sm transition-colors', source === v ? 'border-blue-500 bg-blue-500/[0.08] text-white' : 'border-line-strong text-muted hover:border-white/25')}>
+                    <input type="radio" name="abuse-source" className="sr-only" checked={source === v} onChange={() => setSource(v)} />
+                    {v === 'system' ? 'vom System' : 'von Hand'}
+                  </label>
+                ))}
+              </div>
+            </Labeled>
             <Toggle
               checked={suspend}
               onChange={setSuspend}
@@ -363,7 +376,7 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
 
       <section className="surface p-5 sm:p-6">
         <h2 className="text-[15px] font-semibold text-white">Als Abuse markierte Server</h2>
-        <p className="mt-1 text-sm text-muted">Diese Server sind beim Nutzer rot markiert. Hebe die Markierung auf, sobald das Ticket geklärt ist.</p>
+        <p className="mt-1 text-sm text-muted">Diese Server sind beim Nutzer rot markiert – dort steht auch, ob der Verstoß vom System oder vom Team festgestellt wurde (Klick auf die Kennzeichnung schaltet um). Hebe die Markierung auf, sobald das Ticket geklärt ist.</p>
         {data.flagged.length === 0 ? (
           <p className="mt-4 text-sm text-subtle">Aktuell ist kein Server markiert.</p>
         ) : (
@@ -377,6 +390,26 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
                     {f.ownerEmail} · {f.reason} · seit {dateTime(f.at)} · {SERVER_STATUS[f.status] ?? f.status}
                   </span>
                 </span>
+                {/* Wird dem Nutzer in der roten Karte unter „Meine Server“ angezeigt – per Klick umschalten */}
+                <button
+                  type="button"
+                  disabled={toggling !== null}
+                  title="Klicken zum Umschalten – der Nutzer sieht diese Angabe unter „Meine Server“"
+                  onClick={async () => {
+                    setToggling(f.id);
+                    try {
+                      setData((await api<{ abuse: AdminAbuseDTO }>(`/admin/abuse/${f.id}/source`, { body: { source: f.source === 'manual' ? 'system' : 'manual' } })).abuse);
+                      router.refresh();
+                    } catch (err) {
+                      setMessage({ ok: false, text: errorText(err) });
+                    } finally {
+                      setToggling(null);
+                    }
+                  }}
+                  className={cn('shrink-0 rounded border px-2 py-1 text-[11px] transition-colors disabled:opacity-50', f.source === 'manual' ? 'border-red-400/40 bg-red-400/15 text-red-200 hover:bg-red-400/25' : 'border-blue-400/40 bg-blue-400/10 text-blue-200 hover:bg-blue-400/20')}
+                >
+                  {toggling === f.id ? '…' : f.source === 'manual' ? 'von Hand' : 'vom System'}
+                </button>
                 <Button variant="secondary" size="sm" onClick={() => void clearFlag(f.id)}>
                   Markierung aufheben
                 </Button>
@@ -400,7 +433,8 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
           <ul className="mt-5 divide-y divide-line rounded-lg border border-line">
             {shown.map((m) => (
               <li key={m.id}>
-                <button type="button" onClick={() => setOpen(open === m.id ? null : m.id)} aria-expanded={open === m.id} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-3.5 py-3 text-left hover:bg-white/[0.03]">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pr-3.5">
+                <button type="button" onClick={() => setOpen(open === m.id ? null : m.id)} aria-expanded={open === m.id} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 px-3.5 py-3 text-left hover:bg-white/[0.03]">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-gray-100">{m.title}</span>
                     <span className="mt-0.5 block text-[12px] text-subtle">
@@ -408,11 +442,31 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
                       {m.serverName ? ` · Server „${m.serverName}“` : ''}
                     </span>
                   </span>
-                  <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[11px]', m.manual ? 'bg-red-400/15 text-red-200' : 'bg-white/[0.06] text-muted')}>{m.manual ? 'von Hand' : (AUTO_LABEL[m.type] ?? 'automatisch')}</span>
                   <span className={cn('w-24 shrink-0 text-right text-[12px]', m.emailStatus === 'sent' ? 'text-emerald-300' : m.emailStatus === 'failed' ? 'text-red-300' : 'text-amber-300')}>
                     {m.emailStatus === 'sent' ? 'zugestellt' : m.emailStatus === 'failed' ? 'fehlgeschlagen' : m.emailStatus === 'pending' ? 'wird gesendet' : 'ohne E-Mail'}
                   </span>
                 </button>
+                {/* Kennzeichnung: per Klick umschalten zwischen „vom System“ und „von Hand“ */}
+                <button
+                  type="button"
+                  disabled={toggling !== null}
+                  title="Klicken zum Umschalten: vom System oder von Hand festgestellt"
+                  aria-label={`Festgestellt ${m.manual ? 'von Hand' : 'vom System'} – umschalten`}
+                  onClick={async () => {
+                    setToggling(m.id);
+                    try {
+                      setData((await api<{ abuse: AdminAbuseDTO }>(`/admin/abuse/mail/${m.id}/source`, { body: { source: m.manual ? 'system' : 'manual' } })).abuse);
+                    } catch (err) {
+                      setMessage({ ok: false, text: errorText(err) });
+                    } finally {
+                      setToggling(null);
+                    }
+                  }}
+                  className={cn('shrink-0 rounded border px-2 py-1 text-[11px] transition-colors disabled:opacity-50', m.manual ? 'border-red-400/40 bg-red-400/15 text-red-200 hover:bg-red-400/25' : 'border-blue-400/40 bg-blue-400/10 text-blue-200 hover:bg-blue-400/20')}
+                >
+                  {toggling === m.id ? '…' : m.manual ? 'von Hand' : m.type.startsWith('abuse.') ? 'vom System' : `vom System · ${AUTO_LABEL[m.type] ?? 'automatisch'}`}
+                </button>
+                </div>
                 {open === m.id && (
                   <div className="border-t border-line bg-black/20 px-3.5 py-3 text-sm leading-relaxed whitespace-pre-wrap text-gray-200">
                     {m.body}

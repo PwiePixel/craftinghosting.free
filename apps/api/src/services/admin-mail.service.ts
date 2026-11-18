@@ -12,7 +12,7 @@ import { formatDateTime, freeHostingConfig, type AdminAbuseDTO, type AdminDiscor
 import { db } from '../db/client';
 import { notifications, servers, users, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
-import { ApiError, L } from '../lib/errors';
+import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { getDiscordState } from '../discord/store';
 import { ABUSE_REASONS, abuseReasonLabel } from './abuse-reasons';
@@ -182,13 +182,14 @@ export async function listAbuse(): Promise<AdminAbuseDTO> {
     .limit(200);
   return {
     reasons: ABUSE_REASONS.map((r) => ({ id: r.id, label: r.label })),
-    flagged: flagged.map(({ s, email }) => ({ id: s.id, name: s.name, ownerEmail: email, reason: abuseReasonLabel(s.abuseReason), at: s.abuseAt!.toISOString(), status: s.status })),
+    flagged: flagged.map(({ s, email }) => ({ id: s.id, name: s.name, ownerEmail: email, reason: abuseReasonLabel(s.abuseReason), source: s.abuseSource ?? ('system' as const), at: s.abuseAt!.toISOString(), status: s.status })),
     mails: rows.map(({ n, email, server }) => ({
       id: n.id,
       createdAt: n.createdAt.toISOString(),
       userEmail: email,
       type: n.type,
-      manual: n.type.startsWith('abuse.'),
+      // Ohne ausdrückliche Angabe (ältere Einträge) gilt: vom System
+      manual: n.abuseSource === 'manual',
       title: n.title,
       body: n.body,
       emailStatus: n.emailStatus,
@@ -196,6 +197,25 @@ export async function listAbuse(): Promise<AdminAbuseDTO> {
       serverName: server ?? null,
     })),
   };
+}
+
+/** Nachträglich festhalten, ob ein Verstoß vom System oder von Hand festgestellt wurde */
+export async function setAbuseSource(admin: User, id: string, source: 'system' | 'manual', ip?: string): Promise<void> {
+  const [n] = await db.select().from(notifications).where(eq(notifications.id, id)).limit(1);
+  if (!n || !(n.type.startsWith('abuse.') || AUTO_ABUSE_TYPES.includes(n.type))) throw Errors.notFound(L('Eintrag nicht gefunden.', 'Entry not found.'));
+  await db.update(notifications).set({ abuseSource: source }).where(eq(notifications.id, id));
+  // Der markierte Server zeigt dieselbe Angabe – auch dem Nutzer unter „Meine Server“
+  if (n.serverId) await db.update(servers).set({ abuseSource: source }).where(and(eq(servers.id, n.serverId), isNotNull(servers.abuseAt)));
+  await audit({ userId: n.userId, serverId: n.serverId, actor: 'admin', action: 'admin.abuse_source', message: `Abuse-Meldung „${n.title.slice(0, 80)}“ als „${source === 'system' ? 'vom System' : 'von Hand'}“ gekennzeichnet (durch ${admin.email})`, ip });
+}
+
+/** Dasselbe für einen markierten Server: gilt auch für die zugehörigen Meldungen seit der Markierung */
+export async function setServerAbuseSource(admin: User, serverId: string, source: 'system' | 'manual', ip?: string): Promise<void> {
+  const [s] = await db.select().from(servers).where(and(eq(servers.id, serverId), isNotNull(servers.abuseAt))).limit(1);
+  if (!s) throw Errors.notFound(L('Dieser Server ist nicht als Abuse markiert.', 'This server is not flagged as abuse.'));
+  await db.update(servers).set({ abuseSource: source }).where(eq(servers.id, serverId));
+  await db.update(notifications).set({ abuseSource: source }).where(and(eq(notifications.serverId, serverId), like(notifications.type, 'abuse.%')));
+  await audit({ userId: s.userId, serverId, actor: 'admin', action: 'admin.abuse_source', message: `Abuse-Markierung von „${s.name}“ als „${source === 'system' ? 'vom System' : 'von Hand'}“ gekennzeichnet (durch ${admin.email})`, ip });
 }
 
 /** Server eines Nutzers zur Auswahl im Abuse-Formular */
@@ -217,6 +237,8 @@ export interface AbuseInput {
   suspend: boolean;
   /** Betroffener Server (leer = kein bestimmter) */
   serverId?: string | null;
+  /** Wer den Verstoß festgestellt hat: das System (Standard) oder das Team von Hand */
+  source?: 'system' | 'manual';
 }
 
 /** Adresse des Discord-Servers für den Hinweis „öffne ein Ticket“ */
@@ -290,9 +312,12 @@ export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string)
       () => {},
     );
   }
-  if (server) await db.update(servers).set({ abuseAt: new Date(), abuseReason: reason.id }).where(eq(servers.id, server.id));
+  if (server) await db.update(servers).set({ abuseAt: new Date(), abuseReason: reason.id, abuseSource: input.source ?? 'system' }).where(eq(servers.id, server.id));
   const mail = composeAbuse(reason.id, input.note, server?.name ?? null, suspended, await discordLink());
-  await notify({ userId: user.id, serverId: server?.id ?? null, type: `abuse.${reason.id}`, title: mail.title, body: mail.body, dedupeKey: `abuse:${uuid()}`, email: true });
+  const dedupeKey = `abuse:${uuid()}`;
+  await notify({ userId: user.id, serverId: server?.id ?? null, type: `abuse.${reason.id}`, title: mail.title, body: mail.body, dedupeKey, email: true });
+  // Festhalten, ob das System oder das Team den Verstoß festgestellt hat (im Abuse-Bereich nachträglich änderbar)
+  await db.update(notifications).set({ abuseSource: input.source ?? 'system' }).where(eq(notifications.dedupeKey, dedupeKey));
   await audit({
     userId: user.id,
     serverId: server?.id ?? null,
@@ -308,6 +333,6 @@ export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string)
 export async function clearAbuseFlag(admin: User, serverId: string, ip?: string): Promise<void> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server || !server.abuseAt) throw new ApiError(404, 'not_found', L('Dieser Server ist nicht als Abuse markiert.', 'This server is not marked as abuse.'));
-  await db.update(servers).set({ abuseAt: null, abuseReason: null }).where(eq(servers.id, serverId));
+  await db.update(servers).set({ abuseAt: null, abuseReason: null, abuseSource: null }).where(eq(servers.id, serverId));
   await audit({ userId: server.userId, serverId, actor: 'admin', action: 'admin.abuse_cleared', message: `Abuse-Markierung von Server „${server.name}“ aufgehoben (durch ${admin.email})`, ip });
 }
