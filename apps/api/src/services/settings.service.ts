@@ -304,7 +304,8 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
   const [logoAt] = await db.select({ updatedAt: assets.updatedAt }).from(assets).where(eq(assets.key, 'logo')).limit(1);
   let stats: PublicSiteDTO['stats'] = null;
   if (s.stats.show) {
-    const [u] = await db.select({ n: count() }).from(users).where(isNotNull(users.emailVerifiedAt));
+    // Registrierte Nutzer: alle Konten (wie „Gesamt“ in der Admin-Übersicht), nicht nur die mit bestätigter E-Mail-Adresse
+    const [u] = await db.select({ n: count() }).from(users);
     const [a] = await db.select({ n: count() }).from(servers).where(eq(servers.status, 'active'));
     stats = {
       users: s.stats.users.mode === 'manual' ? s.stats.users.value : Number(u?.n ?? 0) + s.stats.users.offset,

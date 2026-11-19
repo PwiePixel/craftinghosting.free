@@ -192,9 +192,9 @@ export function ServerManager({ initial }: { initial: ServerDetailDTO }) {
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[210px_minmax(0,1fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[210px_minmax(0,1fr)]">
       {/* Seitenleiste – auf dem Handy eine waagrechte Leiste */}
-      <aside className="lg:sticky lg:top-24 lg:self-start">
+      <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">
         <nav aria-label={s.name} className="scrollbar-none flex gap-1.5 overflow-x-auto lg:flex-col lg:gap-1">
           <p className="hidden px-3 pt-1 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-subtle uppercase lg:block">{t.navGeneral}</p>
           {nav.map(navButton)}

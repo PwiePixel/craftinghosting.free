@@ -30,8 +30,8 @@ export default async function ServerPage({ params }: Props) {
   if (!res.ok && res.status === 404) notFound();
 
   return (
-    <div className="container-page py-10 sm:py-14">
-      <div className="mx-auto max-w-6xl">
+    <div className="container-wide py-10 sm:py-14">
+      <div>
         <Link href={localePath(lang, 'myServers')} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-white">
           <ArrowLeft className="size-4" aria-hidden /> {d.manage.back}
         </Link>

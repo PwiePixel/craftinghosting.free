@@ -90,7 +90,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
   // Verwalten auf der Website (Konsole, Start/Stopp, Ports), sobald der Server im Panel angelegt ist
   const manageable = (s.status === 'active' || s.status === 'expiring') && !!s.panelUrl;
   return (
-    <article className={cn('surface overflow-hidden', s.abuse && 'border-red-400/60 ring-1 ring-red-400/30')}>
+    <article className={cn('surface flex h-full flex-col overflow-hidden', s.abuse && 'border-red-400/60 ring-1 ring-red-400/30')}>
       {s.abuse && (
         <div className="border-b border-red-400/30 bg-red-400/[0.1] px-6 py-4" role="alert">
           <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-red-100">
@@ -119,7 +119,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
         </div>
       )}
       <ServerBanner kind={s.kind} tone={st.tone} label={st.label} />
-      <div className="px-6 pt-9 pb-5">
+      <div className="flex-1 px-6 pt-9 pb-5">
         <h2 className="truncate text-lg font-semibold text-white">
           {manageable ? (
             <Link href={serverPagePath(lang, s.id)} className="hover:text-blue-300">
@@ -312,9 +312,9 @@ export default async function MyServersPage({ params, searchParams }: Props) {
     (mode === 'open' ? freeKind : mode === 'preregistration' ? owned === 0 : false);
 
   return (
-    <div className="container-page py-12 sm:py-16">
+    <div className="container-wide py-12 sm:py-16">
       <AutoRefresh active={transitional} />
-      <div className="mx-auto max-w-6xl">
+      <div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white">{t.title}</h1>
@@ -409,7 +409,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {!user.panelLinked && hasPending && <PanelSetupCard email={user.email} />}
 
           {servers.length > 0 && (
-            <div className="grid items-start gap-5 lg:grid-cols-2">
+            <div className="grid auto-rows-fr gap-5 md:grid-cols-2 2xl:grid-cols-3">
               {servers.map((s) => (
                 <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
               ))}

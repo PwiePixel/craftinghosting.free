@@ -42,6 +42,8 @@ export function SiteHeader({
   useEffect(() => setOpen(false), [pathname]);
 
   const other = lang === 'de' ? 'en' : 'de';
+  // Im Kundenbereich (Meine Server, Server-Seite, Konto) ist der Inhalt breiter – die Kopfzeile geht mit
+  const wide = /^\/(de\/)?(meine-server|my-servers|konto|account)(\/|$)/.test(pathname);
   // Early Access: „Platz sichern“ statt „Server erstellen“; Registrierung geschlossen: kein Button
   // Wartung: Anmelden statt Registrieren · Early Access: „Platz sichern“ · Registrierung geschlossen: kein Button
   // Angemeldet: statt „Server erstellen“ der eigene Kontoname (führt zum Konto; neue Server gibt es unter „Meine Server“).
@@ -121,7 +123,7 @@ export function SiteHeader({
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-background/85 backdrop-blur-md">
-      <div className="container-page flex h-16 items-center justify-between gap-6">
+      <div className={cn(wide ? 'container-wide' : 'container-page', 'flex h-16 items-center justify-between gap-6')}>
         <Logo href={localePath(lang, 'home')} custom={logo} />
 
         {!minimal && (
@@ -177,7 +179,7 @@ export function SiteHeader({
       </div>
       {open && (
         <nav className="border-t border-line lg:hidden" aria-label={t.nav.mobile}>
-          <div className="container-page flex flex-col py-3">
+          <div className={cn(wide ? 'container-wide' : 'container-page', 'flex flex-col py-3')}>
             {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }, ...(sessionOk ? [{ href: accountHref, label: accountName ? `${t.common.account} (${accountName})` : t.common.account }] : [])].map((item) => (
               <Link key={item.label} href={item.href} onClick={(e) => goToSection(e, item.href)} className="py-2.5 text-[15px] text-gray-200">
                 {item.label}

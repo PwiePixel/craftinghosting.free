@@ -477,7 +477,7 @@ export function SettingsForm({
 
       <Section
         title="Zahlen auf der Startseite"
-        description="Registrierte Nutzer, aktive Server und Uptime. Automatisch = aus der Datenbank bzw. dem Status-Verlauf. Der Zusatz ist für echte Nutzer/Server, die noch im alten System laufen."
+        description="Registrierte Nutzer, aktive Server und Uptime. Automatisch = aus der Datenbank (Nutzer: alle Konten, wie „Gesamt“ in der Übersicht) bzw. dem Status-Verlauf. Der Zusatz ist für echte Nutzer/Server, die noch im alten System laufen."
       >
         <Toggle checked={s.stats.show} onChange={(v) => patch('stats', { show: v })} label="Zahlen anzeigen" />
         <div className="grid gap-5 lg:grid-cols-3">
