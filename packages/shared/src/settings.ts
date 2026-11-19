@@ -147,7 +147,8 @@ export function normalizeSoftware(input: unknown): SoftwareItem[] {
   const taken = new Set([...out.map((x) => x.id), ...builtinServerTypes.map((t) => t.id)]);
   for (const [id, o] of stored) {
     if (out.length >= 60) break;
-    if (taken.has(id) || !/^[a-z][a-z0-9-]{1,23}$/.test(id)) continue;
+    // „constructor“ ist ein Schlüssel jedes JavaScript-Objekts – als Kennung würde er Werte von Object.prototype lesen
+    if (taken.has(id) || !/^[a-z][a-z0-9-]{1,23}$/.test(id) || id in Object.prototype) continue;
     const name = typeof o.name === 'string' ? o.name.replace(/\s+/g, ' ').trim().slice(0, 30) : '';
     if (!name) continue;
     const d = o.description && typeof o.description === 'object' ? (o.description as Record<string, unknown>) : {};
@@ -201,7 +202,7 @@ export function softwareTypes(items: SoftwareItem[]): ServerTypeConfig[] {
 
 /** Wählbare Versionen eines Servertyps: Liste aus dem Admin-Bereich, sonst die Standardliste */
 export function versionsFor(settings: Pick<SiteSettings, 'versions'>, typeId: string): string[] {
-  const custom = settings.versions[typeId];
+  const custom = Object.hasOwn(settings.versions, typeId) ? settings.versions[typeId] : undefined;
   return custom && custom.length ? custom : (getServerType(typeId)?.versions ?? ['latest']);
 }
 

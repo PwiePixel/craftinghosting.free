@@ -64,6 +64,7 @@ export function SoftwareCatalog({ s, update }: { s: SiteSettings; update: Update
     const id = slug(name);
     if (!name || id.length < 2) return setError('Bitte einen Namen angeben (mindestens zwei Buchstaben).');
     if (s.software.some((x) => x.id === id) || id === 'python' || id === 'nodejs') return setError('Einen Eintrag mit diesem Namen gibt es schon.');
+    if (id in Object.prototype) return setError('Diesen Namen bitte anders schreiben (z. B. mit einem Zusatz).');
     setError(null);
     update((p) => ({
       ...p,

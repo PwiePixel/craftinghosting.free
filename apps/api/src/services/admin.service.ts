@@ -41,14 +41,14 @@ import { isAdmin } from '../plugins/auth';
 import { deleteAccount } from './account.service';
 import { allJobs } from '../jobs/registry';
 import { pterodactyl } from '../pterodactyl';
-import { pterodactylConfig, suggestEggs } from '../config/pterodactyl.config';
+import { installMethodOf, pterodactylConfig, suggestEggs } from '../config/pterodactyl.config';
 import { abuseReasonLabel } from './abuse-reasons';
 import { mapLimit } from '../jobs/types';
 import { audit } from './audit.service';
 import { sendMail } from './mail/mailer';
 import { notificationMail } from './mail/templates';
 import { trySyncPanelDescription } from './panel';
-import { provisionServer } from './provisioning.service';
+import { provisionServer, startupFor } from './provisioning.service';
 import { activatePendingServers, hardDeleteServer, pendingReasonFor } from './server.service';
 import { destroyAllSessions } from './session.service';
 import { liftBan } from './warnings.service';
@@ -445,11 +445,17 @@ export async function serverAction(admin: User, id: string, action: ServerAction
         return;
       }
       if (!(await requestSiteSoftware(server))) {
-        // Inzwischen über ein eigenes Egg: Einen alten, fehlgeschlagenen Auftrag aufräumen, damit der Server nicht als fehlerhaft gilt
-        if (server.softwareJob) {
-          await db.update(servers).set({ softwareJob: null }).where(eq(servers.id, id));
-          await log('admin.server_software', `Alter Einrichtungs-Auftrag von „${server.name}“ entfernt (Typ läuft jetzt über ein eigenes Egg)`);
+        // Inzwischen über ein eigenes Egg: im Panel auf dieses Egg umstellen und neu installieren (sonst bliebe der
+        // Hinweis-Startbefehl bzw. die Grundlage stehen) und den alten Auftrag entfernen
+        if (server.softwareJob && server.pteroServerId && installMethodOf(server.serverType, settings) === 'egg') {
+          await ptero.updateServerStartup(server.pteroServerId, await startupFor(server.serverType, server.version, settings));
+          await ptero.reinstallServer(server.pteroServerId);
+          await db.update(servers).set({ softwareJob: null, powerState: 'installing', powerStateAt: new Date() }).where(eq(servers.id, id));
+          await log('admin.server_software', `„${server.name}“ wird über das eigene Egg von ${server.serverType} neu installiert (alter Einrichtungs-Auftrag entfernt)`);
           return;
+        }
+        if (installMethodOf(server.serverType, settings) === null) {
+          throw Errors.conflict('not_available', L('Für diese Server-Software ist gerade weder ein Egg noch eine Grundlage eingerichtet.', 'Neither an egg nor a base is set up for this server software right now.'));
         }
         throw Errors.conflict('not_applicable', L('Dieser Servertyp wird über ein eigenes Egg installiert – hier gibt es nichts neu einzurichten.', 'This server type is installed through its own egg – there is nothing to set up again here.'));
       }

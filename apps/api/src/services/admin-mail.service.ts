@@ -352,8 +352,9 @@ export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string)
 export async function clearAbuseFlag(admin: User, serverId: string, ip?: string): Promise<void> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server || !server.abuseAt) throw new ApiError(404, 'not_found', L('Dieser Server ist nicht als Abuse markiert.', 'This server is not marked as abuse.'));
-  await db.update(servers).set({ abuseAt: null, abuseReason: null, abuseSource: null }).where(eq(servers.id, serverId));
-  // War der Server inzwischen abgelaufen, beginnt die Frist zum Reaktivieren jetzt neu (markiert wurde er nicht automatisch gelöscht)
+  // War der Server inzwischen abgelaufen, beginnt die Frist zum Reaktivieren jetzt neu (markiert wurde er nicht automatisch
+  // gelöscht) – vor dem Aufheben, damit der Zyklus-Job nicht dazwischen die alte Frist sieht
   await restoreReactivationWindow({ serverId });
+  await db.update(servers).set({ abuseAt: null, abuseReason: null, abuseSource: null }).where(eq(servers.id, serverId));
   await audit({ userId: server.userId, serverId, actor: 'admin', action: 'admin.abuse_cleared', message: `Abuse-Markierung von Server „${server.name}“ aufgehoben (durch ${admin.email})`, ip });
 }

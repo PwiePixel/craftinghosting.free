@@ -306,10 +306,11 @@ export async function revokeWarning(admin: User, id: string, ip?: string): Promi
 
 /** Auszeit beenden (vom Team vorzeitig oder vom Job nach Ablauf) */
 export async function endTimeout(userId: string, by: string | null, now = new Date()): Promise<number> {
+  // Erst die Frist abgelaufener Server neu setzen, dann freigeben – solange suspendedUntil steht, hält der Zyklus-Job still
+  await restoreReactivationWindow({ userId }, now);
   const res = await db.update(users).set({ suspendedUntil: null }).where(and(eq(users.id, userId), isNotNull(users.suspendedUntil)));
   if (affectedRows(res) !== 1) return 0;
   const n = await releaseServers(userId, 'warning', now);
-  await restoreReactivationWindow({ userId }, now);
   await audit({ userId, actor: by ? 'admin' : 'system', action: 'warning.timeout_ended', message: by ? `Auszeit vorzeitig beendet (durch ${by}) – ${n} Server entsperrt` : `Auszeit abgelaufen – ${n} Server entsperrt` });
   await notify({
     userId,
@@ -330,10 +331,17 @@ export async function liftBan(admin: User, userId: string, ip?: string): Promise
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user || !user.bannedAt) throw Errors.notFound(L('Dieses Konto ist nicht gebannt.', 'This account is not banned.'));
   const now = new Date();
+  await restoreReactivationWindow({ userId }, now);
   await db.update(users).set({ status: 'active', bannedAt: null, banDeleteAt: null }).where(eq(users.id, userId));
   await db.delete(bannedIdentities).where(eq(bannedIdentities.userId, userId));
+  // Fingerabdrücke, die auch zu einem anderen gebannten Konto gehören (z. B. dieselbe Gmail-Adresse ohne Punkte/+Zusatz),
+  // gehörten bisher nur diesem Konto – für die anderen wieder eintragen, sonst wäre deren Sperre durchlässig
+  const others = await db.select().from(users).where(and(isNotNull(users.bannedAt), ne(users.id, userId)));
+  for (const other of others) {
+    const rows = [...emailHashes(other.email).map((hash) => ({ kind: 'email' as const, hash })), ...(other.discordId ? [{ kind: 'discord' as const, hash: discordHash(other.discordId) }] : [])];
+    for (const row of rows) await db.insert(bannedIdentities).values({ id: uuid(), ...row, userId: other.id }).onConflictDoNothing();
+  }
   const n = await releaseServers(userId, 'ban', now);
-  await restoreReactivationWindow({ userId }, now);
   invalidatePublicSite();
   await audit({ userId, actor: 'admin', action: 'admin.ban_lifted', message: `Ban von ${user.email} aufgehoben – ${n} Server entsperrt (durch ${admin.email})`, ip });
   await notify({

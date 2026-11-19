@@ -82,9 +82,11 @@ export const syncPowerStatesJob: JobDefinition = {
       // dort besteht der Auftrag ohnehin schon)
       const wasReady = server.powerState !== 'installing' && server.powerState !== 'unknown';
       if (res.state === 'installing' && wasReady && !server.softwareJob && !server.partnerId && server.kind === 'minecraft' && server.pteroServerId) {
-        // Mit dem mitgelieferten Egg spielt das Panel die gewählte Software bei der Neuinstallation selbst auf
-        const panelInstalls = !!(await ptero.getServer(server.pteroServerId).catch(() => null))?.environment?.SOFTWARE_STEPS;
-        if (!panelInstalls && (await requestSiteSoftware(server, { onlyIfNone: true }))) {
+        // Nur bei einer echten Neuinstallation: Auch eine Backup-Wiederherstellung, ein Umzug oder Wartung der Node
+        // melden sich hier als „installing“ – die Application-API sagt, was wirklich läuft.
+        // Mit dem mitgelieferten Egg spielt das Panel die gewählte Software bei der Neuinstallation selbst auf.
+        const panel = await ptero.getServer(server.pteroServerId).catch(() => null);
+        if (panel?.status === 'installing' && !panel.environment?.SOFTWARE_STEPS && (await requestSiteSoftware(server, { onlyIfNone: true }))) {
           await audit({ serverId: server.id, userId: server.userId, actor: 'system', action: 'server.software_rearmed', message: `Neuinstallation im Panel erkannt – ${server.serverType} ${server.version} wird danach wieder eingerichtet` });
         }
       }

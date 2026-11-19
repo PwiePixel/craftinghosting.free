@@ -8,12 +8,12 @@
  *    parallele Läufe (API + Worker) überspringen sich gegenseitig.
  */
 import { partnerNodeIds } from './partner-nodes';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
 import { baseEggMapping, getEggMapping, installMethodOf, pterodactylConfig, versionVariableIn } from '../config/pterodactyl.config';
 import { env, panelPublicUrl } from '../env';
 import { affectedRows, db } from '../db/client';
-import { servers, users, type Server, type User } from '../db/schema';
+import { partnerServers, servers, users, type Server, type User } from '../db/schema';
 import { ApiError, L } from '../lib/errors';
 import { pterodactyl, PterodactylError, type PteroEgg, type PteroServer } from '../pterodactyl';
 import type { PteroNode } from '../pterodactyl/types';
@@ -23,7 +23,7 @@ import { getUserLocale } from './locale.service';
 import { desiredPanelDescription } from './panel';
 import { getSettings } from './settings.service';
 import { pendingSoftwareJob } from './software-directory';
-import { installerReady, installerStartup, resolveSoftware } from './partner-software.service';
+import { SETUP_STARTUP, installerReady, installerStartup, resolveSoftware } from './partner-software.service';
 import { inTimeout } from './sanction-gate';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
@@ -123,7 +123,8 @@ export async function startupFor(serverType: string, version: string, settings: 
   const environment: Record<string, string> = {};
   for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
   Object.assign(environment, egg.environment ?? {});
-  const variable = versionVariableIn(egg.versionVariable, eggInfo.variables);
+  // Discord-Bots: keine Versionsangabe (die Variablen ihrer Eggs bleiben auf den Standardwerten)
+  const variable = getServerType(serverType)?.kind === 'minecraft' ? versionVariableIn(egg.versionVariable, eggInfo.variables) : undefined;
   if (variable) environment[variable] = version;
   return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, dockerImages: eggInfo.dockerImages ?? {}, startup: eggInfo.startup, environment };
 }
@@ -215,6 +216,9 @@ function formatAddress(p: PteroServer): string | null {
   return `${p.allocation.alias || p.allocation.ip}:${p.allocation.port}`;
 }
 
+/** Das Software-Verzeichnis ist gerade nicht erreichbar – kein Fehlversuch der Anlage */
+class DirectoryUnavailable extends Error {}
+
 export async function provisionServer(serverId: string, actor: 'user' | 'system', ip?: string): Promise<'active' | 'failed' | 'skipped'> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server || (server.status !== 'provisioning' && server.status !== 'provisioning_failed')) return 'skipped';
@@ -248,7 +252,14 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
     // Ist die Grundlage das mitgelieferte Egg, installiert das Panel die gewählte Software gleich beim Anlegen selbst
     // (ein Durchgang, kein nachgelagerter Job) – sonst wie bisher: Grundinstallation, danach der Software-Job
-    const software = viaDirectory && (await installerReady(settings)) ? await resolveSoftware(server.serverType, server.version) : null;
+    const software =
+      viaDirectory && (await installerReady(settings))
+        ? await resolveSoftware(server.serverType, server.version).catch((err: unknown) => {
+            // Verzeichnis gerade nicht erreichbar: kein Fehlversuch – der Job versucht es gleich erneut
+            if (err instanceof ApiError && err.statusCode === 503) throw new DirectoryUnavailable();
+            throw err;
+          })
+        : null;
     // Minecraft-EULA: Kunden der Website stimmen ihr beim Bestellen zu; Partner bestätigen sie beim Start über die API
     const installer = software ? await installerStartup(software, settings, { eula: !server.partnerId }) : null;
 
@@ -263,7 +274,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
       for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
       Object.assign(environment, egg.environment ?? {});
       // Minecraft: Version setzen · Discord-Bots: Standardwerte des Eggs (Startdatei, requirements.txt …)
-      const variable = viaDirectory ? undefined : versionVariableIn(egg.versionVariable, eggInfo.variables);
+      const variable = viaDirectory || type.kind !== 'minecraft' ? undefined : versionVariableIn(egg.versionVariable, eggInfo.variables);
       if (variable) environment[variable] = server.version;
       const allocationId = await pickAllocation(server, settings);
 
@@ -274,7 +285,9 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         userId: user.pteroUserId,
         eggId: installer?.eggId ?? egg.eggId,
         dockerImage: installer?.dockerImage ?? (egg.dockerImage || eggInfo.dockerImage),
-        startup: installer?.startup ?? eggInfo.startup,
+        // Ohne mitgeliefertes Egg (Software kommt per Job): vorerst nur der Hinweis als Startbefehl, damit bis zum Ende der
+        // Einrichtung nie die Software der Grundlage startet – auch nicht, wenn die Einrichtung vorher scheitert
+        startup: installer?.startup ?? (viaDirectory ? SETUP_STARTUP : eggInfo.startup),
         environment: installer?.environment ?? environment,
         // Ressourcen aus dem Snapshot des Servers – das Paket kann inzwischen geändert oder entfernt worden sein
         limits: { memory: server.memoryMb, swap: plan?.swapMb ?? 0, disk: server.diskMb, io: plan?.ioWeight ?? 500, cpu: server.cpuPercent },
@@ -283,6 +296,13 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         ...(allocationId ? { allocationId } : {}),
         startOnCompletion: pterodactylConfig.startOnCompletion,
       });
+    }
+
+    // Partner-Server: Ob das Panel die Software selbst installiert oder der Job sie einrichtet, gilt so, wie hier angelegt
+    // wurde (die Einstellungen können sich seit der Anfrage geändert haben, z. B. bei einem späteren Versuch)
+    if (server.partnerId && viaDirectory) {
+      if (installer) await db.update(partnerServers).set({ softwareJob: null }).where(eq(partnerServers.serverId, server.id));
+      else await db.update(partnerServers).set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, true) }).where(and(eq(partnerServers.serverId, server.id), isNull(partnerServers.softwareJob)));
     }
 
     const res = await db
@@ -329,6 +349,10 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     }
     return 'active';
   } catch (err) {
+    if (err instanceof DirectoryUnavailable) {
+      await db.update(servers).set({ provisioningAttempts: server.provisioningAttempts }).where(eq(servers.id, server.id));
+      return 'skipped';
+    }
     const message = (err as Error).message.slice(0, 480);
     await db
       .update(servers)

@@ -5,7 +5,7 @@
 import { and, eq, gt, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import { formatDateTime, freeHostingConfig } from '@chfree/shared';
 import { db } from '../db/client';
-import { bannedIdentities, servers, userWarnings, type User } from '../db/schema';
+import { bannedIdentities, servers, userWarnings, warningCarry, type User } from '../db/schema';
 import { sha256 } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 
@@ -82,7 +82,7 @@ export const lockedError = (user: Pick<User, 'bannedAt'>) =>
  * oder ein Server eine Abuse-Markierung trägt. Sonst ließe sich kurz vor einem Ban (oder vor dem Löschen des Kontos)
  * die Identität tauschen – und Sperrliste bzw. Verwarnungen hingen dann an einer Wegwerf-Adresse.
  */
-export async function assertIdentityFree(user: Pick<User, 'id' | 'suspendedUntil'>, now = new Date()): Promise<void> {
+export async function assertIdentityFree(user: Pick<User, 'id' | 'suspendedUntil' | 'email' | 'discordId'>, now = new Date()): Promise<void> {
   const frozen = async () => {
     if (inTimeout(user, now)) return true;
     const [warning] = await db
@@ -91,6 +91,15 @@ export async function assertIdentityFree(user: Pick<User, 'id' | 'suspendedUntil
       .where(and(eq(userWarnings.userId, user.id), isNull(userWarnings.revokedAt), gt(userWarnings.expiresAt, now)))
       .limit(1);
     if (warning) return true;
+    // Verwarnungen eines früher gelöschten Kontos mit derselben E-Mail-Adresse bzw. demselben Discord-Konto (noch nicht
+    // übernommen, solange der Nutzer seine Server nicht aufgerufen hat) zählen genauso
+    const carried = [...emailHashes(user.email).map((hash) => and(eq(warningCarry.kind, 'email'), eq(warningCarry.hash, hash))), ...(user.discordId ? [and(eq(warningCarry.kind, 'discord'), eq(warningCarry.hash, discordHash(user.discordId)))] : [])];
+    const [carry] = await db
+      .select({ id: warningCarry.id })
+      .from(warningCarry)
+      .where(and(gt(warningCarry.expiresAt, now), or(...carried)))
+      .limit(1);
+    if (carry) return true;
     const [flagged] = await db
       .select({ id: servers.id })
       .from(servers)

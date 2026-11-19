@@ -286,7 +286,9 @@ export const cycleJob: JobDefinition = {
     // Verwarnungs-System: Server mit Abuse-Markierung und Server von Konten in einer Auszeit bzw. mit Ban werden hier
     // weder angeschrieben noch gelöscht. (Gebannte Konten: Löschung nach der eigenen Frist; sonst läuft die Frist
     // weiter, sobald die Markierung aufgehoben bzw. die Auszeit vorbei ist – siehe restoreReactivationWindow.)
-    const sanctioned = new Set((await db.select({ id: users.id }).from(users).where(or(isNotNull(users.bannedAt), gt(users.suspendedUntil, now)))).map((u) => u.id));
+    // Gespeicherter Zustand statt Zeitvergleich: Eine abgelaufene Auszeit gilt, bis der Job user-sanctions sie beendet
+    // und dabei die Frist wiederhergestellt hat – sonst könnte dieser Lauf dazwischenkommen und den Server löschen
+    const sanctioned = new Set((await db.select({ id: users.id }).from(users).where(or(isNotNull(users.bannedAt), isNotNull(users.suspendedUntil)))).map((u) => u.id));
     const held = (server: Server) => !!server.abuseAt || sanctioned.has(server.userId);
 
     // 4) Ruhezeit vorbei → einmalig Bescheid geben (E-Mail). Nur kürzlich abgelaufene Ruhezeiten,
@@ -313,7 +315,7 @@ export const cycleJob: JobDefinition = {
           type: 'cycle.reactivatable',
           title: t.readyTitle,
           body: t.readyBody(server),
-          dedupeKey: `cycle-reactivatable:${server.id}:${server.cycleNumber}`,
+          dedupeKey: `cycle-reactivatable:${server.id}:${server.cycleNumber}:${server.suspendedAt?.getTime() ?? 0}`,
           email: true,
         });
         if (created) {
@@ -344,7 +346,8 @@ export const cycleJob: JobDefinition = {
               type: 'cycle.delete_soon',
               title: t.deleteSoonTitle,
               body: t.deleteSoonBody(server),
-              dedupeKey: `cycle-delete-soon:${server.id}:${server.cycleNumber}`,
+              // Frist im Schlüssel: Wird sie nach einer Auszeit/Abuse-Prüfung neu gesetzt, kommt auch die Erinnerung neu
+              dedupeKey: `cycle-delete-soon:${server.id}:${server.cycleNumber}:${at.getTime()}`,
               email: true,
             })
           )

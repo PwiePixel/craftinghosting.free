@@ -210,7 +210,7 @@ export async function assertInstallSlot(partnerId: string, exceptServerId?: stri
     .select({ n: count() })
     .from(partnerServers)
     .innerJoin(servers, eq(servers.id, partnerServers.serverId))
-    .where(and(eq(partnerServers.partnerId, partnerId), ne(servers.status, 'deleted'), sql`${partnerServers.softwareJob} is not null`, sql`json_extract(${partnerServers.softwareJob}, '$.error') is null`, ...(exceptServerId ? [ne(partnerServers.serverId, exceptServerId)] : [])));
+    .where(and(eq(partnerServers.partnerId, partnerId), ne(servers.status, 'deleted'), ne(servers.status, 'suspended'), sql`${partnerServers.softwareJob} is not null`, sql`json_extract(${partnerServers.softwareJob}, '$.error') is null`, ...(exceptServerId ? [ne(partnerServers.serverId, exceptServerId)] : [])));
   if (Number(open?.n ?? 0) >= MAX_OPEN_INSTALLS) {
     throw new ApiError(429, 'too_many_installs', L(`Es werden gerade schon ${MAX_OPEN_INSTALLS} Server eingerichtet. Bitte warten, bis einer fertig ist.`, `${MAX_OPEN_INSTALLS} servers are already being set up. Please wait until one has finished.`), { retryAfterSeconds: '30' });
   }
@@ -291,6 +291,8 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
       return await wait();
     }
     if (now.getTime() > deadline) return await fail('Die Einrichtung hat zu lange gedauert.');
+    // Typ inzwischen entfernt oder über ein eigenes Egg eingestellt: hier gibt es nichts mehr einzurichten
+    if (!installsViaDirectory(job.serverType, await getSettings())) return await fail('Diese Server-Software wird nicht mehr über das Verzeichnis eingerichtet.', undefined, true);
     const identifier = server.pteroIdentifier;
     const ptero = pterodactyl();
     try {
@@ -308,7 +310,7 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
       }
       if (job.waitInstall) {
         const p = await ptero.getServer(server.pteroServerId);
-        if (p?.status === 'installing') return await wait();
+        if (p?.status === 'installing' || p?.status === 'restoring_backup') return await wait();
         if (p?.status === 'install_failed') {
           // Einmal von selbst neu anstoßen (z. B. Download im Installationsskript kurz nicht erreichbar)
           if (job.reinstalled) return await fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
@@ -324,6 +326,12 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
       // Läuft der Server (im Panel gestartet), zuerst anhalten – vor jedem Schritt, nicht nur am Anfang. Erst freundlich
       // („stop“, die Welt wird gespeichert), nach einer Wartezeit hart. Solange er läuft, wird nichts verändert.
       const state = (await ptero.getResources(identifier)).state;
+      if (state === 'installing') {
+        // Mitten in der Einrichtung im Panel neu installiert (oder Backup/Umzug): Das Installationsskript der Grundlage
+        // überschreibt ggf. schon geladene Dateien – deshalb abwarten und danach von vorn beginnen
+        Object.assign(job, { waitInstall: true, pos: 0, pullStartedAt: null, pullSize: 0, pullStable: 0, prepared: false, finalized: false, polls: 0 });
+        return await wait();
+      }
       if (state === 'running' || state === 'starting' || state === 'stopping') {
         if (!job.stopSentAt) {
           job.stopSentAt = now.getTime();
@@ -359,8 +367,15 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
           const size = (await ptero.listFiles(identifier, '/')).find((f) => !f.directory && f.name === step.file)?.size ?? 0;
           job.pullStable = size > 0 && size === job.pullSize ? job.pullStable + 1 : 0;
           job.pullSize = size;
-          // Fertig, wenn die erwartete Größe erreicht ist – oder (Größe unbekannt/abweichend) die Datei längere Zeit nicht mehr wächst
-          const complete = size > 0 && (step.size ? size === step.size || job.pullStable >= 4 : job.pullStable >= 2);
+          // Fertig, wenn die erwartete Größe erreicht ist. Ohne bekannte Größe: wenn die Datei längere Zeit nicht mehr wächst.
+          const complete = size > 0 && (step.size ? size === step.size : job.pullStable >= 2);
+          if (!complete && step.size && size > 0 && job.pullStable >= 4) {
+            // Bleibt bei einer anderen als der erwarteten Größe stehen: abgebrochener Download – neu laden (zählt als Versuch)
+            job.pullStartedAt = null;
+            job.attempts++;
+            if (job.attempts >= MAX_ATTEMPTS) return await fail(`Der Download von „${step.file}“ ist unvollständig angekommen.`);
+            return await wait();
+          }
           if (!complete) {
             const waited = now.getTime() - job.pullStartedAt;
             if (waited > PULL_TIMEOUT_MS || (size === 0 && waited > 3 * 60_000)) return await fail(`Der Download von „${step.file}“ ist nicht angekommen.`);
@@ -524,8 +539,14 @@ export async function runSoftwareJobs(now = new Date()) {
       ),
     )
     .limit(20);
+  const settings = await getSettings();
   for (const server of failedSite) {
     const old = server.softwareJob!;
+    if (!installsViaDirectory(old.serverType, settings)) {
+      // Nicht mehr über das Verzeichnis: kein Neuversuch (und kein weiterer „wird eingerichtet“)
+      await db.update(servers).set({ softwareJob: { ...old, permanent: true } }).where(and(eq(servers.id, server.id), sameJob(servers.softwareJob, old)));
+      continue;
+    }
     await db
       .update(servers)
       .set({ softwareJob: { ...pendingSoftwareJob(old.serverType, old.version, true), retries: (old.retries ?? 0) + 1 } })

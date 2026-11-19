@@ -74,7 +74,9 @@ function fromEnv(type: string): EggMapping | null | undefined {
  */
 export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 'products'>): EggMapping | null {
   const kind = getServerType(serverType)?.kind;
-  const chosen = kind ? settings?.products[kind].eggs[serverType] : undefined;
+  // Nur eigene Einträge – sonst läse z. B. die Kennung „constructor“ Werte von Object.prototype
+  const eggs = kind ? settings?.products[kind].eggs : undefined;
+  const chosen = eggs && Object.hasOwn(eggs, serverType) ? eggs[serverType] : undefined;
   if (chosen) {
     return {
       nestId: chosen.nestId,
@@ -85,7 +87,7 @@ export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 
   }
   const override = fromEnv(serverType);
   if (override !== undefined) return override && kind === 'discord' ? { ...override, versionVariable: undefined } : override;
-  return defaults[serverType] ?? null;
+  return Object.hasOwn(defaults, serverType) ? (defaults[serverType] ?? null) : null;
 }
 
 /** Servertyp, dessen Egg als Grundlage für alle Minecraft-Typen ohne eigenes Egg dient */

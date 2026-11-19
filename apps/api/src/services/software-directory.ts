@@ -81,7 +81,7 @@ const releasesFrom = (versions: Record<string, DirectoryVersion>): string[] =>
 
 const pick = (settings: Pick<SiteSettings, 'versions'>, typeId: string, releases: string[] | null): string[] => {
   // Eine im Admin-Bereich gepflegte eigene Liste gilt immer genau so
-  const custom = settings.versions[typeId];
+  const custom = Object.hasOwn(settings.versions, typeId) ? settings.versions[typeId] : undefined;
   if (custom && custom.length) return custom;
   if (!releases || releases.length === 0) return versionsFor(settings, typeId);
   const preferred = getServerType(typeId)?.defaultVersion;
