@@ -74,12 +74,9 @@
 }
 
 @layer components {
+  /* Seitenbreite überall: nutzt große Bildschirme (bis 1600 px), mit mehr Rand auf breiten Fenstern */
   .container-page {
-    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
-  }
-  /* Kundenbereich (Meine Server, Server-Seite, Konto): nutzt die Breite großer Bildschirme */
-  .container-wide {
-    @apply mx-auto w-full max-w-[1600px] px-5 sm:px-8 xl:px-10;
+    @apply mx-auto w-full max-w-[1600px] px-5 sm:px-8 xl:px-12;
   }
   .surface {
     @apply rounded-xl border border-line bg-surface;

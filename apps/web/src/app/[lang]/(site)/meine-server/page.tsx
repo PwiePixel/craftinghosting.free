@@ -312,7 +312,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
     (mode === 'open' ? freeKind : mode === 'preregistration' ? owned === 0 : false);
 
   return (
-    <div className="container-wide py-12 sm:py-16">
+    <div className="container-page py-12 sm:py-16">
       <AutoRefresh active={transitional} />
       <div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

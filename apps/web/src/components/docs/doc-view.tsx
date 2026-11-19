@@ -1,7 +1,8 @@
 /** Darstellung einer Doku-Seite (/docs) aus ihren Bausteinen */
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
-import { localePath, type Locale } from '@chfree/shared';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import type { Locale } from '@chfree/shared';
+import { DocToc } from './docs-nav';
 import { fill, type Block, type DocPage, type DocVars, type L } from '@/content/docs/types';
 
 const text = (value: string | L, lang: Locale, vars: DocVars) => fill(typeof value === 'string' ? value : value[lang], vars);
@@ -55,32 +56,27 @@ function BlockView({ block, lang, vars }: { block: Block; lang: Locale; vars: Do
   );
 }
 
-export function DocView({ page, lang, vars, back, badge }: { page: DocPage; lang: Locale; vars: DocVars; back: string; badge?: string }) {
+export interface DocLink {
+  href: string;
+  title: string;
+}
+
+/** Inhalt einer Doku-Seite (die Seitenleiste kommt aus dem Layout der Dokumentation) */
+export function DocView({ page, lang, vars, badge, prev, next, labels }: { page: DocPage; lang: Locale; vars: DocVars; badge?: string; prev?: DocLink | null; next?: DocLink | null; labels: { onThisPage: string; prev: string; next: string } }) {
+  const sections = page.sections.map((s, i) => ({ id: `s${i + 1}`, title: fill(s.heading[lang], vars) }));
   return (
-    <div className="container-page py-12 sm:py-16">
-      <div className="mx-auto max-w-3xl">
-        <Link href={localePath(lang, 'docs')} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-white">
-          <ArrowLeft className="size-4" aria-hidden /> {back}
-        </Link>
-        {badge && <p className="mt-6 inline-block rounded bg-violet-500/20 px-2 py-0.5 text-[12px] font-medium text-violet-200">{badge}</p>}
-        <h1 className={badge ? 'mt-3 text-3xl font-semibold tracking-[-0.02em] text-white sm:text-4xl' : 'mt-6 text-3xl font-semibold tracking-[-0.02em] text-white sm:text-4xl'}>{page.title[lang]}</h1>
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-12 xl:grid-cols-[minmax(0,1fr)_220px]">
+      <article className="min-w-0 max-w-4xl">
+        {badge && <p className="mb-3 inline-block rounded bg-violet-500/20 px-2 py-0.5 text-[12px] font-medium text-violet-200">{badge}</p>}
+        <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white sm:text-4xl">{page.title[lang]}</h1>
         <p className="mt-3 text-lg leading-relaxed text-muted">{fill(page.summary[lang], vars)}</p>
-        {page.sections.length > 2 && (
-          <nav className="mt-8 rounded-lg border border-line p-4" aria-label={page.title[lang]}>
-            <ul className="space-y-1.5 text-sm">
-              {page.sections.map((s, i) => (
-                <li key={s.heading.de}>
-                  <a href={`#s${i + 1}`} className="text-blue-400 hover:text-blue-300">
-                    {fill(s.heading[lang], vars)}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        )}
         {page.sections.map((s, i) => (
-          <section key={s.heading.de} id={`s${i + 1}`} className="mt-10 scroll-mt-24">
-            <h2 className="text-xl font-semibold text-white">{fill(s.heading[lang], vars)}</h2>
+          <section key={s.heading.de} id={`s${i + 1}`} className="mt-10 scroll-mt-24 border-t border-line pt-8 first-of-type:border-t-0 first-of-type:pt-0">
+            <h2 className="text-xl font-semibold text-white">
+              <a href={`#s${i + 1}`} className="hover:text-blue-300">
+                {fill(s.heading[lang], vars)}
+              </a>
+            </h2>
             <div className="mt-4 space-y-4">
               {s.blocks.map((b, j) => (
                 <BlockView key={j} block={b} lang={lang} vars={vars} />
@@ -88,7 +84,36 @@ export function DocView({ page, lang, vars, back, badge }: { page: DocPage; lang
             </div>
           </section>
         ))}
-      </div>
+        {(prev || next) && (
+          <nav className="mt-14 grid gap-3 border-t border-line pt-8 sm:grid-cols-2" aria-label={`${labels.prev} / ${labels.next}`}>
+            {prev ? (
+              <Link href={prev.href} className="surface group flex items-center gap-3 p-4 transition-colors hover:border-white/25">
+                <ArrowLeft className="size-4 shrink-0 text-subtle group-hover:text-white" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-[12px] text-subtle">{labels.prev}</span>
+                  <span className="block truncate text-sm font-medium text-white">{prev.title}</span>
+                </span>
+              </Link>
+            ) : (
+              <span />
+            )}
+            {next && (
+              <Link href={next.href} className="surface group flex items-center justify-end gap-3 p-4 text-right transition-colors hover:border-white/25">
+                <span className="min-w-0">
+                  <span className="block text-[12px] text-subtle">{labels.next}</span>
+                  <span className="block truncate text-sm font-medium text-white">{next.title}</span>
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-subtle group-hover:text-white" aria-hidden />
+              </Link>
+            )}
+          </nav>
+        )}
+      </article>
+      {sections.length > 1 && (
+        <aside className="hidden xl:block">
+          <DocToc sections={sections} label={labels.onThisPage} />
+        </aside>
+      )}
     </div>
   );
 }

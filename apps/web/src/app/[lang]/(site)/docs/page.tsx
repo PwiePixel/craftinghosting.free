@@ -25,11 +25,11 @@ export default async function DocsPage({ params }: Props) {
   const partner = !!me?.user.partner;
   const base = localePath(lang, 'docs');
   return (
-    <div className="container-page py-12 sm:py-16">
-      <div className="mx-auto max-w-4xl">
+    <div>
+      <div>
         <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white sm:text-4xl">{t.title}</h1>
         <p className="mt-3 max-w-2xl text-lg leading-relaxed text-muted">{t.intro}</p>
-        <ul className="mt-10 grid gap-4 sm:grid-cols-2">
+        <ul className="mt-10 grid auto-rows-fr gap-4 sm:grid-cols-2 2xl:grid-cols-3">
           {userDocs.map((page) => (
             <li key={page.slug}>
               <Link href={`${base}/${page.slug}`} className="surface group flex h-full flex-col p-6 transition-colors hover:border-white/25">

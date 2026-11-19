@@ -37,8 +37,8 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const discordResult = query.discord ? d.discord.results[query.discord] : undefined;
 
   return (
-    <div className="container-wide py-12 sm:py-16">
-      <div className="mx-auto max-w-4xl">
+    <div className="container-page py-12 sm:py-16">
+      <div className="mx-auto max-w-5xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white">{d.account.title}</h1>

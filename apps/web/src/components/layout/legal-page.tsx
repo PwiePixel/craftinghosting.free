@@ -9,7 +9,7 @@ export function LegalPage({ lang, title, updated, children }: { lang: Locale; ti
   const t = getDict(lang).legal;
   return (
     <div className="container-page py-14 sm:py-20">
-      <article className="mx-auto max-w-3xl" lang={lang}>
+      <article className="mx-auto max-w-4xl" lang={lang}>
         <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white sm:text-4xl">{title}</h1>
         <p className="mt-2 text-sm text-muted">
           {t.updated}: {updated}

@@ -413,6 +413,13 @@ return {
     noAccessText: 'Dieser Bereich ist Partnern von Crafting Hosting vorbehalten. Dein Konto ist kein Partner-Konto. Wenn du Partner werden möchtest, bestätige deine E-Mail-Adresse unter „Meine Server“ und öffne ein Ticket auf unserem Discord-Server.',
     noAccessBack: 'Zur Dokumentation',
     more: 'Noch Fragen? In den FAQ und im Support-Chat helfen wir weiter.',
+    overview: 'Übersicht',
+    pages: 'Seiten',
+    onThisPage: 'Auf dieser Seite',
+    prev: 'Zurück',
+    next: 'Weiter',
+    menu: 'Inhalt der Dokumentation',
+    partnerSection: 'Für Partner',
   },
   register: {
     metaTitle: 'Registrieren',

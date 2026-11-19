@@ -26,7 +26,7 @@ export default async function StatusPage({ params }: Props) {
   const page = status?.page;
   return (
     <div className="container-page py-14 sm:py-20">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <p className="label">Status</p>
         <h1 className="h2 mt-3">{page?.title[lang] || t.title}</h1>
         <p className="lead mt-4">{page?.intro[lang] || t.intro}</p>

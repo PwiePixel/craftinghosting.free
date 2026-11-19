@@ -386,6 +386,13 @@ return {
     noAccessText: 'This area is reserved for Crafting Hosting partners. Your account is not a partner account. If you would like to become a partner, confirm your email address under “My servers” and open a ticket on our Discord server.',
     noAccessBack: 'Go to the documentation',
     more: 'Still have questions? The FAQ and the support chat are there to help.',
+    overview: 'Overview',
+    pages: 'Pages',
+    onThisPage: 'On this page',
+    prev: 'Previous',
+    next: 'Next',
+    menu: 'Documentation contents',
+    partnerSection: 'For partners',
   },
   register: {
     metaTitle: 'Sign up',

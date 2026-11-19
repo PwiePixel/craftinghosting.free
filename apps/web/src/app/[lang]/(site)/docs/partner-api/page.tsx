@@ -7,7 +7,8 @@ import { ButtonLink } from '@/components/ui/button';
 import { partnerDoc } from '@/content/docs/partner';
 import { getDict, resolveLang } from '@/i18n';
 import { getCurrentUser } from '@/lib/api/server';
-import { site } from '@/lib/site';
+import { userDocs } from '@/content/docs/user';
+import { docVars } from '@/content/docs/vars';
 
 type Props = { params: Promise<{ lang: string }> };
 
@@ -27,7 +28,7 @@ export default async function PartnerDocsPage({ params }: Props) {
   if (!me) redirect(localePath(lang, 'login', { next: here }));
   if (!me.user.partner) {
     return (
-      <div className="container-page py-16 sm:py-24">
+      <div className="py-6 sm:py-10">
         <div className="surface mx-auto max-w-lg p-8 text-center">
           <Lock className="mx-auto size-8 text-violet-300" aria-hidden />
           <h1 className="mt-5 text-2xl font-semibold tracking-tight text-white">{t.noAccessTitle}</h1>
@@ -41,5 +42,15 @@ export default async function PartnerDocsPage({ params }: Props) {
       </div>
     );
   }
-  return <DocView page={partnerDoc} lang={lang} vars={{ api: `${site.url}/api/v1/partner` }} back={t.back} badge={t.partnerBadge} />;
+  const last = userDocs[userDocs.length - 1]!;
+  return (
+    <DocView
+      page={partnerDoc}
+      lang={lang}
+      vars={docVars()}
+      badge={t.partnerBadge}
+      prev={{ href: `${localePath(lang, 'docs')}/${last.slug}`, title: last.title[lang] }}
+      labels={{ onThisPage: t.onThisPage, prev: t.prev, next: t.next }}
+    />
+  );
 }

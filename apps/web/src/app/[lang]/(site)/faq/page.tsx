@@ -30,7 +30,7 @@ export default async function FaqPage({ params }: Props) {
   return (
     <div className="container-page py-14 sm:py-20">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <p className="label">FAQ</p>
         <h1 className="h2 mt-3">{t.title}</h1>
         <p className="lead mt-4">{t.intro}</p>
