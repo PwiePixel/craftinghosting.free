@@ -169,6 +169,11 @@ Version-Changer im Panel tut:
 3. Das Java-Image wird passend zur Minecraft-Version aus den Images des Paper-Eggs gewählt (genau diese Version, sonst
    die nächsthöhere), die Startdatei auf `server.jar` gesetzt. Ressourcen, Node und Ports bleiben unverändert.
 
+**Versionen:** Angeboten werden je Typ alle veröffentlichten Versionen aus dem Verzeichnis (keine Vorabversionen),
+die neueste zuerst – auf der Website und in `GET /me`. Der Stand wird 10 Minuten gemerkt; ist das Verzeichnis nicht
+erreichbar, gilt der letzte bekannte Stand bzw. unsere fest hinterlegte Liste. Eine im Admin-Bereich gepflegte eigene
+Liste (Einstellungen → Minecraft-Versionen) gilt immer genau so und ersetzt die automatische.
+
 So lange ist `state` = `installing` und `install` in der Server-Antwort zeigt den Fortschritt; bei einem Fehlschlag
 `state` = `failed` mit `install.error` (erneut versuchen: `POST /servers/{id}/reinstall`). Hat ein Typ ein **eigenes
 Egg**, läuft alles wie bisher über dieses Egg (Wechsel = Egg umstellen und im Panel neu installieren).

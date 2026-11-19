@@ -148,7 +148,7 @@ export function MoreSettings({ s, update }: { s: SiteSettings; update: Update })
           {serverTypesOf('minecraft').map((t) => {
             const custom = s.versions[t.id];
             return (
-              <Labeled key={t.id} label={t.name} hint={custom ? `${custom.length} eigene Versionen` : `Standardliste (${t.versions.length} Versionen)`}>
+              <Labeled key={t.id} label={t.name} hint={custom ? `${custom.length} eigene Versionen – genau diese werden angeboten` : 'Automatisch: alle veröffentlichten Versionen (die Liste hier ist nur der Rückfall, falls das Verzeichnis nicht erreichbar ist)'}>
                 <ListArea
                   key={`${t.id}-${custom ? 'custom' : 'default'}`}
                   value={custom ?? t.versions}

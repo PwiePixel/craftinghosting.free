@@ -32,6 +32,7 @@ import { checkSettingsCaps, enforceSettingsCaps, purgePartnerBackups } from './p
 import { emitPartnerEvent } from './partner-webhooks.service';
 import { hardDeleteServer } from './server.service';
 import { deletionsAllowed, getSettings } from './settings.service';
+import { offeredVersions } from './software-directory';
 
 const LIVE = ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended'] as const;
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10; // Platz für „ #<Spieler-ID>“
@@ -405,9 +406,11 @@ export async function partnerInfo(partner: Partner) {
   return {
     partner: { id: partner.id, name: partner.name },
     plan: plan ? { id: plan.id, name: plan.name, memoryMb: plan.memoryMb, cpuPercent: plan.cpuPercent, diskMb: plan.diskMb } : null,
-    serverTypes: allMinecraftTypesForPartners()
-      .filter((t) => partnerTypeAvailable(t.id, settings))
-      .map((t) => ({ id: t.id, name: t.name, versions: versionsFor(settings, t.id) })),
+    serverTypes: await Promise.all(
+      allMinecraftTypesForPartners()
+        .filter((t) => partnerTypeAvailable(t.id, settings))
+        .map(async (t) => ({ id: t.id, name: t.name, versions: await offeredVersions(settings, t.id) })),
+    ),
     limits: {
       maxServers: partner.maxServers,
       usedServers: Number(used?.n ?? 0),
@@ -461,7 +464,7 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
     const msg = L('Dieser Servertyp ist nicht verfügbar.', 'This server type is not available.');
     throw Errors.badRequest('server_type_unavailable', msg, { serverType: msg });
   }
-  if (!versionsFor(settings, type.id).includes(input.version)) {
+  if (!(await offeredVersions(settings, type.id)).includes(input.version)) {
     const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
     throw Errors.badRequest('version_unavailable', msg, { version: msg });
   }

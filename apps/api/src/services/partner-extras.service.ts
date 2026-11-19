@@ -15,6 +15,7 @@ import { confirmedState, forgetLiveState, stillInstalling, getPartnerServer, loa
 import { startupFor } from './provisioning.service';
 import { assertInstallSlot, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
 import { getSettings } from './settings.service';
+import { offeredVersions } from './software-directory';
 
 const NAME_MAX = freeHostingConfig.limits.serverNameMaxLength - 10;
 
@@ -778,7 +779,7 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
     throw Errors.badRequest('server_type_unavailable', msg, { serverType: msg });
   }
   // Unverändert neu installieren geht immer – auch wenn „latest“ inzwischen eine Version bezeichnet, die nicht einzeln zur Auswahl steht
-  if (!(serverType === server.serverType && version === server.version) && !versionsFor(settings, type.id).includes(version)) {
+  if (!(serverType === server.serverType && version === server.version) && !(await offeredVersions(settings, type.id)).includes(version)) {
     const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
     throw Errors.badRequest('version_unavailable', msg, { version: msg });
   }

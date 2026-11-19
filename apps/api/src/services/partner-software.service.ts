@@ -22,11 +22,9 @@ import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
 import { startupFor } from './provisioning.service';
+import { DIRECTORY_TYPES, softwareDirectory } from './software-directory';
 import { getSettings } from './settings.service';
 import type { SiteSettings } from '@chfree/shared';
-
-/** Unsere Servertypen → Bezeichnung im Verzeichnis */
-const DIRECTORY_TYPES: Record<string, string> = { paper: 'PAPER', purpur: 'PURPUR', vanilla: 'VANILLA', fabric: 'FABRIC', forge: 'FORGE', neoforge: 'NEOFORGE', quilt: 'QUILT' };
 
 /** Wird dieser Typ über das Verzeichnis eingerichtet (statt über ein eigenes Egg)? */
 export const installsViaDirectory = (serverType: string, settings: Pick<SiteSettings, 'products'>): boolean => !!DIRECTORY_TYPES[serverType] && sharesBaseEgg(serverType, settings);
@@ -36,46 +34,6 @@ export function partnerTypeAvailable(serverType: string, settings: SiteSettings)
   const type = getServerType(serverType);
   if (!type || type.kind !== 'minecraft') return false;
   return installsViaDirectory(serverType, settings) || !!getEggMapping(serverType, settings);
-}
-
-interface DirectoryBuild {
-  name?: string | null;
-  versionId?: string | null;
-  projectVersionId?: string | null;
-  installation?: unknown;
-}
-interface DirectoryVersion {
-  type?: string;
-  supported?: boolean;
-  java?: number | null;
-  latest?: DirectoryBuild | null;
-}
-
-const directoryCache = new Map<string, { at: number; versions: Record<string, DirectoryVersion> }>();
-
-const unavailable = () => Errors.unavailable(L('Das Verzeichnis der Server-Software ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.', 'The server software directory cannot be reached right now. Please try again shortly.'));
-
-async function directory(serverType: string): Promise<Record<string, DirectoryVersion>> {
-  const name = DIRECTORY_TYPES[serverType];
-  if (!name) throw unavailable();
-  const hit = directoryCache.get(name);
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.versions;
-  let data: { success?: boolean; builds?: Record<string, DirectoryVersion> };
-  try {
-    const res = await fetch(`${env.MCJARS_API_URL.replace(/\/$/, '')}/builds/${name}`, { headers: { Accept: 'application/json', 'User-Agent': 'server-software-installer/1' }, signal: AbortSignal.timeout(20_000), redirect: 'error' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = (await res.json()) as typeof data;
-  } catch {
-    // Lieber einen etwas älteren Stand als gar keinen
-    if (hit) return hit.versions;
-    throw unavailable();
-  }
-  if (!data.success || !data.builds || typeof data.builds !== 'object') {
-    if (hit) return hit.versions;
-    throw unavailable();
-  }
-  directoryCache.set(name, { at: Date.now(), versions: data.builds });
-  return data.builds;
 }
 
 /** Dateiname bzw. Ort innerhalb des Servers: nur einfache, relative Angaben */
@@ -122,7 +80,7 @@ export interface ResolvedSoftware {
 
 /** Typ und Version im Verzeichnis nachschlagen. „latest“ = neueste veröffentlichte Version. */
 export async function resolveSoftware(serverType: string, version: string): Promise<ResolvedSoftware> {
-  const versions = await directory(serverType);
+  const versions = await softwareDirectory(serverType);
   let resolved = version;
   if (version === 'latest') {
     const releases = Object.entries(versions).filter(([, v]) => v.type === 'RELEASE' && v.supported !== false && v.latest);

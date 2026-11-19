@@ -31,6 +31,7 @@ import { discordConfig, discordGate, syncCustomerRoleSoon } from '../discord/ser
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactylConfig } from '../config/pterodactyl.config';
+import { offeredVersions } from './software-directory';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
@@ -166,7 +167,7 @@ export async function assertConfigAvailable(input: ServerConfigInput, opts: { ig
     });
   }
   // Versionslisten sind im Admin-Bereich pflegbar
-  if (type.kind === 'minecraft' && !versionsFor(settings, type.id).includes(input.version)) {
+  if (type.kind === 'minecraft' && !(await offeredVersions(settings, type.id)).includes(input.version)) {
     const msg = L('Diese Version ist für den Servertyp nicht verfügbar.', 'This version is not available for the selected server type.');
     throw Errors.badRequest('version_unavailable', msg, { version: msg });
   }

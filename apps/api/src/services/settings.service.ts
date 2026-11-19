@@ -24,6 +24,7 @@ import {
   type WaitlistBlock,
   partnerServerTypes,
 } from '@chfree/shared';
+import { offeredVersionsCached } from './software-directory';
 import { getEggMapping } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
@@ -333,7 +334,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
             plans: p.plans
               .filter((plan) => plan.enabled)
               .map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, ...capacity.plans.find((a) => a.id === plan.id)! })),
-            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: versionsFor(s, t.id) })),
+            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: offeredVersionsCached(s, t.id) })),
           },
         ];
       }),
