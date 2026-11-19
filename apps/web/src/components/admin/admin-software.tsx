@@ -17,7 +17,7 @@ import { Labeled, Section, Toggle } from './admin-settings';
 type Update = (fn: (prev: SiteSettings) => SiteSettings) => void;
 type DirectoryType = { id: string; name: string; group: string; deprecated: boolean; experimental: boolean; versions: number };
 type PanelEgg = { nestId: number; nestName: string; eggId: number; name: string };
-type Status = { directory: DirectoryType[] | null; eggs: PanelEgg[]; baseEgg: boolean; status: Record<string, { method: 'egg' | 'directory' | null; ownEgg: boolean }> };
+type Status = { directory: DirectoryType[] | null; eggs: PanelEgg[]; baseEgg: boolean; installer: boolean; status: Record<string, { method: 'egg' | 'directory' | null; ownEgg: boolean }> };
 /** Einträge bei MCJars, die keine Spielserver sind (Proxys, Warteräume): immer nur über ein eigenes Egg */
 const NOT_GAME = (d: DirectoryType) => DIRECTORY_NOT_GAME_SERVERS.includes(d.id) || d.versions === 0;
 
@@ -99,7 +99,7 @@ export function SoftwareCatalog({ s, update }: { s: SiteSettings; update: Update
     >
       <Labeled
         label="Grundlage für MCJars (Nest und Egg)"
-        hint="Mit diesem Egg legt das Panel den Server an; danach kommt die gewählte Software darauf. Am besten ein einfaches Java-Egg mit dem Startbefehl „java … -jar server.jar“ und Images für mehrere Java-Versionen (z. B. das Paper-Egg)."
+        hint="Empfohlen: das mitgelieferte Egg „CraftingHosting Software (MCJars)“ (Datei docs/eggs/craftinghosting-software.json im Panel unter Admin › Nests importieren). Damit installiert das Panel die gewählte Software gleich beim Anlegen – der Server ist in Sekunden bereit. Jedes andere Java-Egg funktioniert auch, ist aber langsamer: Dann installiert das Panel zuerst dessen Software, und wir tauschen sie danach aus."
       >
         <select
           className="input md:max-w-xl"
@@ -118,6 +118,13 @@ export function SoftwareCatalog({ s, update }: { s: SiteSettings; update: Update
           ))}
         </select>
       </Labeled>
+      {info?.baseEgg && (
+        <p className={`rounded-lg border px-3 py-2 text-sm ${info.installer ? 'border-emerald-400/40 bg-emerald-400/[0.06] text-emerald-200' : 'border-amber-400/40 bg-amber-400/[0.06] text-amber-200'}`}>
+          {info.installer
+            ? 'Schnellinstallation aktiv: Die gespeicherte Grundlage ist das mitgelieferte Egg – das Panel installiert die gewählte Software direkt beim Anlegen.'
+            : 'Langsamer Weg aktiv: Die gespeicherte Grundlage ist nicht das mitgelieferte Egg. Server werden erst mit dessen Software angelegt und danach umgestellt (dauert mehrere Minuten). Für Server in Sekunden: Egg importieren, oben auswählen und speichern.'}
+        </p>
+      )}
       {info && info.eggs.length === 0 && <p className="text-[13px] text-amber-200">Die Eggs des Panels ließen sich gerade nicht laden – die Auswahl der Grundlage ist deshalb leer.</p>}
       {info && !info.baseEgg && <p className="rounded-lg border border-amber-400/40 bg-amber-400/[0.06] px-3 py-2 text-sm text-amber-200">Es ist noch keine Grundlage vorhanden: Wähle oben ein Egg oder ordne dem Typ Paper im Reiter „Pterodactyl“ eines zu.</p>}
       {info && directory === null && <p className="text-[13px] text-amber-200">MCJars ist gerade nicht erreichbar – die Auswahl der Software ist deshalb ein Textfeld.</p>}

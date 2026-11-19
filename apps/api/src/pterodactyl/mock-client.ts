@@ -132,6 +132,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       allocation: { ip: '203.0.113.10', alias, port },
       nodeId,
       allocations: [port, ...extra].map((p): PteroAllocation => ({ id: nodeId * 100_000 + p, ip: '203.0.113.10', alias, port: p })),
+      environment: s.files?.['/.startup-env.json'] ? (JSON.parse(s.files['/.startup-env.json']) as Record<string, string>) : null,
     };
   }
 
@@ -178,6 +179,23 @@ export class PterodactylMockClient implements PterodactylGateway {
     return s ? this.toServer(s) : null;
   }
 
+  /** Nachbau des Installationsskripts aus docs/eggs/craftinghosting-software.json (Variable SOFTWARE_STEPS) */
+  private runInstaller(files: Record<string, string>, environment: Record<string, string>): Record<string, string> {
+    const out: Record<string, string> = { ...files, '/.startup-env.json': JSON.stringify(environment) };
+    const encoded = environment.SOFTWARE_STEPS;
+    if (!encoded) return out;
+    for (const line of Buffer.from(encoded, 'base64').toString('utf8').split('\n').filter(Boolean)) {
+      const [kind, a = '', b = ''] = line.split('|');
+      if (kind === 'download') out[`/${b}`] = `download:${a}`;
+      else if (kind === 'unzip') {
+        delete out[`/${a}`];
+        out['/server.jar'] = `unzipped:${a}`;
+      } else if (kind === 'remove') delete out[`/${a}`];
+    }
+    if (environment.EULA === 'TRUE') out['/eula.txt'] = 'eula=true';
+    return out;
+  }
+
   async createServer(spec: CreateServerSpec) {
     const state = this.load();
     const id = state.nextServerId++;
@@ -205,6 +223,8 @@ export class PterodactylMockClient implements PterodactylGateway {
       featureLimits: { ...spec.featureLimits },
       // Die „Allokations-ID“ des Mocks kodiert die Node (siehe freeAllocations)
       nodeId: spec.allocationId ? Math.floor(spec.allocationId / 100_000) : 0,
+      eggId: spec.eggId,
+      files: this.runInstaller({ '/.docker-image': spec.dockerImage, '/.startup': spec.startup }, spec.environment),
     };
     state.servers.push(s);
     this.save(state);
@@ -330,6 +350,19 @@ export class PterodactylMockClient implements PterodactylGateway {
         variables: [{ envVariable: 'MAIN_FILE', defaultValue: 'index.js' }],
       };
     }
+    if (eggId === 30) {
+      return {
+        id: eggId,
+        dockerImage: 'ghcr.io/pterodactyl/yolks:java_21',
+        dockerImages: { 'Java 25': 'ghcr.io/pterodactyl/yolks:java_25', 'Java 21': 'ghcr.io/pterodactyl/yolks:java_21', 'Java 17': 'ghcr.io/pterodactyl/yolks:java_17', 'Java 8': 'ghcr.io/pterodactyl/yolks:java_8' },
+        startup: 'java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}',
+        variables: [
+          { envVariable: 'SERVER_JARFILE', defaultValue: 'server.jar' },
+          { envVariable: 'SOFTWARE_STEPS', defaultValue: '' },
+          { envVariable: 'EULA', defaultValue: 'FALSE' },
+        ],
+      };
+    }
     return {
       id: eggId,
       dockerImage: 'ghcr.io/pterodactyl/yolks:java_21',
@@ -370,6 +403,7 @@ export class PterodactylMockClient implements PterodactylGateway {
       mc(5, 'Vanilla Minecraft'),
       mc(16, 'Purpur'),
       mc(17, 'Fabric'),
+      mc(30, 'CraftingHosting Software (MCJars)'),
       { nestId: 5, nestName: 'Discord Bots', eggId: 20, name: 'generic python', description: 'Python-Bots (Mock)', dockerImages: ['Python 3.13', 'Python 3.12'] },
       { nestId: 5, nestName: 'Discord Bots', eggId: 21, name: 'generic node.js', description: 'Node.js-Bots (Mock)', dockerImages: ['Nodejs 22', 'Nodejs 20'] },
     ];
@@ -601,6 +635,8 @@ export class PterodactylMockClient implements PterodactylGateway {
 
   async reinstallServer(id: number): Promise<void> {
     this.mutate(id, (s) => {
+      const env = s.files?.['/.startup-env.json'] ? (JSON.parse(s.files['/.startup-env.json']) as Record<string, string>) : null;
+      if (env?.SOFTWARE_STEPS) s.files = this.runInstaller(s.files ?? {}, env);
       s.installedAt = Date.now() + INSTALL_MS;
       s.installFailed = false;
       s.state = 'offline';

@@ -395,6 +395,15 @@ export function StartForm({
               {s.acceptPrivacy}
             </Link>
             {s.acceptAfter}
+            {!bot && (
+              <>
+                {s.acceptEulaBefore}
+                <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer" className="text-gray-200 underline underline-offset-4 hover:text-white">
+                  {s.acceptEula}
+                </a>
+                {s.acceptEulaAfter}
+              </>
+            )}
           </span>
         </label>
         {form.fieldErrors.acceptTerms && <p className="mt-2 text-sm text-red-400">{form.fieldErrors.acceptTerms}</p>}

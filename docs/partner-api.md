@@ -166,6 +166,10 @@ Hat ein Typ **kein eigenes Egg** (oder ist „über MCJars“ eingestellt), legt
 Grundlage an (ein Java-Egg, ohne Auswahl das Paper-Egg) und die API richtet die gewünschte Software danach selbst ein –
 so wie es sonst der Version-Changer im Panel tut:
 
+Ist im Panel das mitgelieferte Egg (`docs/eggs/craftinghosting-software.json`) als Grundlage eingerichtet, installiert das
+Panel die Software direkt beim Anlegen bzw. beim Wechsel in einem Durchgang – `install` bleibt dann `null`, der Server
+meldet wie bei jedem anderen Typ `installing` und danach `offline` (Ereignis `server.installed`). Sonst gilt:
+
 1. Typ und Version werden im Verzeichnis **MCJars** nachgeschlagen (`MCJARS_API_URL`, Standard `https://mcjars.app/api/v2`).
 2. Der Job `partner-software` (alle 5 s) führt die dort genannten Schritte aus: Dateien über den Node direkt auf den
    Server laden, entpacken, alte Dateien entfernen.

@@ -13,7 +13,7 @@ import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
 import { confirmedState, forgetLiveState, stillInstalling, getPartnerServer, loadPartnerServer, playersOnline, type PartnerServerDTO } from './partner.service';
 import { startupFor } from './provisioning.service';
-import { assertInstallSlot, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
+import { assertInstallSlot, installerReady, installerStartup, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware } from './partner-software.service';
 import { getSettings } from './settings.service';
 import { offeredVersions } from './software-directory';
 
@@ -790,7 +790,18 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
   // Server, dem die Software unter den Füßen ausgetauscht wird)
   const idle = and(eq(partnerServers.serverId, id), eq(partnerServers.hostActive, false));
   const busy = () => new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
-  if (software) {
+  if (software && (await installerReady(settings))) {
+    // Mitgeliefertes Egg: Software und Java-Version in die Variablen, dann neu installieren – das Panel erledigt den Rest
+    // in einem Durchgang (Welt und übrige Dateien bleiben; die alte Software räumt das Installationsskript weg)
+    if (affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(idle)) !== 1) throw busy();
+    try {
+      await pterodactyl().updateServerStartup(server.pteroServerId, await installerStartup(software, settings, { eula: false }));
+      await pterodactyl().reinstallServer(server.pteroServerId);
+    } catch (err) {
+      panelFailure(err);
+    }
+    await db.update(servers).set({ serverType, version: software.resolvedVersion, powerState: 'installing' }).where(eq(servers.id, id));
+  } else if (software) {
     await assertInstallSlot(partner.id, id);
     // Kein Neuaufsetzen im Panel: Der Software-Job tauscht die Server-Software aus (Welt und übrige Dateien bleiben).
     // Ausnahme: Die Grundinstallation im Panel war fehlgeschlagen – dann zuerst diese wiederholen.

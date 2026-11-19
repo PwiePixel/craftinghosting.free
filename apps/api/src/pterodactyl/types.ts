@@ -24,6 +24,8 @@ export interface PteroServer {
   nodeId: number | null;
   /** Alle Ports des Servers (der Hauptport zuerst) */
   allocations: PteroAllocation[];
+  /** Variablen des Servers (null = vom Panel nicht gemeldet) */
+  environment?: Record<string, string> | null;
 }
 
 /** Backup eines Servers im Panel */

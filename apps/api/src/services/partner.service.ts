@@ -26,7 +26,7 @@ import { pterodactyl } from '../pterodactyl';
 import { unbudgeted } from '../pterodactyl/budget';
 import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
-import { assertInstallSlot, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware, softwareProgress } from './partner-software.service';
+import { assertInstallSlot, installerReady, installsViaDirectory, newSoftwareJob, partnerTypeAvailable, resolveSoftware, softwareProgress } from './partner-software.service';
 import { provisionServer } from './provisioning.service';
 import { checkSettingsCaps, enforceSettingsCaps, purgePartnerBackups } from './partner-extras.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
@@ -476,7 +476,9 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
   // Typen ohne eigenes Egg (Fabric, Forge, NeoForge, Quilt …): die Software vorab im Verzeichnis nachschlagen –
   // gibt es sie dort nicht, wird gar nicht erst ein Server angelegt
   const software = installsViaDirectory(input.serverType, settings) ? await resolveSoftware(input.serverType, input.version) : null;
-  if (software) await assertInstallSlot(partner.id);
+  // Mit dem mitgelieferten Egg installiert das Panel die Software selbst beim Anlegen – dann gibt es keinen Software-Job
+  const viaJob = !!software && !(await installerReady(settings));
+  if (viaJob) await assertInstallSlot(partner.id);
   const player = await upsertPlayer(partner, input.player.externalId, input.player.name);
 
   const id = uuid();
@@ -544,7 +546,7 @@ export async function createPartnerServer(partner: Partner, input: PartnerCreate
       installedNotified: false,
       stopReason: cooling ? 'session_limit' : null,
       // Nach der Grundinstallation im Panel richtet der Software-Job die gewünschte Software ein
-      softwareJob: software ? newSoftwareJob(software, true) : null,
+      softwareJob: software && viaJob ? newSoftwareJob(software, true) : null,
     });
     await tx.update(partnerPlayers).set({ lastSeenAt: now }).where(eq(partnerPlayers.id, player.id));
     // Der neue Server hat den Stand dieses Spielers übernommen – seine gelöschten Server belegen keinen Platz mehr

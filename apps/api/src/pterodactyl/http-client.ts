@@ -109,6 +109,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
         : null,
       nodeId: typeof a.node === 'number' ? a.node : null,
       allocations: primary ? [toAllocation(primary), ...allocations.filter((x) => x !== primary).map(toAllocation)] : [],
+      environment: a.container?.environment && typeof a.container.environment === 'object' ? (a.container.environment as Record<string, string>) : null,
     };
   }
 

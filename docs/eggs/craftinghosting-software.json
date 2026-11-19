@@ -1,0 +1,71 @@
+{
+    "_comment": "CraftingHosting.free – Grundlage für die Server-Software aus dem Verzeichnis MCJars. Im Panel unter Admin › Nests › Import Egg importieren und im Admin-Bereich der Website unter Einstellungen › Server-Software als Grundlage wählen.",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-11-19T00:00:00+00:00",
+    "name": "CraftingHosting Software (MCJars)",
+    "author": "noreply@craftinghosting.free",
+    "description": "Installiert Paper, Purpur, Fabric, Forge, NeoForge, Quilt und weitere Java-Server-Software in einem Durchgang. Welche Software in welcher Version, legt die CraftingHosting-API fest (versteckte Variable).",
+    "features": [
+        "eula",
+        "java_version",
+        "pid_limit"
+    ],
+    "docker_images": {
+        "Java 25": "ghcr.io/pterodactyl/yolks:java_25",
+        "Java 21": "ghcr.io/pterodactyl/yolks:java_21",
+        "Java 17": "ghcr.io/pterodactyl/yolks:java_17",
+        "Java 16": "ghcr.io/pterodactyl/yolks:java_16",
+        "Java 11": "ghcr.io/pterodactyl/yolks:java_11",
+        "Java 8": "ghcr.io/pterodactyl/yolks:java_8"
+    },
+    "file_denylist": [],
+    "startup": "java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}",
+    "config": {
+        "files": "{\"server.properties\": {\"parser\": \"properties\", \"find\": {\"server-ip\": \"0.0.0.0\", \"server-port\": \"{{server.build.default.port}}\", \"query.port\": \"{{server.build.default.port}}\"}}}",
+        "startup": "{\"done\": \")! For help, type \"}",
+        "logs": "{}",
+        "stop": "stop"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/ash\n# CraftingHosting.free – installiert die gewählte Server-Software in einem Durchgang.\n# Die Schritte (Downloads aus dem Verzeichnis MCJars, Entpacken, Aufräumen) setzt die CraftingHosting-API\n# in die versteckte Variable SOFTWARE_STEPS: eine Zeile je Schritt „art|wert|wert“, Base64-kodiert.\nset -e\nmkdir -p /mnt/server\ncd /mnt/server\n\nif [ -z \"${SOFTWARE_STEPS}\" ]; then\n  echo \"Keine Server-Software angegeben (SOFTWARE_STEPS ist leer) – der Server wird von der CraftingHosting-API eingerichtet.\"\n  exit 1\nfi\ncommand -v curl >/dev/null 2>&1 || apk add --no-cache curl\ncommand -v unzip >/dev/null 2>&1 || apk add --no-cache unzip\n\n# Nur einfache, relative Pfade innerhalb des Servers\ncheck_path() {\n  case \"$1\" in\n    \"\"|/*|*..*) echo \"Ungültiger Pfad: $1\"; exit 1 ;;\n  esac\n}\n\necho \"${SOFTWARE_STEPS}\" | base64 -d > /tmp/steps\n# „|| [ -n … ]“: auch die letzte Zeile ohne Zeilenumbruch ausführen\nwhile IFS='|' read -r kind a b || [ -n \"${kind}\" ]; do\n  [ -z \"${kind}\" ] && continue\n  case \"${kind}\" in\n    download)\n      check_path \"${b}\"\n      echo \"Lade ${b} ...\"\n      rm -f \"/mnt/server/${b}\"\n      curl -fSL --retry 3 --retry-delay 2 --connect-timeout 15 -o \"/mnt/server/${b}\" \"${a}\"\n      ;;\n    unzip)\n      check_path \"${a}\"\n      [ \"${b}\" = \".\" ] || check_path \"${b}\"\n      echo \"Entpacke ${a} ...\"\n      unzip -oq \"/mnt/server/${a}\" -d \"/mnt/server/${b}\"\n      ;;\n    remove)\n      check_path \"${a}\"\n      rm -rf \"/mnt/server/${a}\"\n      ;;\n    *)\n      echo \"Unbekannter Schritt: ${kind}\"\n      exit 1\n      ;;\n  esac\ndone < /tmp/steps\n\nif [ ! -f server.properties ]; then\n  printf 'server-ip=0.0.0.0\\nserver-port=%s\\nquery.port=%s\\n' \"${SERVER_PORT}\" \"${SERVER_PORT}\" > server.properties\nfi\n# Minecraft-EULA nur, wenn der Kunde ihr zugestimmt hat (setzt die API)\nif [ \"${EULA}\" = \"TRUE\" ]; then\n  echo \"eula=true\" > eula.txt\nfi\necho \"Installation abgeschlossen.\"\n",
+            "container": "ghcr.io/pterodactyl/installers:alpine",
+            "entrypoint": "ash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Startdatei",
+            "description": "Die Software liegt immer als server.jar im Server.",
+            "env_variable": "SERVER_JARFILE",
+            "default_value": "server.jar",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "required|regex:/^server\\.jar$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Software (wird von der API gesetzt)",
+            "description": "Installationsschritte für die gewählte Software. Wird von der CraftingHosting-API gesetzt – nicht von Hand ändern.",
+            "env_variable": "SOFTWARE_STEPS",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|string|max:8000",
+            "field_type": "text"
+        },
+        {
+            "name": "Minecraft-EULA akzeptiert",
+            "description": "TRUE, wenn der Kunde der Minecraft-EULA zugestimmt hat (setzt die API).",
+            "env_variable": "EULA",
+            "default_value": "FALSE",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "required|string|in:TRUE,FALSE",
+            "field_type": "text"
+        }
+    ]
+}

@@ -15,14 +15,14 @@ import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, getServerType, type Ser
 import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
-import { installMethodOf } from '../config/pterodactyl.config';
+import { baseEggMapping, installMethodOf } from '../config/pterodactyl.config';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
 import { notify } from './notification.service';
-import { baseStartup } from './provisioning.service';
+import { baseStartup, getEggCached } from './provisioning.service';
 import { pendingSoftwareJob, softwareDirectory } from './software-directory';
 import { getSettings } from './settings.service';
 import type { SiteSettings } from '@chfree/shared';
@@ -110,6 +110,62 @@ export async function resolveSoftware(serverType: string, version: string): Prom
   }
   const build = [entry.latest.projectVersionId, entry.latest.name].filter((v, i, all) => v && all.indexOf(v) === i).join(' ');
   return { serverType, version, resolvedVersion: resolved, build: build.slice(0, 80), java: typeof entry.java === 'number' ? entry.java : null, steps };
+}
+
+/* ------------------------------------------------------------ Einrichtung direkt im Panel (Schnellinstallation) */
+
+/**
+ * Variable des mitgelieferten Eggs (docs/eggs/craftinghosting-software.json): Hat die Grundlage sie, installiert das Panel
+ * die gewählte Software selbst – in einem Durchgang beim Anlegen bzw. Neuinstallieren, ohne Umweg über ein anderes Egg und
+ * ohne nachgelagerten Job. Der Server ist damit so schnell bereit wie mit einem eigenen Egg.
+ */
+export const INSTALLER_VARIABLE = 'SOFTWARE_STEPS';
+/** Variable des Eggs, mit der das Installationsskript die Minecraft-EULA akzeptiert (nur, wenn der Kunde zugestimmt hat) */
+export const INSTALLER_EULA_VARIABLE = 'EULA';
+
+/** Schritte für das Installationsskript: eine Zeile je Schritt („art|wert|wert“), Base64 – so kann nichts als Shell gedeutet werden */
+export function encodeSteps(steps: SoftwareStep[]): string {
+  const safe = (v: string) => {
+    if (/[|\s]/.test(v)) throw new Error(`Ungültiges Zeichen in einem Installationsschritt: ${v.slice(0, 80)}`);
+    return v;
+  };
+  const lines = steps.map((s) =>
+    s.type === 'download' ? `download|${safe(s.url)}|${safe(s.file)}` : s.type === 'unzip' ? `unzip|${safe(s.file)}|${safe(s.location)}` : `remove|${safe(s.location)}|`,
+  );
+  return Buffer.from(`${lines.join('\n')}\n`, 'utf8').toString('base64');
+}
+
+/** Ist die Grundlage das mitgelieferte Egg (mit Installationsskript für das Verzeichnis)? */
+export async function installerReady(settings: SiteSettings): Promise<boolean> {
+  const egg = baseEggMapping(settings);
+  if (!egg) return false;
+  try {
+    return (await getEggCached(egg.nestId, egg.eggId)).variables.some((v) => v.envVariable === INSTALLER_VARIABLE);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Egg, Image, Startbefehl und Variablen, mit denen das Panel die Software selbst installiert. Java-Version passend zur
+ * Minecraft-Version aus den Images der Grundlage. Wirft, wenn es kein passendes Image gibt.
+ */
+export async function installerStartup(software: ResolvedSoftware, settings: SiteSettings, opts: { eula: boolean }): Promise<{ eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }> {
+  const egg = baseEggMapping(settings);
+  if (!egg) throw new Error('Für die Software-Einrichtung ist keine Grundlage (Egg) eingerichtet (Admin → Einstellungen → Server-Software)');
+  const eggInfo = await getEggCached(egg.nestId, egg.eggId);
+  const image = pickJavaImage(eggInfo.dockerImages ?? {}, software.java);
+  if (image === false) {
+    const msg = L(`Für diese Version wird Java ${software.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `This version needs Java ${software.java} – no matching image is set up for it.`);
+    throw Errors.badRequest('version_unavailable', msg, { version: msg });
+  }
+  const environment: Record<string, string> = {};
+  for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
+  Object.assign(environment, egg.environment ?? {});
+  for (const name of ['SERVER_JARFILE', 'JARFILE', 'JAR_FILE']) if (name in environment) environment[name] = 'server.jar';
+  environment[INSTALLER_VARIABLE] = encodeSteps(software.steps);
+  if (eggInfo.variables.some((v) => v.envVariable === INSTALLER_EULA_VARIABLE)) environment[INSTALLER_EULA_VARIABLE] = opts.eula ? 'TRUE' : 'FALSE';
+  return { eggId: egg.eggId, dockerImage: image ?? egg.dockerImage ?? eggInfo.dockerImage, startup: eggInfo.startup, environment };
 }
 
 export const newSoftwareJob = (software: ResolvedSoftware, waitInstall: boolean): SoftwareJob => ({
@@ -357,6 +413,9 @@ async function startupFor(job: SoftwareJob) {
   const environment = { ...base.environment };
   // Die Software aus dem Verzeichnis heißt immer „server.jar“ (die Variable heißt je nach Egg unterschiedlich)
   for (const name of ['SERVER_JARFILE', 'JARFILE', 'JAR_FILE']) if (name in environment) environment[name] = 'server.jar';
+  // Ist die Grundlage inzwischen das mitgelieferte Egg: Schritte mitgeben, damit eine spätere Neuinstallation im Panel
+  // dieselbe Software aufspielt (sonst liefe das Installationsskript ohne Angaben)
+  if (INSTALLER_VARIABLE in environment) environment[INSTALLER_VARIABLE] = encodeSteps(job.steps);
   return { base, image, environment };
 }
 

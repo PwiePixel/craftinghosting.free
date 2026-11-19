@@ -23,6 +23,7 @@ import { getUserLocale } from './locale.service';
 import { desiredPanelDescription } from './panel';
 import { getSettings } from './settings.service';
 import { pendingSoftwareJob } from './software-directory';
+import { installerReady, installerStartup, resolveSoftware } from './partner-software.service';
 import { inTimeout } from './sanction-gate';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
@@ -105,7 +106,7 @@ async function deployLocations(tier: Server['nodeTier']): Promise<number[]> {
 
 const eggCache = new Map<string, { egg: PteroEgg; at: number }>();
 
-async function getEggCached(nestId: number, eggId: number): Promise<PteroEgg> {
+export async function getEggCached(nestId: number, eggId: number): Promise<PteroEgg> {
   const key = `${nestId}:${eggId}`;
   const hit = eggCache.get(key);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.egg;
@@ -245,6 +246,11 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     const viaDirectory = installMethodOf(server.serverType, settings) === 'directory';
     const egg = viaDirectory ? baseEggMapping(settings) : getEggMapping(server.serverType, settings);
     if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
+    // Ist die Grundlage das mitgelieferte Egg, installiert das Panel die gewählte Software gleich beim Anlegen selbst
+    // (ein Durchgang, kein nachgelagerter Job) – sonst wie bisher: Grundinstallation, danach der Software-Job
+    const software = viaDirectory && (await installerReady(settings)) ? await resolveSoftware(server.serverType, server.version) : null;
+    // Minecraft-EULA: Kunden der Website stimmen ihr beim Bestellen zu; Partner bestätigen sie beim Start über die API
+    const installer = software ? await installerStartup(software, settings, { eula: !server.partnerId }) : null;
 
     const ptero = pterodactyl();
     const externalId = `${pterodactylConfig.externalIdPrefix.server}${server.id}`;
@@ -266,10 +272,10 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         name: server.name,
         description,
         userId: user.pteroUserId,
-        eggId: egg.eggId,
-        dockerImage: egg.dockerImage || eggInfo.dockerImage,
-        startup: eggInfo.startup,
-        environment,
+        eggId: installer?.eggId ?? egg.eggId,
+        dockerImage: installer?.dockerImage ?? (egg.dockerImage || eggInfo.dockerImage),
+        startup: installer?.startup ?? eggInfo.startup,
+        environment: installer?.environment ?? environment,
         // Ressourcen aus dem Snapshot des Servers – das Paket kann inzwischen geändert oder entfernt worden sein
         limits: { memory: server.memoryMb, swap: plan?.swapMb ?? 0, disk: server.diskMb, io: plan?.ioWeight ?? 500, cpu: server.cpuPercent },
         featureLimits: { databases: plan?.databases ?? 0, allocations: plan?.allocations ?? 1, backups: plan?.backups ?? 0 },
@@ -292,7 +298,9 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         provisioningError: null,
         // Server der Website mit Software ohne eigenes Egg: Nach der Grundinstallation richtet der Software-Job sie ein
         // (Server der Partner-API haben ihren Auftrag schon beim Erstellen bekommen)
-        ...(viaDirectory && !server.partnerId ? { softwareJob: pendingSoftwareJob(server.serverType, server.version, true) } : {}),
+        ...(viaDirectory && !installer && !server.partnerId ? { softwareJob: pendingSoftwareJob(server.serverType, server.version, true) } : {}),
+        // „latest“ wird zur tatsächlich installierten Version (Launcher und Mod-Suche brauchen sie)
+        ...(software ? { version: software.resolvedVersion } : {}),
         panelDescription: pServer.description || description,
       })
       .where(and(eq(servers.id, server.id), inArray(servers.status, ['provisioning', 'provisioning_failed'])));

@@ -40,6 +40,7 @@ import { addWaitlistEntries, nextWaitlistIds, releaseWaitlist, removeWaitlistEnt
 import { explainSmtpError } from '../services/mail/mailer';
 import { endTimeout, liftBan, revokeWarning, warnManually } from '../services/warnings.service';
 import { baseEggMapping, getEggMapping, installMethodOf } from '../config/pterodactyl.config';
+import { installerReady } from '../services/partner-software.service';
 import { directoryTypes } from '../services/software-directory';
 import { pterodactyl } from '../pterodactyl';
 
@@ -294,6 +295,8 @@ export async function adminRoutes(app: FastifyInstance) {
       directory: await directoryTypes(),
       eggs,
       baseEgg: !!baseEggMapping(settings),
+      // Ist die Grundlage das mitgelieferte Egg? Dann installiert das Panel die Software selbst (Server in Sekunden bereit)
+      installer: await installerReady(settings),
       status: Object.fromEntries(settings.software.map((item) => [item.id, { method: installMethodOf(item.id, settings), ownEgg: !!getEggMapping(item.id, settings) }])),
     };
   });
