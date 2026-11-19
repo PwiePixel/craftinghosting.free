@@ -253,6 +253,11 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
         )}
       </div>
 
+      {s.softwareFailed && (
+        <div className="border-t border-line px-6 py-3">
+          <p className="text-sm text-amber-200">{t.softwareFailed}</p>
+        </div>
+      )}
       <div className="flex border-t border-line px-6 py-3">
         {s.deleteLocked ? <p className="text-[13px] leading-relaxed text-subtle">{t.deleteLocked}</p> : <DeleteServer server={s} />}
       </div>

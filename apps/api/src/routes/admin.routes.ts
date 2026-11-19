@@ -39,6 +39,9 @@ import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } 
 import { addWaitlistEntries, nextWaitlistIds, releaseWaitlist, removeWaitlistEntry } from '../services/waitlist.service';
 import { explainSmtpError } from '../services/mail/mailer';
 import { endTimeout, liftBan, revokeWarning, warnManually } from '../services/warnings.service';
+import { baseEggMapping, getEggMapping, installMethodOf } from '../config/pterodactyl.config';
+import { directoryTypes } from '../services/software-directory';
+import { pterodactyl } from '../pterodactyl';
 
 const idParams = z.object({ id: z.string().uuid() });
 const listQuery = z.object({
@@ -228,7 +231,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post('/admin/servers/:id/:action', async (request) => {
     const { id } = idParams.parse({ id: (request.params as { id: string }).id });
-    const action = z.enum(['suspend', 'unsuspend', 'extend', 'clear-pause', 'retry', 'delete']).parse((request.params as { action: string }).action);
+    const action = z.enum(['suspend', 'unsuspend', 'extend', 'clear-pause', 'retry', 'delete', 'reinstall-software']).parse((request.params as { action: string }).action);
     await serverAction(currentUser(request), id, action, request.ip);
     return { ok: true };
   });
@@ -276,6 +279,24 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /* ---------------------------------------------------------- Einstellungen */
   app.get('/admin/settings', async () => ({ settings: await getSettings() }));
+  /**
+   * Software-Katalog: welche Software das Verzeichnis (MCJars) kennt und wie jeder Eintrag des Katalogs gerade
+   * installiert würde (eigenes Egg, über das Verzeichnis oder gar nicht).
+   */
+  app.get('/admin/software', async () => {
+    const settings = await getSettings();
+    // Eggs des Panels für die Auswahl der Grundlage (leer, wenn das Panel gerade nicht erreichbar ist)
+    const eggs = await pterodactyl()
+      .listEggs()
+      .then((list) => list.map((e) => ({ nestId: e.nestId, nestName: e.nestName, eggId: e.eggId, name: e.name })))
+      .catch(() => []);
+    return {
+      directory: await directoryTypes(),
+      eggs,
+      baseEgg: !!baseEggMapping(settings),
+      status: Object.fromEntries(settings.software.map((item) => [item.id, { method: installMethodOf(item.id, settings), ownEgg: !!getEggMapping(item.id, settings) }])),
+    };
+  });
   app.post('/admin/settings', async (request) => {
     const admin = currentUser(request);
     const before = await getSettings();

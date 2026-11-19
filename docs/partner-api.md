@@ -158,15 +158,18 @@ Ablauf im Launcher:
 
 ## Servertypen und Versionen (Software-Einrichtung)
 
-Angeboten werden `paper`, `purpur`, `vanilla`, `fabric`, `forge`, `neoforge` und `quilt`. Im Panel braucht nicht jeder
-Typ ein eigenes Egg: Hat ein Typ **kein eigenes Egg** (oder ist ihm dasselbe Egg wie Paper zugeordnet), legt das Panel
-den Server mit dem Paper-Egg an und die API richtet die gewünschte Software danach selbst ein – so wie es sonst der
-Version-Changer im Panel tut:
+Standardmäßig angeboten werden `paper`, `purpur`, `vanilla`, `fabric`, `forge`, `neoforge` und `quilt`; welche Typen
+tatsächlich wählbar sind, legt der Betreiber im Admin-Bereich fest (Einstellungen → „Server-Software“, Schalter „Über
+die Partner-API anbieten“) – die gültige Liste samt Versionen liefert `GET /partner/me` (`serverTypes`). Über die Partner-API gibt es nur Java-Spielserver;
+Bedrock und Proxys (Velocity, BungeeCord) sind dort nicht wählbar. Im Panel braucht nicht jeder Typ ein eigenes Egg:
+Hat ein Typ **kein eigenes Egg** (oder ist „über MCJars“ eingestellt), legt das Panel den Server mit der eingestellten
+Grundlage an (ein Java-Egg, ohne Auswahl das Paper-Egg) und die API richtet die gewünschte Software danach selbst ein –
+so wie es sonst der Version-Changer im Panel tut:
 
 1. Typ und Version werden im Verzeichnis **MCJars** nachgeschlagen (`MCJARS_API_URL`, Standard `https://mcjars.app/api/v2`).
 2. Der Job `partner-software` (alle 5 s) führt die dort genannten Schritte aus: Dateien über den Node direkt auf den
    Server laden, entpacken, alte Dateien entfernen.
-3. Das Java-Image wird passend zur Minecraft-Version aus den Images des Paper-Eggs gewählt (genau diese Version, sonst
+3. Das Java-Image wird passend zur Minecraft-Version aus den Images der Grundlage gewählt (genau diese Version, sonst
    die nächsthöhere), die Startdatei auf `server.jar` gesetzt. Ressourcen, Node und Ports bleiben unverändert.
 
 **Versionen:** Angeboten werden je Typ alle veröffentlichten Versionen aus dem Verzeichnis (keine Vorabversionen),

@@ -6,11 +6,15 @@
  * keinen gibt, unsere fest hinterlegte Liste.
  */
 import { getServerType, versionsFor, type SiteSettings } from '@chfree/shared';
+import type { SoftwareJob } from '../db/schema';
 import { env } from '../env';
 import { Errors, L } from '../lib/errors';
 
-/** Unsere Servertypen → Bezeichnung im Verzeichnis */
-export const DIRECTORY_TYPES: Record<string, string> = { paper: 'PAPER', purpur: 'PURPUR', vanilla: 'VANILLA', fabric: 'FABRIC', forge: 'FORGE', neoforge: 'NEOFORGE', quilt: 'QUILT' };
+/** Bezeichnung eines Servertyps im Verzeichnis (aus dem Software-Katalog) – null = dort nicht vorhanden */
+export const directoryName = (serverType: string): string | null => {
+  const name = getServerType(serverType)?.directory;
+  return name && /^[A-Z][A-Z0-9_]{1,23}$/.test(name) ? name : null;
+};
 
 export interface DirectoryBuild {
   name?: string | null;
@@ -55,7 +59,7 @@ function refresh(name: string): Promise<Record<string, DirectoryVersion> | null>
 
 /** Alle Einträge eines Typs (für die Einrichtung). Wirft, wenn das Verzeichnis nicht erreichbar ist und nichts gemerkt wurde. */
 export async function softwareDirectory(serverType: string): Promise<Record<string, DirectoryVersion>> {
-  const name = DIRECTORY_TYPES[serverType];
+  const name = directoryName(serverType);
   if (!name) throw unavailable();
   const hit = cache.get(name);
   if (hit && Date.now() - hit.at < FRESH_MS) return hit.versions;
@@ -87,7 +91,7 @@ const pick = (settings: Pick<SiteSettings, 'versions'>, typeId: string, releases
  * aufgefrischt), sonst unsere fest hinterlegte Liste. Für Antworten, die nie auf das Verzeichnis warten dürfen.
  */
 export function offeredVersionsCached(settings: Pick<SiteSettings, 'versions'>, typeId: string): string[] {
-  const name = DIRECTORY_TYPES[typeId];
+  const name = directoryName(typeId);
   if (!name) return versionsFor(settings, typeId);
   const hit = cache.get(name);
   if (!hit || Date.now() - hit.at >= FRESH_MS) void refresh(name);
@@ -96,7 +100,66 @@ export function offeredVersionsCached(settings: Pick<SiteSettings, 'versions'>, 
 
 /** Wählbare Versionen eines Servertyps – wartet kurz auf das Verzeichnis, wenn noch nichts gemerkt ist (für die Prüfung einer Eingabe) */
 export async function offeredVersions(settings: Pick<SiteSettings, 'versions'>, typeId: string): Promise<string[]> {
-  if (!DIRECTORY_TYPES[typeId]) return versionsFor(settings, typeId);
+  if (!directoryName(typeId)) return versionsFor(settings, typeId);
   const versions = await softwareDirectory(typeId).catch(() => null);
   return pick(settings, typeId, versions ? releasesFrom(versions) : null);
+}
+
+/**
+ * Auftrag für einen Server der Website: Typ und Version stehen fest, die Schritte schlägt der Job nach
+ * (so scheitert das Erstellen eines Servers nie daran, dass das Verzeichnis gerade nicht erreichbar ist).
+ */
+export const pendingSoftwareJob = (serverType: string, version: string, waitInstall: boolean): SoftwareJob => ({
+  serverType,
+  version,
+  resolvedVersion: version,
+  build: '',
+  java: null,
+  steps: [],
+  pos: 0,
+  waitInstall,
+  prepared: false,
+  pullStartedAt: null,
+  pullSize: 0,
+  pullStable: 0,
+  attempts: 0,
+  startedAt: Date.now(),
+  error: null,
+});
+
+
+/* ---- Übersicht für den Admin-Bereich: welche Software das Verzeichnis kennt ---- */
+
+export interface DirectoryTypeInfo {
+  id: string;
+  name: string;
+  group: string;
+  deprecated: boolean;
+  experimental: boolean;
+  /** Zahl der Minecraft-Versionen (0 = z. B. ein Proxy, der nicht an eine Minecraft-Version gebunden ist) */
+  versions: number;
+}
+
+let typesCache: { at: number; list: DirectoryTypeInfo[] } | null = null;
+
+/** Alle Software-Arten des Verzeichnisses (eine Stunde gemerkt). null = gerade nicht erreichbar und nichts gemerkt. */
+export async function directoryTypes(): Promise<DirectoryTypeInfo[] | null> {
+  if (typesCache && Date.now() - typesCache.at < 60 * 60_000) return typesCache.list;
+  try {
+    const res = await fetch(`${env.MCJARS_API_URL.replace(/\/$/, '')}/types`, { headers: { Accept: 'application/json', 'User-Agent': 'server-software-installer/1' }, signal: AbortSignal.timeout(10_000), redirect: 'error' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { success?: boolean; types?: Record<string, Record<string, { name?: string; deprecated?: boolean; experimental?: boolean; versions?: { minecraft?: number } }>> };
+    if (!data.success || !data.types) throw new Error('unerwartete Antwort');
+    const list: DirectoryTypeInfo[] = [];
+    for (const [group, entries] of Object.entries(data.types)) {
+      for (const [id, t] of Object.entries(entries ?? {})) {
+        if (!/^[A-Z][A-Z0-9_]{1,23}$/.test(id)) continue;
+        list.push({ id, name: String(t.name ?? id).slice(0, 40), group, deprecated: !!t.deprecated, experimental: !!t.experimental, versions: Number(t.versions?.minecraft ?? 0) });
+      }
+    }
+    typesCache = { at: Date.now(), list };
+    return list;
+  } catch {
+    return typesCache?.list ?? null;
+  }
 }

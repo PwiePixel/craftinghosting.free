@@ -79,7 +79,8 @@ export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 
     return {
       nestId: chosen.nestId,
       eggId: chosen.eggId,
-      versionVariable: kind === 'minecraft' ? process.env[`PTERODACTYL_EGG_${serverType.toUpperCase()}_VERSION_VAR`] || versionVariables[serverType] : undefined,
+      // Reihenfolge: Angabe im Software-Katalog → .env → übliche Variable des Typs (sonst wird sie am Egg erkannt)
+      versionVariable: kind === 'minecraft' ? getServerType(serverType)?.versionVariable || process.env[`PTERODACTYL_EGG_${serverType.toUpperCase()}_VERSION_VAR`] || versionVariables[serverType] : undefined,
     };
   }
   const override = fromEnv(serverType);
@@ -90,16 +91,55 @@ export function getEggMapping(serverType: string, settings?: Pick<SiteSettings, 
 /** Servertyp, dessen Egg als Grundlage für alle Minecraft-Typen ohne eigenes Egg dient */
 export const BASE_SERVER_TYPE = 'paper';
 
+type EggSettings = Pick<SiteSettings, 'products'> & Partial<Pick<SiteSettings, 'softwareBase'>>;
+
 /**
- * Hat dieser Minecraft-Typ kein eigenes Egg – oder dasselbe wie der Grundtyp? Dann installiert das Panel nur den
- * Grundtyp, und die eigentliche Software muss nachträglich eingerichtet werden (services/partner-software.service.ts).
+ * Grundlage für alles, was über das Software-Verzeichnis eingerichtet wird: das im Admin-Bereich gewählte Egg –
+ * ohne Auswahl das Egg, das dem Typ Paper zugeordnet ist.
  */
-export function sharesBaseEgg(serverType: string, settings?: Pick<SiteSettings, 'products'>): boolean {
-  if (serverType === BASE_SERVER_TYPE || getServerType(serverType)?.kind !== 'minecraft') return false;
-  const base = getEggMapping(BASE_SERVER_TYPE, settings);
-  if (!base) return false;
+export function baseEggMapping(settings?: EggSettings): EggMapping | null {
+  const chosen = settings?.softwareBase;
+  if (chosen) return { nestId: chosen.nestId, eggId: chosen.eggId };
+  return getEggMapping(BASE_SERVER_TYPE, settings);
+}
+
+/**
+ * Wie kommt die Software dieses Typs auf den Server?
+ *  – 'egg': über das zugeordnete Egg im Panel
+ *  – 'directory': Das Panel legt den Server mit dem Grundlage-Egg an; danach richten wir die Software aus dem
+ *    Software-Verzeichnis ein (services/partner-software.service.ts)
+ *  – null: gerade nicht möglich (kein Egg zugeordnet bzw. nicht im Verzeichnis)
+ * Die gewünschte Art steht im Software-Katalog (Admin → Server-Software): „automatisch“ nimmt ein eigenes Egg, wenn
+ * eines zugeordnet ist – sonst (oder wenn dem Typ dasselbe Egg wie der Grundlage zugeordnet ist) das Verzeichnis.
+ * Bedrock und Proxys (eggOnly) laufen immer und nur über ein eigenes Egg.
+ */
+export function installMethodOf(serverType: string, settings?: EggSettings): 'egg' | 'directory' | null {
+  const type = getServerType(serverType);
+  if (!type) return null;
   const own = getEggMapping(serverType, settings);
-  return !own || (own.nestId === base.nestId && own.eggId === base.eggId);
+  if (type.kind !== 'minecraft' || type.eggOnly || type.edition === 'bedrock' || !type.directory) return own ? 'egg' : null;
+  // Ohne eigens gewählte Grundlage ist das Egg von Paper die Grundlage – Paper selbst kommt dann einfach aus seinem Egg
+  if (serverType === BASE_SERVER_TYPE && !settings?.softwareBase) return own ? 'egg' : null;
+  const base = baseEggMapping(settings);
+  const sameAsBase = !!own && !!base && own.nestId === base.nestId && own.eggId === base.eggId;
+  const wants = type.install ?? 'auto';
+  if (wants === 'directory') return base ? 'directory' : null;
+  if (wants === 'egg') return own ? 'egg' : null;
+  if (own && !sameAsBase) return 'egg';
+  if (base) return 'directory';
+  return own ? 'egg' : null;
+}
+
+/**
+ * Variable des Eggs, in die die gewünschte Version gehört. Ist die eingestellte im Egg nicht vorhanden (z. B. bei einem
+ * eigenen Egg für Bedrock), wird sie erkannt: die üblichen Namen zuerst, sonst die erste Variable, die auf „VERSION“ endet.
+ */
+export function versionVariableIn(configured: string | undefined, variables: { envVariable: string }[]): string | undefined {
+  const names = variables.map((v) => v.envVariable);
+  if (configured && names.includes(configured)) return configured;
+  const usual = ['MINECRAFT_VERSION', 'MC_VERSION', 'VANILLA_VERSION', 'BEDROCK_VERSION', 'NUKKIT_VERSION', 'PMMP_VERSION', 'SERVER_VERSION'];
+  const loader = /^(FORGE|NEOFORGE|FABRIC|QUILT|LOADER|INSTALLER|BUILD|JAVA)_/;
+  return usual.find((n) => names.includes(n)) ?? names.find((n) => n.endsWith('_VERSION') && !loader.test(n)) ?? names.find((n) => n === 'VERSION');
 }
 
 /** Erkennt passende Eggs anhand ihres Namens (Vorschlag für den Admin-Bereich) */
@@ -111,6 +151,13 @@ const eggPatterns: Record<string, RegExp[]> = {
   forge: [/^forge/i, /(?<!neo)forge/i],
   neoforge: [/neoforge/i],
   quilt: [/quilt/i],
+  spigot: [/^spigot/i],
+  velocity: [/velocity/i],
+  bungeecord: [/bungee/i],
+  folia: [/folia/i],
+  bedrock: [/vanilla bedrock|bedrock dedicated|^bedrock/i, /bedrock/i],
+  pocketmine: [/pocketmine|pmmp/i],
+  nukkit: [/nukkit/i],
   python: [/discord.*py|py.*discord/i, /generic.*python|python.*generic/i, /python/i],
   nodejs: [/discord.*(js|node)/i, /generic.*node|node.*generic/i, /node\.?js/i],
 };

@@ -180,6 +180,11 @@ export const servers = sqliteTable(
     abuseReason: text('abuse_reason'),
     /** Wer den Verstoß festgestellt hat: system (Standard) oder manual = vom Team – wird dem Nutzer angezeigt */
     abuseSource: text('abuse_source', { enum: ['system', 'manual'] }),
+    /**
+     * Laufende Einrichtung der Server-Software (für Typen ohne eigenes Egg, siehe Software-Katalog): die Schritte, der
+     * Fortschritt und ggf. der Fehler. null = nichts offen. (Server der Partner-API führen das in partner_servers.)
+     */
+    softwareJob: text('software_job', { mode: 'json' }).$type<SoftwareJob | null>(),
     /** Node im Panel, auf der der Server liegt (null = noch nicht bekannt) */
     nodeId: integer('node_id'),
     /** Vom Team als Upgrade markiert: Zeitpunkt und optionaler Hinweis für den Kunden */
@@ -759,6 +764,9 @@ export interface SoftwareJob {
   /** Abfragen in Folge ohne Fortschritt und Zeitpunkt der nächsten (wachsender Abstand) */
   polls?: number;
   nextPollAt?: number;
+  /** Nach einem Fehlschlag: wann, und wie oft schon automatisch neu versucht wurde (nur Server der Website) */
+  failedAt?: number;
+  retries?: number;
   startedAt: number;
   error: string | null;
 }

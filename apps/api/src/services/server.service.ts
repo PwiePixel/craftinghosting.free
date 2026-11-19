@@ -78,7 +78,9 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     // Löschen gesperrt, solange ein Abuse-Fall offen ist
     deleteLocked: !!server.abuseAt || (server.status === 'suspended' && (server.suspensionReason === 'abuse' || server.suspensionReason === 'warning' || server.suspensionReason === 'ban')),
     suspensionReason: server.suspensionReason,
-    powerState: server.powerState,
+    // Solange die gewählte Software eingerichtet wird, gilt der Server als „wird installiert“
+    powerState: server.softwareJob && !server.softwareJob.error ? 'installing' : server.powerState,
+    softwareFailed: !!server.softwareJob?.error,
     address: server.address,
     limits: { memoryMb: server.memoryMb, cpuPercent: server.cpuPercent, diskMb: server.diskMb },
     cycle: state.cycle,

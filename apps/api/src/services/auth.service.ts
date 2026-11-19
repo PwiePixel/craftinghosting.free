@@ -32,7 +32,7 @@ import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
 import { activateSignupSubscription, subscribe } from './newsletter.service';
 import { getSettings } from './settings.service';
-import { bannedError, isBannedIdentity, lockedError } from './sanction-gate';
+import { assertIdentityFree, bannedError, isBannedIdentity, lockedError } from './sanction-gate';
 import { checkSecondFactor, type SecondFactorInput } from './two-factor.service';
 import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.service';
 import { rememberUserLocale } from './locale.service';
@@ -432,6 +432,8 @@ export async function changeEmail(user: User, email: string, meta: { ip?: string
     const msg = L('Das ist bereits deine E-Mail-Adresse.', 'This already is your email address.');
     throw Errors.badRequest('email_same', msg, { email: msg });
   }
+  // Verwarnungs-System: kein Tausch der Identität, solange eine Verwarnung oder Abuse-Meldung besteht
+  await assertIdentityFree(user);
   if (isEmailBlocked(email, (await getSettings()).blocklist)) throw emailBlocked();
   if (await isBannedIdentity({ email })) throw bannedError();
   if (await findUserByEmail(email)) throw taken();

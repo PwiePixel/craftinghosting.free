@@ -22,10 +22,12 @@ import {
   type PublicSiteDTO,
   type SiteSettings,
   type WaitlistBlock,
-  partnerServerTypes,
+  getServerType,
+  softwareTypes,
+  websiteTypesOf,
 } from '@chfree/shared';
 import { offeredVersionsCached } from './software-directory';
-import { getEggMapping } from '../config/pterodactyl.config';
+import { installMethodOf } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
 import { db } from '../db/client';
@@ -108,7 +110,7 @@ async function loadBotInvite(): Promise<void> {
  * Jobs, E-Mail-Vorlagen und Texte lesen danach automatisch die eingestellten Werte.
  */
 function applyRuntime(s: SiteSettings) {
-  applyRuntimeConfig({ rules: s.rules, brand: resolveBrand(s) });
+  applyRuntimeConfig({ rules: s.rules, brand: resolveBrand(s), software: softwareTypes(s.software) });
 }
 
 /** Hostname der Beta-Instanz (nur auf der Hauptseite bekannt) */
@@ -281,11 +283,11 @@ export async function capacityState(
  * (Admin → Pterodactyl), damit sie nie auf den Minecraft-Nodes landen.
  */
 export function serverTypeAvailable(serverType: string, settings: SiteSettings): boolean {
-  // Typen, die es nur über die Partner-API gibt, stehen auf der Website nie zur Wahl
-  if (partnerServerTypes.some((t) => t.id === serverType)) return false;
-  if (!getEggMapping(serverType, settings)) return false;
-  const kind = serverTypesOf('discord').some((t) => t.id === serverType) ? 'discord' : 'minecraft';
-  return kind === 'minecraft' || env.PTERODACTYL_MODE === 'mock' || settings.products.discord.nodeIds.length > 0;
+  const type = getServerType(serverType);
+  // Im Software-Katalog für die Website abgeschaltet?
+  if (!type || type.website === false) return false;
+  if (installMethodOf(serverType, settings) === null) return false;
+  return type.kind === 'minecraft' || env.PTERODACTYL_MODE === 'mock' || settings.products.discord.nodeIds.length > 0;
 }
 
 let publicCache: { value: PublicSiteDTO; at: number } | null = null;
@@ -320,6 +322,8 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
       epycRemaining: wl.epycRemaining,
     },
     plans: capacity.plans.map(({ kind: _kind, ...p }) => p),
+    // Minecraft-Software im Bestellformular: Name und Beschreibung aus dem Katalog, Versionen wie angeboten
+    software: websiteTypesOf('minecraft').map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: offeredVersionsCached(s, t.id), defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
     products: Object.fromEntries(
       productKinds.map((kind): [ProductKind, PublicProductDTO] => {
         const p = s.products[kind];
@@ -334,7 +338,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
             plans: p.plans
               .filter((plan) => plan.enabled)
               .map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, ...capacity.plans.find((a) => a.id === plan.id)! })),
-            serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: offeredVersionsCached(s, t.id) })),
+            serverTypes: websiteTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: offeredVersionsCached(s, t.id) })),
           },
         ];
       }),

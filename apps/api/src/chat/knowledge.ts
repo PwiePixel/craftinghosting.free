@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describeServerLimits, formatMb, freeHostingConfig, localePath, productKinds, serverTypesOf, type SiteSettings } from '@chfree/shared';
+import { describeServerLimits, formatMb, freeHostingConfig, localePath, productKinds, serverTypesOf, websiteTypesOf, type SiteSettings } from '@chfree/shared';
 import { env, panelPublicUrl } from '../env';
 import { getDiscordState } from '../discord/store';
 import { resolveBrand } from '../services/settings.service';
@@ -48,7 +48,7 @@ export async function currentFacts(s: SiteSettings): Promise<string> {
       continue;
     }
     lines.push(`- ${label} – Pakete: ${p.plans.filter((x) => x.enabled).map((x) => `${x.name} (${formatMb(x.memoryMb, 'de')} RAM, ${x.cpuLabel.de}, ${formatMb(x.diskMb, 'de')} Speicher, ${x.backups} Backup-Slots, ${x.databases} Datenbank-Slots, ${x.allocations} ${x.allocations === 1 ? 'Port' : 'Ports'})`).join('; ')}.`);
-    lines.push(`  Auswahl: ${serverTypesOf(kind).map((t) => t.name).join(', ')}.`);
+    lines.push(`  Auswahl: ${websiteTypesOf(kind).map((t) => t.name).join(', ')}.`);
   }
   lines.push(`- ${describeServerLimits(s.registration.limits, 'de', productKinds.filter((k) => s.products[k].enabled))}`);
   lines.push(`- Registrierung: ${s.registration.mode === 'open' ? 'offen' : s.registration.mode === 'preregistration' ? 'Warteliste (Early Access) – Server werden nach und nach freigeschaltet' : 'derzeit geschlossen'}.`);

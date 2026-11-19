@@ -10,6 +10,7 @@ import { defaultBrand, defaultRules, DISPOSABLE_EMAIL_DOMAINS, serverTypesOf, ty
 import { Button } from '@/components/ui/button';
 import { LogoSettings } from './admin-logo';
 import { Labeled, NumberInput, Section, Toggle } from './admin-settings';
+import { SoftwareCatalog } from './admin-software';
 
 type Update = (fn: (prev: SiteSettings) => SiteSettings) => void;
 
@@ -140,12 +141,16 @@ export function MoreSettings({ s, update }: { s: SiteSettings; update: Update })
         </Button>
       </Section>
 
+      <SoftwareCatalog s={s} update={update} />
+
       <Section
         title="Minecraft-Versionen"
         description="Welche Versionen im Bestellformular wählbar sind – je Servertyp, eine Version pro Zeile (oder mit Komma getrennt). „latest“ steht für die neueste Version des Eggs. Die erste Zeile ist die Vorauswahl, wenn die Standardversion nicht in der Liste steht. Leer = Standardliste."
       >
         <div className="grid gap-5 md:grid-cols-2">
-          {serverTypesOf('minecraft').map((t) => {
+          {s.software.map((item) => {
+            // Fest hinterlegte Liste (nur als Rückfall) – eigene Einträge haben keine
+            const t = { id: item.id, name: item.name, versions: serverTypesOf('minecraft').find((x) => x.id === item.id)?.versions ?? ['latest'] };
             const custom = s.versions[t.id];
             return (
               <Labeled key={t.id} label={t.name} hint={custom ? `${custom.length} eigene Versionen – genau diese werden angeboten` : 'Automatisch: alle veröffentlichten Versionen (die Liste hier ist nur der Rückfall, falls das Verzeichnis nicht erreichbar ist)'}>

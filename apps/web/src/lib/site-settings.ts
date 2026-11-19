@@ -6,7 +6,7 @@
  * überall sichtbar sein. Ein kurzer Zwischenspeicher im Prozess hält die Last gering.
  */
 import { connection } from 'next/server';
-import { applyRuntimeConfig, defaultBrand, defaultServerLimits, defaultSiteSettings, freeHostingConfig, serverTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
+import { applyRuntimeConfig, defaultBrand, defaultServerLimits, defaultSiteSettings, freeHostingConfig, websiteTypesOf, type ProductKind, type PublicProductDTO, type PublicSiteDTO } from '@chfree/shared';
 
 import { site } from './site';
 
@@ -27,7 +27,7 @@ function fallbackProduct(kind: ProductKind): PublicProductDTO {
     remaining: p.capacity,
     available: true,
     plans: p.plans.map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, kind, used: 0, remaining: plan.capacity, available: true })),
-    serverTypes: serverTypesOf(kind).map((t) => ({ id: t.id, available: true, versions: t.versions })),
+    serverTypes: websiteTypesOf(kind).map((t) => ({ id: t.id, available: true, versions: t.versions })),
   };
 }
 
@@ -37,6 +37,7 @@ export const fallbackSite: PublicSiteDTO = {
   waitlist: { total: null, epycSlots: 0, epycUsed: 0, epycRemaining: 0 },
   plans: [],
   products: { minecraft: fallbackProduct('minecraft'), discord: fallbackProduct('discord') },
+  software: websiteTypesOf('minecraft').map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: t.versions, defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
   hardware: { ...defaults.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
   donate: { enabled: false, url: null },
   chat: null,
@@ -65,7 +66,8 @@ export const fallbackSite: PublicSiteDTO = {
  * Texte (getDict) und `site` aus lib/site lesen danach die eingestellten Werte.
  */
 function applyRuntime(value: PublicSiteDTO) {
-  applyRuntimeConfig({ rules: value.rules, brand: value.brand });
+  // Software-Katalog: Im Bestellformular stehen genau die Einträge, die im Admin-Bereich für die Website eingeschaltet sind
+  applyRuntimeConfig({ rules: value.rules, brand: value.brand, software: value.software ?? undefined });
   Object.assign(site, value.brand);
 }
 

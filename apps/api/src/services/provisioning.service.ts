@@ -10,7 +10,7 @@
 import { partnerNodeIds } from './partner-nodes';
 import { and, eq, inArray } from 'drizzle-orm';
 import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
-import { BASE_SERVER_TYPE, getEggMapping, pterodactylConfig, sharesBaseEgg } from '../config/pterodactyl.config';
+import { baseEggMapping, getEggMapping, installMethodOf, pterodactylConfig, versionVariableIn } from '../config/pterodactyl.config';
 import { env, panelPublicUrl } from '../env';
 import { affectedRows, db } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
@@ -22,6 +22,8 @@ import { notify } from './notification.service';
 import { getUserLocale } from './locale.service';
 import { desiredPanelDescription } from './panel';
 import { getSettings } from './settings.service';
+import { pendingSoftwareJob } from './software-directory';
+import { inTimeout } from './sanction-gate';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
 
@@ -120,7 +122,22 @@ export async function startupFor(serverType: string, version: string, settings: 
   const environment: Record<string, string> = {};
   for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
   Object.assign(environment, egg.environment ?? {});
-  if (egg.versionVariable) environment[egg.versionVariable] = version;
+  const variable = versionVariableIn(egg.versionVariable, eggInfo.variables);
+  if (variable) environment[variable] = version;
+  return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, dockerImages: eggInfo.dockerImages ?? {}, startup: eggInfo.startup, environment };
+}
+
+/**
+ * Start-Konfiguration der Grundlage (für Software, die über das Verzeichnis eingerichtet wird): Egg, Images,
+ * Startbefehl und die Standardwerte der Variablen – ohne Versionsangabe (die Software bringt ihre eigene Datei mit).
+ */
+export async function baseStartup(settings: SiteSettings): Promise<{ eggId: number; dockerImage: string; dockerImages: Record<string, string>; startup: string; environment: Record<string, string> }> {
+  const egg = baseEggMapping(settings);
+  if (!egg) throw new Error('Für die Software-Einrichtung ist keine Grundlage (Egg) eingerichtet (Admin → Einstellungen → Server-Software)');
+  const eggInfo = await getEggCached(egg.nestId, egg.eggId);
+  const environment: Record<string, string> = {};
+  for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
+  Object.assign(environment, egg.environment ?? {});
   return { eggId: egg.eggId, dockerImage: egg.dockerImage || eggInfo.dockerImage, dockerImages: eggInfo.dockerImages ?? {}, startup: eggInfo.startup, environment };
 }
 
@@ -203,6 +220,8 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
 
   const [user] = await db.select().from(users).where(eq(users.id, server.userId)).limit(1);
   if (!user?.pteroUserId) return 'skipped'; // Panel-Konto fehlt noch
+  // Verwarnungs-System: Während einer Auszeit oder bei gesperrtem Konto wird kein Server eingerichtet (der Job versucht es danach erneut)
+  if (user.status !== 'active' || inTimeout(user)) return 'skipped';
 
   // Versuch claimen (optimistische Sperre)
   const claim = await db
@@ -221,10 +240,10 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     const settings = await getSettings();
     const plan = findPlan(settings, server.planId);
     const type = getServerType(server.serverType);
-    // Partner-Server: Typen ohne eigenes Egg (bzw. mit dem Egg des Grundtyps) werden mit dem Grund-Egg in dessen
+    // Software ohne eigenes Egg (laut Software-Katalog): Der Server wird mit dem Egg des Grundtyps in dessen
     // Standardversion angelegt; die gewünschte Software richtet danach der Software-Job ein.
-    const viaDirectory = !!server.partnerId && sharesBaseEgg(server.serverType, settings);
-    const egg = viaDirectory ? getEggMapping(BASE_SERVER_TYPE, settings) : getEggMapping(server.serverType, settings);
+    const viaDirectory = installMethodOf(server.serverType, settings) === 'directory';
+    const egg = viaDirectory ? baseEggMapping(settings) : getEggMapping(server.serverType, settings);
     if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
 
     const ptero = pterodactyl();
@@ -238,7 +257,8 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
       for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
       Object.assign(environment, egg.environment ?? {});
       // Minecraft: Version setzen · Discord-Bots: Standardwerte des Eggs (Startdatei, requirements.txt …)
-      if (egg.versionVariable && !viaDirectory) environment[egg.versionVariable] = server.version;
+      const variable = viaDirectory ? undefined : versionVariableIn(egg.versionVariable, eggInfo.variables);
+      if (variable) environment[variable] = server.version;
       const allocationId = await pickAllocation(server, settings);
 
       pServer = await ptero.createServer({
@@ -270,6 +290,9 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         pteroUuid: pServer.uuid,
         address: formatAddress(pServer),
         provisioningError: null,
+        // Server der Website mit Software ohne eigenes Egg: Nach der Grundinstallation richtet der Software-Job sie ein
+        // (Server der Partner-API haben ihren Auftrag schon beim Erstellen bekommen)
+        ...(viaDirectory && !server.partnerId ? { softwareJob: pendingSoftwareJob(server.serverType, server.version, true) } : {}),
         panelDescription: pServer.description || description,
       })
       .where(and(eq(servers.id, server.id), inArray(servers.status, ['provisioning', 'provisioning_failed'])));
@@ -335,6 +358,8 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
 export async function runPostProvision(server: Server): Promise<boolean> {
   if (server.postProvisionDone || !server.pteroIdentifier || server.status !== 'active') return false;
   if (server.powerState === 'installing' || server.powerState === 'unknown') return false;
+  // „Bereit“ ist der Server erst, wenn auch die gewählte Software eingerichtet ist
+  if (server.softwareJob) return false;
   let scheduleId: number | null = server.backupScheduleId;
   const plan = findPlan(await getSettings(), server.planId);
   const bot = server.kind === 'discord';

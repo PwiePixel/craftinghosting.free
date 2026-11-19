@@ -13,7 +13,7 @@
  */
 import { randomBytes, randomInt } from 'node:crypto';
 import { and, count, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
-import { NO_CYCLE_END, allMinecraftTypesForPartners, findPlan, freeHostingConfig, getServerType, versionsFor, type AdminPartnerDTO, type AdminPartnerInput } from '@chfree/shared';
+import { NO_CYCLE_END, serverTypesOf, findPlan, freeHostingConfig, getServerType, versionsFor, type AdminPartnerDTO, type AdminPartnerInput } from '@chfree/shared';
 import { affectedRows, db, isUniqueViolation, writeTx } from '../db/client';
 import { partnerPlayers, partnerServers, partners, servers, users, type Partner, type PartnerPlayer, type PartnerServer, type Server } from '../db/schema';
 import { env } from '../env';
@@ -407,7 +407,7 @@ export async function partnerInfo(partner: Partner) {
     partner: { id: partner.id, name: partner.name },
     plan: plan ? { id: plan.id, name: plan.name, memoryMb: plan.memoryMb, cpuPercent: plan.cpuPercent, diskMb: plan.diskMb } : null,
     serverTypes: await Promise.all(
-      allMinecraftTypesForPartners()
+      serverTypesOf('minecraft')
         .filter((t) => partnerTypeAvailable(t.id, settings))
         .map(async (t) => ({ id: t.id, name: t.name, versions: await offeredVersions(settings, t.id) })),
     ),

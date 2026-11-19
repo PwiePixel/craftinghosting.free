@@ -3,7 +3,7 @@
  * (Stunden, Tage, RAM …) werden eingesetzt und bleiben so automatisch aktuell.
  * Die englische Fassung (en.ts) muss dieselbe Struktur haben – TypeScript prüft das.
  */
-import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText } from '@chfree/shared';
+import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText, builtinServerTypes } from '@chfree/shared';
 
 /** Werte aus dem Admin-Bereich (Pakete, Standorte, Hardware), die in Texten vorkommen */
 export interface FaqContext {
@@ -27,7 +27,8 @@ export interface FaqContext {
  */
 export function buildDe() {
 const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
-const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
+// Feste Aufzählung aus dem Auslieferungszustand (welche Software angeboten wird, stellt der Admin-Bereich ein)
+const minecraftTypes = builtinServerTypes.filter((t) => t.kind === 'minecraft' && t.website !== false);
 const botTypes = serverTypes.filter((t) => t.kind === 'discord');
 
 const hasRest = cycle.reactivationCooldownMinutes > 0;
@@ -550,6 +551,7 @@ return {
     restAfter: ' reaktivieren – wir schicken dir dann eine E-Mail.',
     deleteAt: (dt: string) => `Ohne Reaktivierung wird der Server am ${dt} automatisch gelöscht.`,
     lockedText: 'Dieser Server wurde vom Team gesperrt. Bitte wende dich an den Support.',
+    softwareFailed: 'Die gewählte Server-Software konnte noch nicht eingerichtet werden. Wir versuchen es automatisch erneut – du musst nichts tun. Dauert es länger, öffne bitte ein Ticket.',
     lockedTextWarning: 'Dieser Server ist wegen einer Verwarnung vorübergehend offline. Wie lange noch, steht oben unter „Verwarnungen“ – danach wird er automatisch wieder freigegeben.',
     lockedTextBan: 'Dieser Server ist gesperrt, weil dein Konto dauerhaft gesperrt wurde.',
     abuseBadge: 'Abuse',
@@ -674,7 +676,7 @@ return {
       },
       {
         q: 'Welche Minecraft-Versionen werden unterstützt?',
-        a: `Du wählst zwischen ${minecraftTypes.map((t) => t.name).join(', ')} – von aktuellen Versionen bis zu Klassikern wie 1.8.8, 1.12.2 und 1.16.5. Version und Servertyp kannst du später im Panel über die Startparameter anpassen.`,
+        a: `Du wählst unter anderem zwischen ${minecraftTypes.map((t) => t.name).join(', ')} – von aktuellen Versionen bis zu Klassikern wie 1.8.8, 1.12.2 und 1.16.5. Version und Servertyp kannst du später im Panel über die Startparameter anpassen.`,
       },
       {
         q: 'Wie viel RAM bekomme ich?',
@@ -950,7 +952,7 @@ return {
       failed: { ok: false, title: 'Verknüpfung fehlgeschlagen', text: 'Discord hat die Anfrage nicht bestätigt. Bitte versuche es erneut.' },
       email_taken: { ok: false, title: 'Diese E-Mail-Adresse gehört schon zu einem Konto', text: 'Für diese E-Mail-Adresse gibt es bereits ein Konto. Melde dich dort an (mit Discord oder mit Code per E-Mail) – oder gib eine andere E-Mail-Adresse an.' },
       no_account: { ok: false, title: 'Noch kein Konto mit diesem Discord-Konto', text: 'Zu diesem Discord-Konto gibt es bei uns noch kein Konto. Erstelle zuerst einen Server – dabei registrierst du dich mit Discord.' },
-      locked: { ok: false, title: 'Konto gesperrt', text: 'Dieses Konto ist gesperrt. Bitte wende dich an den Support.' },
+      locked: { ok: false, title: 'Konto gesperrt', text: 'Dieses Konto bzw. dieses Discord-Konto ist bei uns gesperrt (z. B. dauerhaft wegen wiederholter Regelverstöße) – oder zu deinem Konto besteht eine Verwarnung, solange lässt sich die Verknüpfung nicht ändern. Bei Fragen öffne bitte ein Ticket.' },
     } as Record<string, { ok: boolean; title: string; text: string }>,
   },
   beta: {

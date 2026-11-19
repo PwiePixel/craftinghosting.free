@@ -41,6 +41,7 @@ import { createSession } from '../services/session.service';
 import { audit } from '../services/audit.service';
 import { activatePendingServers } from '../services/server.service';
 import { getSettings, invalidatePublicSite } from '../services/settings.service';
+import { assertIdentityFree } from '../services/sanction-gate';
 
 const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { max, timeWindow } } });
 /** Server in diesen Zuständen hängen an der Discord-Mitgliedschaft */
@@ -219,6 +220,8 @@ export async function discordRoutes(app: FastifyInstance) {
         );
       }
     }
+    // Verwarnungs-System: kein Lösen der Verknüpfung, solange eine Verwarnung oder Abuse-Meldung besteht
+    await assertIdentityFree(user);
     await unlinkDiscordAccount(user, request.ip);
     return { ok: true };
   });

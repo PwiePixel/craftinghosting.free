@@ -16,7 +16,7 @@
  *  Sie durchlaufen die Schritte 2–5 nur, wenn das Bot-Fair-Use-System ihren Platz wegen Inaktivität freigibt
  *  (status → expiring); reaktivieren geht dann sofort.
  */
-import { and, eq, gt, lt, lte, ne } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, lt, lte, ne, or } from 'drizzle-orm';
 import {
   NO_CYCLE_END,
   capitalize,
@@ -29,7 +29,7 @@ import {
   type Locale,
 } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
-import { servers, type Server } from '../db/schema';
+import { servers, users, type Server } from '../db/schema';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from '../services/audit.service';
 import { notify } from '../services/notification.service';
@@ -283,6 +283,12 @@ export const cycleJob: JobDefinition = {
       }
     });
 
+    // Verwarnungs-System: Server mit Abuse-Markierung und Server von Konten in einer Auszeit bzw. mit Ban werden hier
+    // weder angeschrieben noch gelöscht. (Gebannte Konten: Löschung nach der eigenen Frist; sonst läuft die Frist
+    // weiter, sobald die Markierung aufgehoben bzw. die Auszeit vorbei ist – siehe restoreReactivationWindow.)
+    const sanctioned = new Set((await db.select({ id: users.id }).from(users).where(or(isNotNull(users.bannedAt), gt(users.suspendedUntil, now)))).map((u) => u.id));
+    const held = (server: Server) => !!server.abuseAt || sanctioned.has(server.userId);
+
     // 4) Ruhezeit vorbei → einmalig Bescheid geben (E-Mail). Nur kürzlich abgelaufene Ruhezeiten,
     //    damit z. B. nach einem Update keine alten Server nachträglich angeschrieben werden.
     if (hasRest) {
@@ -298,6 +304,7 @@ export const cycleJob: JobDefinition = {
           ),
         );
       for (const server of ready) {
+        if (held(server)) continue;
         // Discord-Bots haben keine Ruhezeit – sie sind sofort reaktivierbar
         if (isBot(server)) continue;
         const created = await notify({
@@ -325,6 +332,7 @@ export const cycleJob: JobDefinition = {
         .where(and(eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired')));
       const allowed = await deletionsAllowed(now);
       for (const server of expired) {
+        if (held(server)) continue;
         const at = deleteAtOf(server);
         if (!at) continue;
         const msLeft = at.getTime() - now.getTime();

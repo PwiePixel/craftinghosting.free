@@ -263,16 +263,18 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
   }
 
   /** Aktion im Verwarnungs-System ausführen und die Liste neu laden */
-  async function warnAction(key: string, path: string, body: unknown, done: string, ask?: string) {
-    if (ask && !window.confirm(ask)) return;
+  async function warnAction(key: string, path: string, body: unknown, done: string, ask?: string): Promise<boolean> {
+    if (ask && !window.confirm(ask)) return false;
     setWarnBusy(key);
     setWarnMessage(null);
     try {
       setData((await api<{ abuse: AdminAbuseDTO }>(path, { body })).abuse);
       setWarnMessage({ ok: true, text: done });
       router.refresh();
+      return true;
     } catch (err) {
       setWarnMessage({ ok: false, text: errorText(err) });
+      return false;
     } finally {
       setWarnBusy(null);
     }
@@ -425,7 +427,7 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
           <Labeled label="Verwarnung ohne Abuse-Mail">
             <input className="input" type="email" placeholder="E-Mail-Adresse des Nutzers" value={manual.email} onChange={(e) => setManual({ ...manual, email: e.target.value })} />
           </Labeled>
-          <Labeled label="Grund (steht in der Nachricht an den Nutzer)">
+          <Labeled label="Grund (steht so in der Nachricht an den Nutzer – auch bei englischsprachigen)">
             <input className="input" maxLength={500} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} />
           </Labeled>
           <Button
@@ -433,7 +435,7 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
             loading={warnBusy === 'manual'}
             disabled={!validEmail(manual.email) || !manual.note.trim()}
             onClick={() =>
-              void warnAction('manual', '/admin/warnings', { email: manual.email.trim(), note: { de: manual.note.trim(), en: '' } }, 'Verwarnung eingetragen – der Nutzer wird benachrichtigt.', `${manual.email} verwarnen? Der Nutzer bekommt eine Nachricht; je nach Stand folgt eine Auszeit oder der Ban.`).then(() => setManual({ email: '', note: '' }))
+              void warnAction('manual', '/admin/warnings', { email: manual.email.trim(), note: { de: manual.note.trim(), en: '' } }, 'Verwarnung eingetragen – der Nutzer wird benachrichtigt.', `${manual.email} verwarnen? Der Nutzer bekommt eine Nachricht; je nach Stand folgt eine Auszeit oder der Ban.`).then((ok) => ok && setManual({ email: '', note: '' }))
             }
           >
             Verwarnen

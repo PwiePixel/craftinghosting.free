@@ -1,7 +1,7 @@
 /**
  * Datenobjekte, die die API an das Frontend ausliefert.
  */
-import type { PlanConfig, ProductKind } from './config/freehosting.config';
+import type { PlanConfig, ProductKind, ServerTypeConfig, SoftwareInstall } from './config/freehosting.config';
 import type { ChatSettings } from './chat-settings';
 import type { DiscordSettings } from './discord-settings';
 import type { ServerLimits } from './server-limits';
@@ -90,6 +90,8 @@ export interface ServerDTO {
   abuse: { at: string; reason: Localized; /** Festgestellt von unserem System (automatisch) oder von unserem Team */ source: 'system' | 'manual' } | null;
   /** Der Nutzer kann den Server gerade nicht löschen (offene Abuse-Meldung bzw. Sperre wegen einer Verwarnung) */
   deleteLocked: boolean;
+  /** Die gewählte Server-Software konnte (noch) nicht eingerichtet werden – das System versucht es erneut */
+  softwareFailed: boolean;
   /** Minecraft-Server oder Discord-Bot */
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
@@ -333,6 +335,8 @@ export interface AdminServerDTO {
   pendingReason: PendingReason | null;
   /** Abuse-Markierung (Zeitpunkt und Grund) – null = keine */
   abuse: { at: string; reason: string } | null;
+  /** Einrichtung der Server-Software: läuft noch bzw. ist fehlgeschlagen (null = nichts offen) */
+  software: { status: 'installing' | 'failed'; error: string | null; retries: number } | null;
   provisioningAttempts: number;
   provisioningError: string | null;
   panelDescription: string | null;
@@ -549,6 +553,16 @@ export interface SiteSettings {
   rules: RuleSettings;
   /** Auswählbare Versionen je Minecraft-Servertyp (fehlt ein Typ, gilt die Standardliste) */
   versions: Record<string, string[]>;
+  /**
+   * Software-Katalog für Minecraft: was beim Erstellen zur Wahl steht (Website bzw. Partner-API) und wie es installiert
+   * wird. Enthält immer alle fest hinterlegten Einträge und dahinter die vom Admin angelegten.
+   */
+  software: SoftwareItem[];
+  /**
+   * Grundlage für alles, was über das Software-Verzeichnis eingerichtet wird: Mit diesem Egg legt das Panel den Server
+   * an, danach kommt die gewählte Software darauf. null = das Egg, das dem Typ Paper zugeordnet ist.
+   */
+  softwareBase: EggRef | null;
   /** Weitere Domains, unter denen die Website erreichbar ist (HTTPS wird automatisch eingerichtet) */
   domains: { extra: DomainSetting[] };
   newsletter: NewsletterSettings;
@@ -763,6 +777,27 @@ export interface PublicPlanDTO extends PlanConfig, PlanAvailabilityDTO {
 }
 
 /** Produkt mit Paketen und Belegung für die Website */
+/** Ein Eintrag im Software-Katalog (Admin → Server-Software) */
+export interface SoftwareItem {
+  id: string;
+  name: string;
+  description: Localized;
+  edition: 'java' | 'bedrock';
+  /** Bezeichnung im Software-Verzeichnis (MCJars), z. B. FABRIC – leer = nur über ein eigenes Egg */
+  directory: string;
+  install: SoftwareInstall;
+  /** Im Bestellformular der Website wählbar */
+  website: boolean;
+  /** Über die Partner-API wählbar (nur Java Edition) */
+  partner: boolean;
+  /** Variable des Eggs für die Version (leer = automatisch erkennen) */
+  versionVariable: string;
+  /** Vom Admin angelegt (lässt sich umbenennen und löschen) */
+  custom: boolean;
+  /** Nur über ein eigenes Egg installierbar (Bedrock, Proxys, alles ohne Eintrag bei MCJars) */
+  eggOnly: boolean;
+}
+
 export interface PublicProductDTO {
   kind: ProductKind;
   enabled: boolean;
@@ -776,6 +811,9 @@ export interface PublicProductDTO {
   /** Servertypen: ob ein Egg dafür eingerichtet ist und welche Versionen wählbar sind */
   serverTypes: { id: string; available: boolean; versions: string[] }[];
 }
+
+/** Software im Bestellformular: Name und Beschreibung kommen aus dem Katalog des Admin-Bereichs */
+export type PublicSoftwareDTO = Pick<ServerTypeConfig, 'id' | 'kind' | 'name' | 'description' | 'versions' | 'defaultVersion' | 'recommended' | 'edition'>;
 
 export interface WaitlistInfo {
   /** Platz in der Warteliste (1 = erster) */
@@ -791,6 +829,8 @@ export interface PublicSiteDTO {
   /** Belegung aller Pakete (beide Produkte) */
   plans: PlanAvailabilityDTO[];
   products: Record<ProductKind, PublicProductDTO>;
+  /** Minecraft-Software, die im Bestellformular zur Wahl steht (aus dem Katalog des Admin-Bereichs) */
+  software: PublicSoftwareDTO[];
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
   /** Support-Chat: Anzeige auf der Website (null = ausgeschaltet) */

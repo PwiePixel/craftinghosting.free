@@ -10,7 +10,7 @@
  * Admins und die Konten von API-Partnern werden nie automatisch gesperrt (dort zählt die Verwarnung nur mit).
  */
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or } from 'drizzle-orm';
-import { sanctionFor, warningRules, type AdminWarningsDTO, type Localized, type WarningSanction, type WarningStatusDTO } from '@chfree/shared';
+import { cycleRulesFor, freeHostingConfig, sanctionFor, warningRules, type AdminWarningsDTO, type Localized, type WarningSanction, type WarningStatusDTO } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { bannedIdentities, partners, servers, userWarnings, users, warningCarry, type Server, type User, type UserWarning } from '../db/schema';
 import { uuid } from '../lib/crypto';
@@ -21,7 +21,8 @@ import { ABUSE_REASONS } from './abuse-reasons';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { trySyncPanelDescription } from './panel';
-import { discordHash, emailHash, fmtSanctionDate, inTimeout } from './sanction-gate';
+import { closeOpenSession } from './power-state';
+import { discordHash, emailHashes, fmtSanctionDate, inTimeout } from './sanction-gate';
 import { hardDeleteServer } from './server.service';
 import { destroyAllSessions } from './session.service';
 import { invalidatePublicSite } from './settings.service';
@@ -51,7 +52,7 @@ export async function carryWarnings(user: Pick<User, 'id' | 'email' | 'discordId
   for (const w of rows) {
     const groupId = uuid();
     const base = { groupId, reason: w.reason, serverName: w.serverName, warnedAt: w.createdAt, expiresAt: w.expiresAt };
-    await db.insert(warningCarry).values({ id: uuid(), kind: 'email', hash: emailHash(user.email), ...base });
+    for (const hash of emailHashes(user.email)) await db.insert(warningCarry).values({ id: uuid(), kind: 'email', hash, ...base });
     if (user.discordId) await db.insert(warningCarry).values({ id: uuid(), kind: 'discord', hash: discordHash(user.discordId), ...base });
   }
   return rows.length;
@@ -59,7 +60,7 @@ export async function carryWarnings(user: Pick<User, 'id' | 'email' | 'discordId
 
 /** Aufgehobene Verwarnungen auf dieses Konto übertragen (gleiche E-Mail-Adresse oder gleiches Discord-Konto) */
 async function restoreCarried(user: Pick<User, 'id' | 'email' | 'discordId'>, now = new Date()): Promise<void> {
-  const match = or(and(eq(warningCarry.kind, 'email'), eq(warningCarry.hash, emailHash(user.email))), ...(user.discordId ? [and(eq(warningCarry.kind, 'discord'), eq(warningCarry.hash, discordHash(user.discordId)))] : []));
+  const match = or(and(eq(warningCarry.kind, 'email'), inArray(warningCarry.hash, emailHashes(user.email))), ...(user.discordId ? [and(eq(warningCarry.kind, 'discord'), eq(warningCarry.hash, discordHash(user.discordId)))] : []));
   const rows = await db.select().from(warningCarry).where(match).limit(50);
   if (rows.length === 0) return;
   const groups = new Map(rows.map((r) => [r.groupId, r]));
@@ -67,6 +68,10 @@ async function restoreCarried(user: Pick<User, 'id' | 'email' | 'discordId'>, no
     // Erst entfernen, dann eintragen: Zwei gleichzeitige Aufrufe übertragen dieselbe Verwarnung so nie doppelt
     const removed = await db.delete(warningCarry).where(eq(warningCarry.groupId, groupId));
     if (affectedRows(removed) === 0 || r.expiresAt <= now) continue;
+    // Schutz gegen Doppelzählung: Trägt das Konto genau diese Verwarnung schon (z. B. weil das Löschen des Kontos
+    // abgebrochen wurde), wird sie nicht noch einmal eingetragen
+    const [same] = await db.select({ id: userWarnings.id }).from(userWarnings).where(and(eq(userWarnings.userId, user.id), eq(userWarnings.createdAt, r.warnedAt), eq(userWarnings.reason, r.reason))).limit(1);
+    if (same) continue;
     await db.insert(userWarnings).values({ id: uuid(), userId: user.id, serverId: null, serverName: r.serverName, reason: r.reason, note: 'Übernommen aus einem früheren, gelöschten Konto', createdBy: 'system', createdAt: r.warnedAt, expiresAt: r.expiresAt });
   }
 }
@@ -117,10 +122,13 @@ async function suspendServers(userId: string, reason: 'warning' | 'ban', now: Da
   for (const server of owned) {
     const res = await db
       .update(servers)
-      .set({ status: 'suspended', suspensionReason: reason, suspendedAt: now, expiringSince: null })
+      .set({ status: 'suspended', suspensionReason: reason, suspendedAt: now, expiringSince: null, powerState: 'offline', powerStateAt: now })
       .where(and(eq(servers.id, server.id), inArray(servers.status, ['active', 'expiring'])));
     if (affectedRows(res) !== 1) continue;
     n++;
+    // Das Panel stoppt den Server beim Sperren: die laufende Laufzeit-Sitzung jetzt schließen – sonst zählten die
+    // 48 Stunden nach der Freigabe als Laufzeit am Stück
+    await closeOpenSession(server.id, now, 'detected').catch(() => {});
     // Schlägt das hier fehl, zieht der Power-Abgleich die Sperre im Panel nach
     if (server.pteroServerId) await pterodactyl().suspendServer(server.pteroServerId).catch(() => {});
     await trySyncPanelDescription(server.id).catch(() => {});
@@ -152,6 +160,26 @@ async function releaseServers(userId: string, reason: 'warning' | 'ban', now: Da
   return n;
 }
 
+/**
+ * Abgelaufene Server (wegen des 30-Tage-Zyklus gesperrt) konnten während einer Auszeit, eines Bans oder mit
+ * Abuse-Markierung nicht reaktiviert werden. Danach beginnt die Frist bis zur automatischen Löschung neu:
+ * sofort reaktivierbar, falls die Ruhezeit schon vorbei war, und die volle Löschfrist ab jetzt.
+ */
+export async function restoreReactivationWindow(where: { userId?: string; serverId?: string }, now = new Date()): Promise<void> {
+  const cond = where.serverId ? eq(servers.id, where.serverId) : eq(servers.userId, where.userId ?? '');
+  const rows = await db
+    .select()
+    .from(servers)
+    .where(and(cond, eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired')));
+  for (const server of rows) {
+    const rest = cycleRulesFor(server.kind, freeHostingConfig.cycle).reactivationCooldownMinutes * 60_000;
+    const earliest = new Date(now.getTime() - rest);
+    if (server.suspendedAt && server.suspendedAt >= earliest) continue; // Ruhezeit läuft ohnehin noch
+    await db.update(servers).set({ suspendedAt: earliest }).where(and(eq(servers.id, server.id), eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'cycle_expired')));
+    await trySyncPanelDescription(server.id).catch(() => {});
+  }
+}
+
 /* ------------------------------------------------------------ Sanktionen */
 
 export interface SanctionResult {
@@ -174,7 +202,7 @@ async function startBan(user: User, now: Date): Promise<Date> {
   const deleteAt = new Date(now.getTime() + warningRules.banDeleteDays * DAY);
   await db.update(users).set({ status: 'locked', bannedAt: now, banDeleteAt: deleteAt, suspendedUntil: null }).where(eq(users.id, user.id));
   await destroyAllSessions(user.id);
-  const identities = [{ kind: 'email' as const, hash: emailHash(user.email) }, ...(user.discordId ? [{ kind: 'discord' as const, hash: discordHash(user.discordId) }] : [])];
+  const identities = [...emailHashes(user.email).map((hash) => ({ kind: 'email' as const, hash })), ...(user.discordId ? [{ kind: 'discord' as const, hash: discordHash(user.discordId) }] : [])];
   for (const identity of identities) await db.insert(bannedIdentities).values({ id: uuid(), ...identity, userId: user.id }).onConflictDoNothing();
   const n = await suspendServers(user.id, 'ban', now);
   invalidatePublicSite();
@@ -281,6 +309,7 @@ export async function endTimeout(userId: string, by: string | null, now = new Da
   const res = await db.update(users).set({ suspendedUntil: null }).where(and(eq(users.id, userId), isNotNull(users.suspendedUntil)));
   if (affectedRows(res) !== 1) return 0;
   const n = await releaseServers(userId, 'warning', now);
+  await restoreReactivationWindow({ userId }, now);
   await audit({ userId, actor: by ? 'admin' : 'system', action: 'warning.timeout_ended', message: by ? `Auszeit vorzeitig beendet (durch ${by}) – ${n} Server entsperrt` : `Auszeit abgelaufen – ${n} Server entsperrt` });
   await notify({
     userId,
@@ -304,6 +333,7 @@ export async function liftBan(admin: User, userId: string, ip?: string): Promise
   await db.update(users).set({ status: 'active', bannedAt: null, banDeleteAt: null }).where(eq(users.id, userId));
   await db.delete(bannedIdentities).where(eq(bannedIdentities.userId, userId));
   const n = await releaseServers(userId, 'ban', now);
+  await restoreReactivationWindow({ userId }, now);
   invalidatePublicSite();
   await audit({ userId, actor: 'admin', action: 'admin.ban_lifted', message: `Ban von ${user.email} aufgehoben – ${n} Server entsperrt (durch ${admin.email})`, ip });
   await notify({

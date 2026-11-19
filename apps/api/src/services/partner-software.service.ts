@@ -15,25 +15,25 @@ import { getServerType } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
-import { BASE_SERVER_TYPE, getEggMapping, sharesBaseEgg } from '../config/pterodactyl.config';
+import { installMethodOf } from '../config/pterodactyl.config';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
-import { startupFor } from './provisioning.service';
-import { DIRECTORY_TYPES, softwareDirectory } from './software-directory';
+import { baseStartup } from './provisioning.service';
+import { pendingSoftwareJob, softwareDirectory } from './software-directory';
 import { getSettings } from './settings.service';
 import type { SiteSettings } from '@chfree/shared';
 
 /** Wird dieser Typ über das Verzeichnis eingerichtet (statt über ein eigenes Egg)? */
-export const installsViaDirectory = (serverType: string, settings: Pick<SiteSettings, 'products'>): boolean => !!DIRECTORY_TYPES[serverType] && sharesBaseEgg(serverType, settings);
+export const installsViaDirectory = (serverType: string, settings: Pick<SiteSettings, 'products' | 'softwareBase'>): boolean => installMethodOf(serverType, settings) === 'directory';
 
-/** Steht der Typ für Partner zur Verfügung? (eigenes Egg – oder Einrichtung über das Verzeichnis) */
+/** Steht der Typ für Partner zur Verfügung? (im Software-Katalog freigegeben, Java Edition, installierbar) */
 export function partnerTypeAvailable(serverType: string, settings: SiteSettings): boolean {
   const type = getServerType(serverType);
-  if (!type || type.kind !== 'minecraft') return false;
-  return installsViaDirectory(serverType, settings) || !!getEggMapping(serverType, settings);
+  if (!type || type.kind !== 'minecraft' || !type.partner || type.edition === 'bedrock') return false;
+  return installMethodOf(serverType, settings) !== null;
 }
 
 /** Dateiname bzw. Ort innerhalb des Servers: nur einfache, relative Angaben */
@@ -164,14 +164,22 @@ export function softwareProgress(ps: Pick<PartnerServer, 'softwareJob'>): { stat
   return { status: job.error ? 'failed' : 'installing', serverType: job.serverType, version: job.resolvedVersion, build: job.build, step: Math.min(job.pos + 1, job.steps.length), steps: job.steps.length, error: job.error };
 }
 
-async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'done' | 'failed' | 'waiting'> {
-  const job = { ...ps.softwareJob! };
-  // Nur schreiben, solange es noch derselbe Auftrag ist (ein neuer Wechsel oder ein überlappender Lauf darf nicht mit
-  // einem alten Stand überschrieben werden)
-  const mine = and(eq(partnerServers.serverId, server.id), sql`json_extract(${partnerServers.softwareJob}, '$.startedAt') = ${job.startedAt}`);
+/** Wo ein Auftrag gespeichert ist: bei Servern der Partner-API in partner_servers, bei Servern der Website in servers */
+interface JobStore {
+  job: SoftwareJob;
+  /** Speichern, solange es noch derselbe Auftrag ist (false = inzwischen ersetzt oder entfernt) */
+  save(job: SoftwareJob): Promise<boolean>;
+  /** Auftrag als erledigt entfernen */
+  finish(): Promise<boolean>;
+  /** Nach einem Fehlschlag (z. B. Webhook an den Partner) */
+  failed(job: SoftwareJob): Promise<void>;
+}
+
+async function advance(server: Server, store: JobStore, now: Date): Promise<'done' | 'failed' | 'waiting'> {
+  const job = { ...store.job };
   class Replaced extends Error {}
   const save = async () => {
-    if (affectedRows(await db.update(partnerServers).set({ softwareJob: job }).where(mine)) !== 1) throw new Replaced();
+    if (!(await store.save(job))) throw new Replaced();
   };
   /** Später erneut nachsehen – mit wachsendem Abstand */
   const wait = async () => {
@@ -183,9 +191,10 @@ async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'d
   /** `detail` (z. B. die Meldung des Panels) steht nur in unserem Protokoll, nicht in der Antwort an den Partner */
   const fail = async (message: string, detail?: string) => {
     job.error = message.slice(0, 240);
+    job.failedAt = now.getTime();
     await save();
     await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_failed', message: `Server-Software für „${server.name}“ konnte nicht eingerichtet werden (${job.serverType} ${job.resolvedVersion}): ${job.error}${detail ? ` – ${detail.slice(0, 300)}` : ''}` });
-    await emitPartnerEvent(ps.partnerId, 'server.install_failed', { serverId: server.id, name: server.name, playerId: ps.playerId, serverType: job.serverType, version: job.resolvedVersion, error: job.error }).catch(() => {});
+    await store.failed(job).catch(() => {});
     return 'failed' as const;
   };
   try {
@@ -195,6 +204,18 @@ async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'d
     const identifier = server.pteroIdentifier;
     const ptero = pterodactyl();
     try {
+      if (job.steps.length === 0) {
+        // Schritte noch nicht nachgeschlagen (Server der Website)
+        let software: ResolvedSoftware;
+        try {
+          software = await resolveSoftware(job.serverType, job.version);
+        } catch (err) {
+          if (err instanceof ApiError && err.code === 'version_unavailable') return await fail('Diese Version gibt es für die gewählte Server-Software nicht.');
+          return await wait(); // Verzeichnis gerade nicht erreichbar
+        }
+        Object.assign(job, { resolvedVersion: software.resolvedVersion, build: software.build, java: software.java, steps: software.steps, polls: 0 });
+        await save();
+      }
       if (job.waitInstall) {
         const p = await ptero.getServer(server.pteroServerId);
         if (p?.status === 'installing') return await wait();
@@ -204,12 +225,19 @@ async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'d
         await save();
       }
       if (!job.prepared) {
+        // Läuft der Server (z. B. im Panel gestartet), zuerst beenden – ihm würde sonst die Software unter den Füßen ausgetauscht
+        const state = (await ptero.getResources(identifier)).state;
+        if (state === 'running' || state === 'starting' || state === 'stopping') {
+          await ptero.sendPowerSignal(identifier, 'kill').catch(() => {});
+          return await wait();
+        }
         // Startbefehl des Grund-Eggs, passende Java-Version, Startdatei „server.jar“ – Ressourcen bleiben unverändert
-        const base = await startupFor(BASE_SERVER_TYPE, 'latest', await getSettings());
+        const base = await baseStartup(await getSettings());
         const image = pickJavaImage(base.dockerImages, job.java);
         if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`);
         const environment = { ...base.environment };
-        if ('SERVER_JARFILE' in environment) environment.SERVER_JARFILE = 'server.jar';
+        // Startdatei: Die Software aus dem Verzeichnis heißt immer „server.jar“ (die Variable heißt je nach Egg unterschiedlich)
+        for (const name of ['SERVER_JARFILE', 'JARFILE', 'JAR_FILE']) if (name in environment) environment[name] = 'server.jar';
         await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: base.startup, environment });
         job.prepared = true;
         await save();
@@ -255,7 +283,7 @@ async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'d
       return await wait();
     }
     // Fertig: Der Server gilt wieder als installiert (das Ereignis „server.installed“ folgt im Sitzungs-Job)
-    if (affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(mine)) !== 1) return 'waiting';
+    if (!(await store.finish())) return 'waiting';
     // Die tatsächlich installierte Version eintragen („latest“ wird zur konkreten Version) – der Launcher braucht sie,
     // um mit dem passenden Spiel zu verbinden, und die Mod-Suche ebenso
     await db.update(servers).set({ version: job.resolvedVersion, serverType: job.serverType }).where(eq(servers.id, server.id));
@@ -267,6 +295,39 @@ async function advance(server: Server, ps: PartnerServer, now: Date): Promise<'d
     if (err instanceof Replaced) return 'waiting'; // inzwischen ersetzt oder entfernt – der neue Auftrag läuft für sich
     throw err;
   }
+}
+
+const sameJob = (column: typeof partnerServers.softwareJob | typeof servers.softwareJob, job: SoftwareJob) => sql`json_extract(${column}, '$.startedAt') = ${job.startedAt}`;
+
+function partnerStore(server: Server, ps: PartnerServer): JobStore {
+  const mine = and(eq(partnerServers.serverId, server.id), sameJob(partnerServers.softwareJob, ps.softwareJob!));
+  return {
+    job: ps.softwareJob!,
+    save: async (job) => affectedRows(await db.update(partnerServers).set({ softwareJob: job }).where(mine)) === 1,
+    finish: async () => affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(mine)) === 1,
+    failed: (job) => emitPartnerEvent(ps.partnerId, 'server.install_failed', { serverId: server.id, name: server.name, playerId: ps.playerId, serverType: job.serverType, version: job.resolvedVersion, error: job.error }),
+  };
+}
+
+function siteStore(server: Server): JobStore {
+  const mine = and(eq(servers.id, server.id), sameJob(servers.softwareJob, server.softwareJob!));
+  return {
+    job: server.softwareJob!,
+    save: async (job) => affectedRows(await db.update(servers).set({ softwareJob: job }).where(mine)) === 1,
+    finish: async () => affectedRows(await db.update(servers).set({ softwareJob: null }).where(mine)) === 1,
+    failed: async () => {},
+  };
+}
+
+/** Wie oft und in welchem Abstand eine fehlgeschlagene Einrichtung eines Website-Servers von selbst neu versucht wird */
+const SITE_RETRIES = 5;
+const SITE_RETRY_AFTER_MS = 15 * 60_000;
+
+/** Einrichtung der Software eines Website-Servers (neu) anstoßen – z. B. vom Team nach einem Fehlschlag */
+export async function requestSiteSoftware(server: Pick<Server, 'id' | 'serverType' | 'version' | 'partnerId'>, waitInstall = false): Promise<boolean> {
+  if (server.partnerId || !installsViaDirectory(server.serverType, await getSettings())) return false;
+  await db.update(servers).set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, waitInstall) }).where(eq(servers.id, server.id));
+  return true;
 }
 
 /** Läuft alle paar Sekunden: bringt offene Einrichtungen einen Schritt weiter */
@@ -295,10 +356,38 @@ export async function runSoftwareJobs(now = new Date()) {
     )
     .orderBy(sql`coalesce(json_extract(${partnerServers.softwareJob}, '$.nextPollAt'), 0)`, sql`json_extract(${partnerServers.softwareJob}, '$.startedAt')`)
     .limit(PER_RUN);
-  stats.open = due.length;
+  // Server der Website: dieselbe Reihenfolge. Fehlgeschlagene werden einige Male von selbst neu versucht
+  // (z. B. wenn das Verzeichnis oder ein Download vorübergehend nicht erreichbar war).
+  await db
+    .update(servers)
+    .set({ softwareJob: null })
+    .where(and(sql`${servers.softwareJob} is not null`, eq(servers.status, 'deleted')));
+  const failedSite = await db
+    .select()
+    .from(servers)
+    .where(and(sql`${servers.softwareJob} is not null`, sql`json_extract(${servers.softwareJob}, '$.error') is not null`, sql`coalesce(json_extract(${servers.softwareJob}, '$.retries'), 0) < ${SITE_RETRIES}`, sql`coalesce(json_extract(${servers.softwareJob}, '$.failedAt'), 0) <= ${now.getTime() - SITE_RETRY_AFTER_MS}`))
+    .limit(20);
+  for (const server of failedSite) {
+    const old = server.softwareJob!;
+    await db
+      .update(servers)
+      .set({ softwareJob: { ...pendingSoftwareJob(old.serverType, old.version, false), retries: (old.retries ?? 0) + 1 } })
+      .where(and(eq(servers.id, server.id), sameJob(servers.softwareJob, old)));
+  }
+  const dueSite = await db
+    .select()
+    .from(servers)
+    .where(and(sql`${servers.softwareJob} is not null`, sql`json_extract(${servers.softwareJob}, '$.error') is null`, sql`coalesce(json_extract(${servers.softwareJob}, '$.nextPollAt'), 0) <= ${now.getTime()}`, ne(servers.status, 'deleted'), sql`${servers.partnerId} is null`))
+    .orderBy(sql`coalesce(json_extract(${servers.softwareJob}, '$.nextPollAt'), 0)`, sql`json_extract(${servers.softwareJob}, '$.startedAt')`)
+    .limit(PER_RUN);
+  stats.open = due.length + dueSite.length;
   await mapLimit(due, 4, async ({ ps, server }) => {
     if (!ps.softwareJob || ps.softwareJob.error) return;
-    stats[await advance(server, ps, now)]++;
+    stats[await advance(server, partnerStore(server, ps), now)]++;
+  });
+  await mapLimit(dueSite, 4, async (server) => {
+    if (!server.softwareJob || server.softwareJob.error) return;
+    stats[await advance(server, siteStore(server), now)]++;
   });
   return stats;
 }

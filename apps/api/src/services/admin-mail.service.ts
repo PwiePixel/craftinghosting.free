@@ -9,7 +9,7 @@
 import { identityConfirmedSql } from './identity';
 import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from 'drizzle-orm';
 import { formatDateTime, freeHostingConfig, type WarningSanction, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type Locale, type Localized } from '@chfree/shared';
-import { db } from '../db/client';
+import { affectedRows, db } from '../db/client';
 import { notifications, servers, users, type User } from '../db/schema';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
@@ -21,7 +21,7 @@ import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { pendingReasonFor } from './server.service';
 import { getSettings, resolveBrand } from './settings.service';
-import { issueWarning, listWarnings, nextWarningEffect, warningParagraph } from './warnings.service';
+import { issueWarning, listWarnings, nextWarningEffect, restoreReactivationWindow, warningParagraph } from './warnings.service';
 
 const DAY_MS = 86_400_000;
 const date = (d: Date, l: Locale) => formatDateTime(d, freeHostingConfig.fairUse.timezone, l);
@@ -253,7 +253,7 @@ async function discordLink(): Promise<string> {
 }
 
 /** Betreff und Text einer Abuse-Mail – genau so, wie sie verschickt wird (auch für die Vorschau im Admin-Bereich) */
-function composeAbuse(reasonId: string, noteRaw: Localized, serverName: string | null, suspended: number, discord: string, warning: Localized | null = null): { title: Localized; body: Localized } {
+function composeAbuse(reasonId: string, noteRaw: Localized, serverName: string | null, suspended: number, discord: string, warning: Localized | null = null, flaggedAll = false): { title: Localized; body: Localized } {
   const reason = ABUSE_REASONS.find((r) => r.id === reasonId);
   if (!reason) throw new ApiError(400, 'validation_error', L('Unbekannter Grund.', 'Unknown reason.'));
   const note = clean(noteRaw);
@@ -270,6 +270,7 @@ function composeAbuse(reasonId: string, noteRaw: Localized, serverName: string |
           ? 'Please stop this immediately. In case of repeated violations we suspend or delete the server or the account.'
           : 'Bitte stelle das umgehend ab. Bei wiederholten Verstößen sperren oder löschen wir den Server bzw. den Account.',
       serverName ? (l === 'en' ? 'The server is marked as “Abuse” under “My servers” until this has been resolved. Until then it cannot be deleted.' : 'Der Server ist unter „Meine Server“ als „Abuse“ markiert, bis das geklärt ist. So lange lässt er sich nicht löschen.') : '',
+      flaggedAll ? (l === 'en' ? 'The suspended servers are marked as “Abuse” under “My servers” until this has been resolved. Until then they cannot be deleted.' : 'Die gesperrten Server sind unter „Meine Server“ als „Abuse“ markiert, bis das geklärt ist. So lange lassen sie sich nicht löschen.') : '',
       // Verwarnungs-System: die wievielte Verwarnung das ist und was daraus folgt
       warning ? warning[l] : '',
       l === 'en' ? `To resolve this, please open a ticket on our Discord server: ${discord}` : `Um das zu klären, öffne bitte ein Ticket auf unserem Discord-Server: ${discord}`,
@@ -279,23 +280,25 @@ function composeAbuse(reasonId: string, noteRaw: Localized, serverName: string |
   return { title: reason.title, body: { de: part('de'), en: part('en') } };
 }
 
-async function abuseTarget(input: AbuseInput): Promise<{ user: User | null; server: { id: string; name: string } | null; toSuspend: string[] }> {
+async function abuseTarget(input: AbuseInput): Promise<{ user: User | null; server: { id: string; name: string } | null; toSuspend: string[]; toKeep: string[] }> {
   const [user] = await db.select().from(users).where(eq(users.email, input.email.trim().toLowerCase())).limit(1);
-  if (!user) return { user: null, server: null, toSuspend: [] };
+  if (!user) return { user: null, server: null, toSuspend: [], toKeep: [] };
   const owned = await db.select().from(servers).where(and(eq(servers.userId, user.id), ne(servers.status, 'deleted')));
   const server = input.serverId ? (owned.find((s) => s.id === input.serverId) ?? null) : null;
   if (input.serverId && !server) throw new ApiError(404, 'server_not_found', L('Dieser Server gehört nicht zu diesem Nutzer.', 'This server does not belong to this user.'));
   // Sperren: nur den betroffenen Server – ohne Auswahl alle laufenden Server des Nutzers
   const candidates = server ? [server] : owned;
   const toSuspend = input.suspend ? candidates.filter((s) => s.status === 'active' || s.status === 'expiring').map((s) => s.id) : [];
-  return { user, server: server ? { id: server.id, name: server.name } : null, toSuspend };
+  // Schon wegen einer Auszeit gesperrt: Diese Server sollen NICHT von selbst wieder frei werden, wenn das Team sperrt
+  const toKeep = input.suspend ? candidates.filter((s) => s.status === 'suspended' && s.suspensionReason === 'warning').map((s) => s.id) : [];
+  return { user, server: server ? { id: server.id, name: server.name } : null, toSuspend, toKeep };
 }
 
 /** Vorschau der Abuse-Mail in beiden Sprachen */
 export async function previewAbuse(input: AbuseInput): Promise<{ title: Localized; body: Localized; locale: Locale | null; warning: { count: number; sanction: WarningSanction } | null }> {
-  const target = await abuseTarget(input).catch(() => ({ user: null, server: null, toSuspend: [] as string[] }));
+  const target = await abuseTarget(input).catch(() => ({ user: null, server: null, toSuspend: [] as string[], toKeep: [] as string[] }));
   // Ohne bekannten Nutzer zeigt die Vorschau den Text so, als würde ein Server gesperrt
-  const suspended = input.suspend ? Math.max(1, target.toSuspend.length) : 0;
+  const suspended = input.suspend ? (target.user ? target.toSuspend.length + target.toKeep.length : 1) : 0;
   // Ohne bekannten Nutzer: so, als wäre es die erste Verwarnung
   const effect = input.warning === false ? null : target.user ? await nextWarningEffect(target.user) : { count: 1, sanction: 'none' as const };
   return { ...composeAbuse(input.reason, input.note, target.server?.name ?? null, suspended, await discordLink(), effect ? warningParagraph(effect, date) : null), locale: target.user?.locale ?? null, warning: effect };
@@ -309,7 +312,7 @@ export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string)
   const reason = ABUSE_REASONS.find((r) => r.id === input.reason);
   if (!reason) throw new ApiError(400, 'validation_error', L('Unbekannter Grund.', 'Unknown reason.'));
   if (reason.id === 'other' && !clean(input.note).de) throw new ApiError(400, 'validation_error', L('Bitte einen eigenen Text angeben.', 'Please enter your own text.'));
-  const { user, server, toSuspend } = await abuseTarget(input);
+  const { user, server, toSuspend, toKeep } = await abuseTarget(input);
   if (!user) throw new ApiError(404, 'user_not_found', L('Zu dieser E-Mail-Adresse gibt es keinen Account.', 'There is no account for this email address.'));
 
   // Erst sperren und markieren, dann schreiben – so stimmt der Text der Mail
@@ -320,11 +323,17 @@ export async function sendAbuseMail(admin: User, input: AbuseInput, ip?: string)
       () => {},
     );
   }
-  if (server) await db.update(servers).set({ abuseAt: new Date(), abuseReason: reason.id, abuseSource: input.source ?? 'system' }).where(eq(servers.id, server.id));
+  if (toKeep.length) {
+    suspended += affectedRows(await db.update(servers).set({ suspensionReason: 'admin' }).where(and(inArray(servers.id, toKeep), eq(servers.status, 'suspended'), eq(servers.suspensionReason, 'warning'))));
+  }
+  // Markieren: den ausgewählten Server – ohne Auswahl alle, die mit dieser Nachricht gesperrt wurden. Markierte Server
+  // lassen sich vom Nutzer nicht löschen, bis das Team die Markierung aufhebt.
+  const flagged = server ? [server.id] : [...toSuspend, ...toKeep];
+  if (flagged.length) await db.update(servers).set({ abuseAt: new Date(), abuseReason: reason.id, abuseSource: input.source ?? 'system' }).where(inArray(servers.id, flagged));
   const dedupeKey = `abuse:${uuid()}`;
   // Verwarnung eintragen und die Folge (Auszeit, Ban) anwenden – die Nachricht nennt dann genau, was passiert ist
   const warned = input.warning === false ? null : await issueWarning(user, { reason: reason.id, note: clean(input.note).de, server, notificationKey: dedupeKey, by: admin.email });
-  const mail = composeAbuse(reason.id, input.note, server?.name ?? null, suspended, await discordLink(), warned ? warningParagraph(warned, date) : null);
+  const mail = composeAbuse(reason.id, input.note, server?.name ?? null, suspended, await discordLink(), warned ? warningParagraph(warned, date) : null, !server && flagged.length > 0);
   await notify({ userId: user.id, serverId: server?.id ?? null, type: `abuse.${reason.id}`, title: mail.title, body: mail.body, dedupeKey, email: true });
   // Festhalten, ob das System oder das Team den Verstoß festgestellt hat (im Abuse-Bereich nachträglich änderbar)
   await db.update(notifications).set({ abuseSource: input.source ?? 'system' }).where(eq(notifications.dedupeKey, dedupeKey));
@@ -344,5 +353,7 @@ export async function clearAbuseFlag(admin: User, serverId: string, ip?: string)
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server || !server.abuseAt) throw new ApiError(404, 'not_found', L('Dieser Server ist nicht als Abuse markiert.', 'This server is not marked as abuse.'));
   await db.update(servers).set({ abuseAt: null, abuseReason: null, abuseSource: null }).where(eq(servers.id, serverId));
+  // War der Server inzwischen abgelaufen, beginnt die Frist zum Reaktivieren jetzt neu (markiert wurde er nicht automatisch gelöscht)
+  await restoreReactivationWindow({ serverId });
   await audit({ userId: server.userId, serverId, actor: 'admin', action: 'admin.abuse_cleared', message: `Abuse-Markierung von Server „${server.name}“ aufgehoben (durch ${admin.email})`, ip });
 }

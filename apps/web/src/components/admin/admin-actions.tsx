@@ -89,6 +89,8 @@ export function ServerActions({ server }: { server: AdminServerDTO }) {
       {/* Paket ändern, auf eine andere (auch private) Node umziehen, als Upgrade kennzeichnen */}
       {server.pteroServerId !== null && (s === 'active' || s === 'expiring' || s === 'suspended') && <ServerUpgradeButton server={server} />}
       {paused && s === 'active' && <ActionButton label="Pause aufheben" run={act('clear-pause')} />}
+      {/* Server-Software (ohne eigenes Egg) konnte nicht eingerichtet werden: noch einmal anstoßen */}
+      {server.software?.status === 'failed' && (s === 'active' || s === 'expiring') && <ActionButton label="Software neu einrichten" run={act('reinstall-software')} />}
       {s === 'provisioning_failed' && <ActionButton label="Erneut versuchen" run={act('retry')} />}
       {/* Offene Anfrage mit Panel-Konto: Voraussetzungen jetzt prüfen und den Server erstellen */}
       {s === 'pending' && server.pendingReason !== 'email' && server.pendingReason !== 'panel' && <ActionButton label="Erneut versuchen" run={act('retry')} />}

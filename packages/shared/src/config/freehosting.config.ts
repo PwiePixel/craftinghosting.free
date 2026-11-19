@@ -67,7 +67,38 @@ export interface ServerTypeConfig {
   versions: string[];
   defaultVersion: string;
   recommended?: boolean;
+  /* ---- Nur Minecraft: Angaben aus dem Software-Katalog (im Admin-Bereich einstellbar) ---- */
+  /** Java Edition (Standard) oder Bedrock Edition */
+  edition?: 'java' | 'bedrock';
+  /** Bezeichnung im Software-Verzeichnis (MCJars) – null/leer = dort nicht vorhanden, braucht ein eigenes Egg */
+  directory?: string | null;
+  /** Im Bestellformular der Website wählbar (Standard: ja) */
+  website?: boolean;
+  /** Über die Partner-API wählbar (Standard: nein) */
+  partner?: boolean;
+  /** Art der Installation: auto = eigenes Egg, sonst automatisch über das Verzeichnis */
+  install?: SoftwareInstall;
+  /** Variable des Eggs für die Version (leer = automatisch erkennen) */
+  versionVariable?: string;
+  /** Vom Admin angelegter Eintrag (kein fest hinterlegter) */
+  custom?: boolean;
+  /**
+   * Nur über ein eigenes Egg installierbar – nie über das Software-Verzeichnis: Bedrock (gibt es dort nicht) und
+   * Proxys wie Velocity (hängen nicht an einer Minecraft-Version und starten anders als ein Spielserver).
+   */
+  eggOnly?: boolean;
 }
+
+/**
+ * Wie die Software auf den Server kommt:
+ *  – egg: über ein eigenes Egg im Panel (Zuordnung unter Admin → Pterodactyl)
+ *  – directory: Das Panel legt den Server mit dem Paper-Egg an, danach richten wir die Software aus dem Verzeichnis ein
+ *  – auto: eigenes Egg, wenn eines zugeordnet ist – sonst über das Verzeichnis
+ */
+export type SoftwareInstall = 'auto' | 'egg' | 'directory';
+
+/** Einträge des Software-Verzeichnisses, die keine Spielserver sind (Proxys, Warteräume) – für sie gilt immer: nur über ein eigenes Egg */
+export const DIRECTORY_NOT_GAME_SERVERS: readonly string[] = ['VELOCITY', 'VELOCITY_CTD', 'BUNGEECORD', 'WATERFALL', 'LOOHP_LIMBO', 'NANOLIMBO'];
 
 export interface FairUseRules {
   timezone: string;
@@ -334,6 +365,8 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'paper',
       kind: 'minecraft',
+      directory: 'PAPER',
+      partner: true,
       name: 'Paper',
       description: { de: 'Performanter Standard mit Bukkit/Spigot-Plugin-Support.', en: 'Fast default with Bukkit/Spigot plugin support.' },
       versions: ['latest', '26.3', '26.2', '26.1.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.8'],
@@ -343,6 +376,8 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'purpur',
       kind: 'minecraft',
+      directory: 'PURPUR',
+      partner: true,
       name: 'Purpur',
       description: { de: 'Paper-Fork mit vielen zusätzlichen Gameplay-Optionen.', en: 'Paper fork with many extra gameplay options.' },
       versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.19.4', '1.18.2', '1.16.5'],
@@ -351,6 +386,8 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'vanilla',
       kind: 'minecraft',
+      directory: 'VANILLA',
+      partner: true,
       name: 'Vanilla',
       description: { de: 'Der offizielle Minecraft-Server – ohne Plugins und Mods.', en: 'The official Minecraft server – no plugins or mods.' },
       versions: ['latest', '26.3', '26.2', '26.1.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.9'],
@@ -359,6 +396,8 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'fabric',
       kind: 'minecraft',
+      directory: 'FABRIC',
+      partner: true,
       name: 'Fabric',
       description: { de: 'Leichtgewichtiger Mod-Loader für moderne Versionen.', en: 'Lightweight mod loader for modern versions.' },
       versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5'],
@@ -367,10 +406,117 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'forge',
       kind: 'minecraft',
+      directory: 'FORGE',
+      partner: true,
       name: 'Forge',
       description: { de: 'Klassischer Mod-Loader für große Modpacks.', en: 'Classic mod loader for large modpacks.' },
       versions: ['latest', '1.21.1', '1.20.1', '1.19.2', '1.18.2', '1.16.5', '1.12.2'],
       defaultVersion: '1.20.1',
+    },
+    {
+      id: 'neoforge',
+      kind: 'minecraft',
+      directory: 'NEOFORGE',
+      partner: true,
+      website: false,
+      name: 'NeoForge',
+      description: { de: 'Moderner Mod-Loader, Nachfolger von Forge für neue Versionen.', en: 'Modern mod loader, the successor of Forge for new versions.' },
+      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'quilt',
+      kind: 'minecraft',
+      directory: 'QUILT',
+      partner: true,
+      website: false,
+      name: 'Quilt',
+      description: { de: 'Mod-Loader, der auch die meisten Fabric-Mods lädt.', en: 'Mod loader that also loads most Fabric mods.' },
+      versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'spigot',
+      kind: 'minecraft',
+      directory: 'SPIGOT',
+      website: false,
+      name: 'Spigot',
+      description: { de: 'Der Klassiker für Bukkit-Plugins.', en: 'The classic for Bukkit plugins.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'folia',
+      kind: 'minecraft',
+      directory: 'FOLIA',
+      website: false,
+      name: 'Folia',
+      description: { de: 'Paper-Variante, die die Welt in Regionen auf mehrere Kerne verteilt (nur für passende Plugins).', en: 'Paper variant that spreads the world over several cores by region (only for compatible plugins).' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'leaf',
+      kind: 'minecraft',
+      directory: 'LEAF',
+      website: false,
+      name: 'Leaf',
+      description: { de: 'Paper-Fork mit vielen Leistungs-Optimierungen.', en: 'Paper fork with many performance optimisations.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'bedrock',
+      kind: 'minecraft',
+      edition: 'bedrock',
+      eggOnly: true,
+      website: false,
+      name: 'Bedrock',
+      description: { de: 'Offizieller Server der Bedrock Edition – für Handy, Konsole und Windows.', en: 'Official Bedrock Edition server – for mobile, console and Windows.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'pocketmine',
+      kind: 'minecraft',
+      edition: 'bedrock',
+      eggOnly: true,
+      website: false,
+      name: 'PocketMine-MP',
+      description: { de: 'Bedrock-Server mit Plugin-Unterstützung (PHP).', en: 'Bedrock server with plugin support (PHP).' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'nukkit',
+      kind: 'minecraft',
+      edition: 'bedrock',
+      eggOnly: true,
+      website: false,
+      name: 'Nukkit',
+      description: { de: 'Bedrock-Server auf Java-Basis mit Plugin-Unterstützung.', en: 'Java-based Bedrock server with plugin support.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'velocity',
+      kind: 'minecraft',
+      eggOnly: true,
+      website: false,
+      name: 'Velocity',
+      description: { de: 'Proxy, der mehrere Minecraft-Server zu einem Netzwerk verbindet.', en: 'Proxy that connects several Minecraft servers into one network.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
+    },
+    {
+      id: 'bungeecord',
+      kind: 'minecraft',
+      eggOnly: true,
+      website: false,
+      name: 'BungeeCord',
+      description: { de: 'Klassischer Proxy für Minecraft-Netzwerke.', en: 'Classic proxy for Minecraft networks.' },
+      versions: ['latest'],
+      defaultVersion: 'latest',
     },
     {
       id: 'python',
@@ -394,37 +540,22 @@ export const freeHostingConfig: FreeHostingConfig = {
 
 export const serverTypes: readonly ServerTypeConfig[] = freeHostingConfig.serverTypes;
 
+/**
+ * Fest hinterlegter Software-Katalog (Stand beim Laden des Moduls). `freeHostingConfig.serverTypes` wird zur Laufzeit
+ * mit den Einstellungen aus dem Admin-Bereich überschrieben (applyRuntimeConfig) – das hier bleibt die Vorlage.
+ */
+export const builtinServerTypes: readonly ServerTypeConfig[] = freeHostingConfig.serverTypes.map((t) => ({ ...t, versions: [...t.versions], description: { ...t.description } }));
+
 /** Servertypen eines Produkts (Minecraft: Paper, Vanilla … · Discord: Python, Node.js) */
 export function serverTypesOf(kind: ProductKind): ServerTypeConfig[] {
   return serverTypes.filter((t) => t.kind === kind);
 }
 
-/**
- * Zusätzliche Minecraft-Typen, die es nur über die Partner-API gibt (dort richtet die API die Software selbst ein).
- * Sie stehen bewusst NICHT in `serverTypes`: Auf der Website, in den Texten und im Admin-Bereich tauchen sie nicht auf.
- */
-export const partnerServerTypes: readonly ServerTypeConfig[] = [
-  {
-    id: 'neoforge',
-    kind: 'minecraft',
-    name: 'NeoForge',
-    description: { de: 'Moderner Mod-Loader, Nachfolger von Forge für neue Versionen.', en: 'Modern mod loader, the successor of Forge for new versions.' },
-    versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4'],
-    defaultVersion: 'latest',
-  },
-  {
-    id: 'quilt',
-    kind: 'minecraft',
-    name: 'Quilt',
-    description: { de: 'Mod-Loader, der auch die meisten Fabric-Mods lädt.', en: 'Mod loader that also loads most Fabric mods.' },
-    versions: ['latest', '26.3', '26.2', '1.21.11', '1.21.8', '1.21.4', '1.21.1', '1.20.6', '1.20.4', '1.20.1', '1.19.4', '1.18.2'],
-    defaultVersion: 'latest',
-  },
-];
-
-/** Alle Typen für Partner: die der Website plus die zusätzlichen */
-export const allMinecraftTypesForPartners = (): ServerTypeConfig[] => [...serverTypes.filter((t) => t.kind === 'minecraft'), ...partnerServerTypes];
-
 export function getServerType(id: string): ServerTypeConfig | undefined {
-  return serverTypes.find((t) => t.id === id) ?? partnerServerTypes.find((t) => t.id === id);
+  return serverTypes.find((t) => t.id === id);
+}
+
+/** Servertypen, die im Bestellformular der Website zur Wahl stehen */
+export function websiteTypesOf(kind: ProductKind): ServerTypeConfig[] {
+  return serverTypes.filter((t) => t.kind === kind && t.website !== false);
 }

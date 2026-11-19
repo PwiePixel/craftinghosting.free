@@ -13,9 +13,10 @@ import type {
   RegistrationMode,
   RuleSettings,
   SiteSettings,
+  SoftwareItem,
   WaitlistBlock,
 } from './api-types';
-import { freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind } from './config/freehosting.config';
+import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind, type ServerTypeConfig, type SoftwareInstall } from './config/freehosting.config';
 import { defaultChatSettings, normalizeChatSettings } from './chat-settings';
 import { defaultDiscordSettings, normalizeDiscordSettings } from './discord-settings';
 import type { Locale, Localized } from './i18n';
@@ -93,14 +94,109 @@ export function runtimeConfigVersion(): number {
  * So greifen alle Stellen, die bisher feste Werte gelesen haben (Jobs, E-Mails, Texte), ohne Neustart auf
  * die Einstellungen zu. Wird von API, Worker und Website nach jedem Laden der Einstellungen aufgerufen.
  */
-export function applyRuntimeConfig(input: { rules: RuleSettings; brand: BrandSettings }): boolean {
-  const before = JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand]);
+export function applyRuntimeConfig(input: { rules: RuleSettings; brand: BrandSettings; software?: ServerTypeConfig[] }): boolean {
+  const before = JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand, freeHostingConfig.serverTypes]);
   Object.assign(freeHostingConfig.fairUse, input.rules.fairUse);
   Object.assign(freeHostingConfig.cycle, { ...input.rules.cycle, reminderDaysBefore: [...input.rules.cycle.reminderDaysBefore] });
   Object.assign(freeHostingConfig.brand, input.brand);
-  const changed = before !== JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand]);
+  if (input.software) {
+    // Software-Katalog: die Minecraft-Einträge an Ort und Stelle ersetzen (alle Verweise auf die Liste bleiben gültig)
+    const others = freeHostingConfig.serverTypes.filter((t) => t.kind !== 'minecraft');
+    freeHostingConfig.serverTypes.splice(0, freeHostingConfig.serverTypes.length, ...input.software.map((t) => ({ ...t, kind: 'minecraft' as const })), ...others);
+  }
+  const changed = before !== JSON.stringify([freeHostingConfig.fairUse, freeHostingConfig.cycle, freeHostingConfig.brand, freeHostingConfig.serverTypes]);
   if (changed) runtimeVersion++;
   return changed;
+}
+
+/* ---- Software-Katalog (Minecraft) ---- */
+
+const builtinSoftware = () => builtinServerTypes.filter((t) => t.kind === 'minecraft');
+
+/** Katalog im Auslieferungszustand: alle fest hinterlegten Einträge mit ihren Voreinstellungen */
+export function defaultSoftware(): SoftwareItem[] {
+  return builtinSoftware().map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: { ...t.description },
+    edition: t.edition ?? 'java',
+    directory: t.directory ?? '',
+    install: 'auto',
+    website: t.website !== false,
+    partner: !!t.partner,
+    versionVariable: '',
+    custom: false,
+    eggOnly: !!t.eggOnly || t.edition === 'bedrock' || !t.directory,
+  }));
+}
+
+const INSTALLS: SoftwareInstall[] = ['auto', 'egg', 'directory'];
+
+/** Katalog aus gespeicherten Einstellungen: fest hinterlegte Einträge (nur Schalter änderbar) + eigene Einträge */
+export function normalizeSoftware(input: unknown): SoftwareItem[] {
+  const stored = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(input)) for (const raw of input) if (raw && typeof raw === 'object' && typeof (raw as { id?: unknown }).id === 'string') stored.set((raw as { id: string }).id, raw as Record<string, unknown>);
+  const install = (v: unknown): SoftwareInstall => (INSTALLS.includes(v as SoftwareInstall) ? (v as SoftwareInstall) : 'auto');
+  const variable = (v: unknown) => (typeof v === 'string' && /^[A-Z][A-Z0-9_]{0,39}$/.test(v.trim()) ? v.trim() : '');
+  const out = defaultSoftware().map((d) => {
+    const o = stored.get(d.id);
+    if (!o) return d;
+    // Nur über Egg: Installation steht fest, und über die Partner-API (dort richtet die API die Software selbst ein) nicht wählbar
+    return { ...d, website: typeof o.website === 'boolean' ? o.website : d.website, partner: !d.eggOnly && d.edition === 'java' && (typeof o.partner === 'boolean' ? o.partner : d.partner), install: d.eggOnly ? ('egg' as const) : install(o.install), versionVariable: variable(o.versionVariable) };
+  });
+  const taken = new Set([...out.map((x) => x.id), ...builtinServerTypes.map((t) => t.id)]);
+  for (const [id, o] of stored) {
+    if (out.length >= 60) break;
+    if (taken.has(id) || !/^[a-z][a-z0-9-]{1,23}$/.test(id)) continue;
+    const name = typeof o.name === 'string' ? o.name.replace(/\s+/g, ' ').trim().slice(0, 30) : '';
+    if (!name) continue;
+    const d = o.description && typeof o.description === 'object' ? (o.description as Record<string, unknown>) : {};
+    const text = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, 200) : '');
+    const edition = o.edition === 'bedrock' ? ('bedrock' as const) : ('java' as const);
+    // Über das Verzeichnis nur echte Java-Spielserver – Bedrock und Proxys laufen immer über ein eigenes Egg
+    const wanted = typeof o.directory === 'string' && /^[A-Z][A-Z0-9_]{1,23}$/.test(o.directory.trim()) ? o.directory.trim() : '';
+    const directory = edition === 'java' && !DIRECTORY_NOT_GAME_SERVERS.includes(wanted) ? wanted : '';
+    taken.add(id);
+    out.push({
+      id,
+      name,
+      description: { de: text(d.de), en: text(d.en) || text(d.de) },
+      edition,
+      directory,
+      install: directory ? install(o.install) : 'egg',
+      website: typeof o.website === 'boolean' ? o.website : false,
+      partner: !!directory && o.partner === true,
+      versionVariable: variable(o.versionVariable),
+      custom: true,
+      eggOnly: !directory,
+    });
+  }
+  return out;
+}
+
+/** Katalog als Servertypen (für die zentrale Konfiguration zur Laufzeit) */
+export function softwareTypes(items: SoftwareItem[]): ServerTypeConfig[] {
+  const builtin = new Map(builtinSoftware().map((t) => [t.id, t]));
+  return items.map((i) => {
+    const b = builtin.get(i.id);
+    return {
+      id: i.id,
+      kind: 'minecraft' as const,
+      name: i.name,
+      description: i.description,
+      versions: b ? [...b.versions] : ['latest'],
+      defaultVersion: b?.defaultVersion ?? 'latest',
+      ...(b?.recommended ? { recommended: true } : {}),
+      edition: i.edition,
+      directory: i.directory || null,
+      website: i.website,
+      partner: i.partner,
+      install: i.install,
+      versionVariable: i.versionVariable,
+      custom: i.custom,
+      eggOnly: i.eggOnly,
+    };
+  });
 }
 
 /** Wählbare Versionen eines Servertyps: Liste aus dem Admin-Bereich, sonst die Standardliste */
@@ -153,6 +249,8 @@ export function defaultSiteSettings(): SiteSettings {
     brand: { discordUrl: '', supportEmail: '', parentUrl: '', parentPricingUrl: '', statusUrl: '' },
     rules: defaultRules(),
     versions: {},
+    software: defaultSoftware(),
+    softwareBase: null,
     domains: { extra: [] },
     newsletter: { enabled: true, footerForm: true, signupCheckbox: true, ratePerMinute: 60 },
     announcement: { enabled: false, tone: 'info', text: { de: '', en: '' }, linkUrl: '', linkLabel: { de: '', en: '' } },
@@ -439,9 +537,15 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
         })
         .filter((x) => x.host && !seenHosts.has(x.host) && seenHosts.add(x.host))
     : [];
+  const software = normalizeSoftware(i.software);
+  const baseRaw = obj(i.softwareBase);
+  const baseNest = int(baseRaw.nestId, 0, 0, 1_000_000);
+  const baseEgg = int(baseRaw.eggId, 0, 0, 1_000_000);
+  const softwareBase = baseNest > 0 && baseEgg > 0 ? { nestId: baseNest, eggId: baseEgg, name: str(baseRaw.name, '', 120) } : null;
+  const softwareIds = new Set(software.map((x) => x.id));
   const versions: Record<string, string[]> = {};
   for (const [typeId, value] of Object.entries(obj(i.versions))) {
-    if (getServerType(typeId)?.kind !== 'minecraft' || !Array.isArray(value)) continue;
+    if (!softwareIds.has(typeId) || !Array.isArray(value)) continue;
     const cleaned = [...new Set(value.map((x) => str(x, '', 32).trim()).filter((x) => /^[A-Za-z0-9._-]{1,32}$/.test(x)))].slice(0, 80);
     if (cleaned.length) versions[typeId] = cleaned;
   }
@@ -512,6 +616,8 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
       },
     },
     versions,
+    software,
+    softwareBase,
     domains: { extra: extraDomains },
     newsletter: {
       enabled: bool(nl.enabled, d.newsletter.enabled),

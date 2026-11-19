@@ -52,6 +52,7 @@ import { provisionServer } from './provisioning.service';
 import { activatePendingServers, hardDeleteServer, pendingReasonFor } from './server.service';
 import { destroyAllSessions } from './session.service';
 import { liftBan } from './warnings.service';
+import { requestSiteSoftware } from './partner-software.service';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const panelServerAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/servers/view/${id}` : null);
@@ -230,6 +231,8 @@ export async function listServersAdmin(
     pauseReason: s.pauseReason,
     pendingReason: s.status === 'pending' ? (reasons.get(s.id) ?? 'stuck') : null,
     abuse: s.abuseAt ? { at: s.abuseAt.toISOString(), reason: abuseReasonLabel(s.abuseReason) } : null,
+    // Einrichtung der Server-Software (Typen ohne eigenes Egg): läuft noch bzw. ist fehlgeschlagen
+    software: s.softwareJob ? { status: s.softwareJob.error ? ('failed' as const) : ('installing' as const), error: s.softwareJob.error, retries: s.softwareJob.retries ?? 0 } : null,
     provisioningAttempts: s.provisioningAttempts,
     provisioningError: s.provisioningError,
     panelDescription: s.panelDescription,
@@ -389,7 +392,7 @@ const retryFailed = (error: string | null | undefined) => {
   return new ApiError(502, 'retry_failed', L(`Erneut versucht – wieder fehlgeschlagen: ${text}`, `Tried again – failed again: ${text}`));
 };
 
-export type ServerAction = 'suspend' | 'unsuspend' | 'extend' | 'clear-pause' | 'retry' | 'delete';
+export type ServerAction = 'suspend' | 'unsuspend' | 'extend' | 'clear-pause' | 'retry' | 'delete' | 'reinstall-software';
 
 export async function serverAction(admin: User, id: string, action: ServerAction, ip?: string): Promise<void> {
   const server = await getServer(id);
@@ -426,6 +429,15 @@ export async function serverAction(admin: User, id: string, action: ServerAction
       if (server.pteroServerId) await ptero.unsuspendServer(server.pteroServerId).catch(() => {});
       await trySyncPanelDescription(server.id);
       await log('admin.server_unsuspended', `Server „${server.name}“ entsperrt${newCycle ? ' – neuer Zyklus gestartet' : ''}`);
+      return;
+    }
+    case 'reinstall-software': {
+      // Die gewählte Server-Software (ohne eigenes Egg) noch einmal einrichten – z. B. nach einem Fehlschlag
+      if (!['active', 'expiring'].includes(server.status)) throw stateChanged();
+      if (!(await requestSiteSoftware(server))) {
+        throw Errors.conflict('not_applicable', L('Dieser Servertyp wird über ein eigenes Egg installiert – hier gibt es nichts neu einzurichten.', 'This server type is installed through its own egg – there is nothing to set up again here.'));
+      }
+      await log('admin.server_software', `Server-Software von „${server.name}“ wird neu eingerichtet (${server.serverType} ${server.version})`);
       return;
     }
     case 'extend': {

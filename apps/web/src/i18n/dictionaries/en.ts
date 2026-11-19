@@ -1,13 +1,14 @@
 /**
  * English texts of the website – same structure as de.ts (checked by TypeScript).
  */
-import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText } from '@chfree/shared';
+import { formatMb, freeHostingConfig, restPeriodAfterText, restPeriodText, builtinServerTypes } from '@chfree/shared';
 import type { Dictionary, FaqContext } from './de';
 
 /** English texts with the CURRENT rules (fair use, runtime) – see buildDe() */
 export function buildEn(): Dictionary {
 const { fairUse, cycle, hardware, serverTypes } = freeHostingConfig;
-const minecraftTypes = serverTypes.filter((t) => t.kind === 'minecraft');
+// Feste Aufzählung aus dem Auslieferungszustand (welche Software angeboten wird, stellt der Admin-Bereich ein)
+const minecraftTypes = builtinServerTypes.filter((t) => t.kind === 'minecraft' && t.website !== false);
 const botTypes = serverTypes.filter((t) => t.kind === 'discord');
 const hasRest = cycle.reactivationCooldownMinutes > 0;
 const rest = restPeriodText(cycle.reactivationCooldownMinutes, 'en');
@@ -521,6 +522,7 @@ return {
     restAfter: ' – we will send you an email then.',
     deleteAt: (dt: string) => `Without reactivation, the server will be deleted automatically on ${dt}.`,
     lockedText: 'This server was suspended by the team. Please contact support.',
+    softwareFailed: 'The selected server software could not be set up yet. We retry automatically – you do not need to do anything. If it takes longer, please open a ticket.',
     lockedTextWarning: 'This server is temporarily offline because of a warning. How much longer is shown above under “Warnings” – after that it is released automatically.',
     lockedTextBan: 'This server is suspended because your account has been banned permanently.',
     abuseBadge: 'Abuse',
@@ -645,7 +647,7 @@ return {
       },
       {
         q: 'Which Minecraft versions are supported?',
-        a: `You can choose between ${minecraftTypes.map((t) => t.name).join(', ')} – from current versions to classics like 1.8.8, 1.12.2 and 1.16.5. You can change the version and server type later in the panel via the startup parameters.`,
+        a: `You can choose between ${minecraftTypes.map((t) => t.name).join(', ')} and more – from current versions to classics like 1.8.8, 1.12.2 and 1.16.5. You can change the version and server type later in the panel via the startup parameters.`,
       },
       {
         q: 'How much RAM do I get?',
@@ -915,7 +917,7 @@ return {
       failed: { ok: false, title: 'Linking failed', text: 'Discord did not confirm the request. Please try again.' },
       email_taken: { ok: false, title: 'This email address already belongs to an account', text: 'An account already exists for this email address. Sign in there (with Discord or with a code by email) – or enter a different email address.' },
       no_account: { ok: false, title: 'No account with this Discord account yet', text: 'There is no account for this Discord account yet. Create a server first – you sign up with Discord while doing so.' },
-      locked: { ok: false, title: 'Account locked', text: 'This account is locked. Please contact support.' },
+      locked: { ok: false, title: 'Account locked', text: 'This account or Discord account is locked (e.g. permanently for repeated rule violations) – or there is a warning for your account; until it is resolved the link cannot be changed. If you have questions, please open a ticket.' },
     } as Record<string, { ok: boolean; title: string; text: string }>,
   },
   beta: {

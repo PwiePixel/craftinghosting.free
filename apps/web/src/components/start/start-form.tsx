@@ -289,7 +289,7 @@ export function StartForm({
       </Step>
 
       <Step n={2 + offset} title={bot ? s.stepRuntime : s.stepSoftware}>
-        <div className={cn('grid grid-cols-2 gap-2', bot ? 'sm:max-w-sm' : 'sm:grid-cols-5')} role="radiogroup" aria-label={bot ? s.runtimeGroup : s.typeGroup}>
+        <div className={cn('grid grid-cols-2 gap-2', bot ? 'sm:max-w-sm' : 'sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]')} role="radiogroup" aria-label={bot ? s.runtimeGroup : s.typeGroup}>
           {serverTypes.map((type_) => {
             const ok = typeOk(type_.id);
             const selected = type_.id === typeId;

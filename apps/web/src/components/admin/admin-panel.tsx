@@ -56,6 +56,9 @@ export function PanelManager() {
   const [saved, setSaved] = useState<Selection | null>(null);
   const [sel, setSel] = useState<Selection | null>(null);
   /** Private Nodes: nie für kostenlose Server – auch nicht, wenn alle anderen voll sind */
+  /** Software-Katalog aus den Einstellungen: Hier stehen ALLE Einträge (auch abgeschaltete und eigene) zur Zuordnung */
+  const [software, setSoftware] = useState<{ id: string; name: string; directory: string; eggOnly: boolean }[]>([]);
+  const typesOf = (kind: ProductKind): { id: string; name: string; directory?: string | null; eggOnly?: boolean }[] => (kind === 'minecraft' && software.length ? software : serverTypesOf(kind));
   const [priv, setPriv] = useState<number[]>([]);
   const [savedPriv, setSavedPriv] = useState<number[]>([]);
   const [discordEnabled, setDiscordEnabled] = useState(true);
@@ -82,6 +85,7 @@ export function PanelManager() {
       const res = await api<{ settings: SiteSettings }>('/admin/settings');
       setSaved(pick(res.settings));
       setSel(pick(res.settings));
+      setSoftware(res.settings.software.map((x) => ({ id: x.id, name: x.name, directory: x.directory, eggOnly: x.eggOnly })));
       setPriv(res.settings.privateNodeIds);
       setSavedPriv(res.settings.privateNodeIds);
       setDiscordEnabled(res.settings.products.discord.enabled);
@@ -133,7 +137,7 @@ export function PanelManager() {
   /** Vorschläge der automatischen Erkennung, die von der aktuellen Auswahl abweichen */
   const openSuggestions = sel
     ? productKinds.flatMap((kind) =>
-        serverTypesOf(kind)
+        typesOf(kind)
           .map((t) => ({ kind, typeId: t.id, egg: panel?.suggestedEggs[t.id] }))
           .filter((x): x is { kind: ProductKind; typeId: string; egg: EggRef } => !!x.egg && eggValue(x.egg) !== eggValue(sel[x.kind].eggs[x.typeId])),
       )
@@ -441,7 +445,7 @@ export function PanelManager() {
               <div key={kind}>
                 <p className="mb-2 text-sm font-medium text-gray-200">{PRODUCT_LABEL[kind]}</p>
                 <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
-                  {serverTypesOf(kind).map((t) => {
+                  {typesOf(kind).map((t) => {
                     const current = sel[kind].eggs[t.id];
                     const value = eggValue(current);
                     const known = !current || eggs.some((e) => eggValue(e) === value);
@@ -462,6 +466,8 @@ export function PanelManager() {
                             </p>
                           )}
                           {!known && panelKnown && <p className="mt-0.5 text-[12px] text-amber-300">Das gespeicherte Egg gibt es im Panel nicht mehr.</p>}
+                          {kind === 'minecraft' && t.id !== 'paper' && !!t.directory && !t.eggOnly && !current && <p className="mt-0.5 text-[12px] text-subtle">Kein Egg nötig – wird über MCJars eingerichtet (Grundlage: siehe Einstellungen → Server-Software).</p>}
+                          {kind === 'minecraft' && t.eggOnly && !current && <p className="mt-0.5 text-[12px] text-subtle">Läuft nur über ein eigenes Egg – ohne Zuordnung wird diese Software nicht angeboten.</p>}
                         </div>
                         <select
                           className="input md:max-w-[360px]"
