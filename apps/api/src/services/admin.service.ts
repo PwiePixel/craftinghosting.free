@@ -8,6 +8,8 @@ import {
   ADMIN_PAGE_SIZE,
   allPlans,
   findPlan,
+  normalizeLimitOverrides,
+  type UserLimitOverrides,
   cycleEndFor,
   productHasCycle,
   freeHostingConfig,
@@ -320,8 +322,38 @@ export async function listUsersAdmin(
     registrationIp: decryptField(u.registrationIp),
     lastLoginIp: decryptField(u.lastLoginIp),
     createdAt: u.createdAt.toISOString(),
+    limitOverrides: u.limitOverrides ? normalizeLimitOverrides(u.limitOverrides) : null,
   }));
   return { users: list, deletable: Number(deletableRow?.n ?? 0), ...info };
+}
+
+/**
+ * Abweichende Grenzen eines Nutzers setzen (Admin → Nutzer → Grenzen): Anzahl Minecraft-Server, Discord-Bots, gesamt und
+ * je Zusatzpaket bzw. freigeschaltetem Paket. Bestehende Server bleiben unberührt; die Grenzen gelten für neue Server.
+ */
+export async function setUserLimits(admin: User, userId: string, input: unknown, ip?: string): Promise<UserLimitOverrides | null> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw Errors.notFound(L('Nutzer nicht gefunden.', 'User not found.'));
+  const settings = await getSettings();
+  const known = new Set(productKinds.flatMap((k) => settings.products[k].plans.map((p) => p.id)));
+  const next = normalizeLimitOverrides(input);
+  // Nur Pakete, die es gibt
+  next.plans = Object.fromEntries(Object.entries(next.plans).filter(([id]) => known.has(id)));
+  const empty = next.minecraft === null && next.discord === null && next.total === null && Object.keys(next.plans).length === 0;
+  await db.update(users).set({ limitOverrides: empty ? null : next }).where(eq(users.id, userId));
+  const plan = (id: string) => findPlan(settings, id)?.name ?? id;
+  const text = empty
+    ? 'Standard-Grenzen'
+    : [
+        next.minecraft !== null ? `Minecraft ${next.minecraft}` : null,
+        next.discord !== null ? `Discord-Bots ${next.discord}` : null,
+        next.total !== null ? `gesamt ${next.total}` : null,
+        ...Object.entries(next.plans).map(([id, n]) => `${plan(id)} ×${n}`),
+      ]
+        .filter(Boolean)
+        .join(', ');
+  await audit({ userId, actor: 'admin', action: 'admin.user_limits', message: `Grenzen für ${user.email}: ${text} (durch ${admin.email})`, ip });
+  return empty ? null : next;
 }
 
 export async function listAudit(filter: { q?: string; page?: number }): Promise<{ entries: AdminAuditDTO[] } & PageInfo> {

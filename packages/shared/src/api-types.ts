@@ -432,6 +432,8 @@ export interface AdminUserDTO {
   registrationIp: string | null;
   lastLoginIp: string | null;
   createdAt: string;
+  /** Abweichende Grenzen und freigeschaltete Pakete (null = Standard) */
+  limitOverrides: UserLimitOverrides | null;
 }
 
 export interface AdminAuditDTO {
@@ -729,11 +731,43 @@ export interface HardwareLocation {
 }
 
 /** Ein Paket, wie es im Admin-Bereich gepflegt wird */
-export interface PlanSetting extends PlanConfig {
+export interface PlanSetting extends PlanConfig, PlanRules {
   /** false = nicht mehr wählbar (bestehende Server laufen weiter) */
   enabled: boolean;
   /** Außerhalb dieser Website belegte Plätze (z. B. Server im alten System auf denselben Nodes) */
   reserved: number;
+}
+
+/** Wer ein Paket bestellen darf, mit welcher Software und wie oft (Admin → Pakete) */
+export interface PlanRules {
+  /** Feste Software für dieses Paket (z. B. nur Velocity). Leer = die im Bestellformular freigegebene Software */
+  serverTypes: string[];
+  /** all = im Bestellformular für alle · granted = nur für Nutzer, denen das Team es freigeschaltet hat */
+  audience: 'all' | 'granted';
+  /**
+   * Eigene Grenze je Person (Zusatzpaket): Server dieses Pakets zählen nicht gegen die normale Grenze des Angebots
+   * (z. B. ein Bedrock-Server zusätzlich zu den Java-Servern). null = normales Paket. Bei „nur freigeschaltet“ legt
+   * die Freischaltung beim Nutzer die Zahl fest (Standard 0).
+   */
+  perUser: number | null;
+}
+
+/** Abweichende Grenzen für einen Nutzer (Admin → Nutzer). null = Standard aus den Einstellungen */
+export interface UserLimitOverrides {
+  minecraft: number | null;
+  discord: number | null;
+  total: number | null;
+  /** Zusatzpakete und freigeschaltete Pakete: wie viele Server dieses Pakets der Nutzer haben darf */
+  plans: Record<string, number>;
+}
+
+/** Grenzen, die für den angemeldeten Nutzer gelten (Bestellformular, „Meine Server“) */
+export interface UserLimitsDTO {
+  limits: ServerLimits;
+  /** Zusatzpakete: Paket-ID → erlaubte Anzahl */
+  extra: Record<string, number>;
+  /** Nur für diesen Nutzer freigeschaltete Pakete (stehen nicht in der öffentlichen Liste) */
+  plans: PublicPlanDTO[];
 }
 
 /** Egg in Pterodactyl (Nest + Egg) */
@@ -774,7 +808,7 @@ export interface PlanAvailabilityDTO {
 }
 
 /** Paket mit Belegung für die Website */
-export interface PublicPlanDTO extends PlanConfig, PlanAvailabilityDTO {
+export interface PublicPlanDTO extends PlanConfig, PlanAvailabilityDTO, PlanRules {
   kind: ProductKind;
 }
 
@@ -810,8 +844,11 @@ export interface PublicProductDTO {
   available: boolean;
   /** Nur aktive Pakete */
   plans: PublicPlanDTO[];
-  /** Servertypen: ob ein Egg dafür eingerichtet ist und welche Versionen wählbar sind */
-  serverTypes: { id: string; available: boolean; versions: string[] }[];
+  /**
+   * Servertypen: ob ein Egg dafür eingerichtet ist und welche Versionen wählbar sind. `general` = für Pakete ohne feste
+   * Software wählbar; Software, die nur über ein festes Paket kommt (z. B. Proxy), hat general = false.
+   */
+  serverTypes: { id: string; available: boolean; versions: string[]; general: boolean }[];
 }
 
 /** Software im Bestellformular: Name und Beschreibung kommen aus dem Katalog des Admin-Bereichs */

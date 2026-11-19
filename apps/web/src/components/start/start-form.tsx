@@ -47,6 +47,7 @@ export function StartForm({
   takenPlans = [],
   lockedPlans = [],
   bonusSlots = 0,
+  extra = {},
   userEmail,
   early = false,
   newsletterOption = false,
@@ -65,6 +66,8 @@ export function StartForm({
   lockedPlans?: string[];
   /** Anzahl zusätzlicher Slots aus Belohnungen (nur für den Hinweis) */
   bonusSlots?: number;
+  /** Zusatzpakete: Paket-ID → erlaubte Anzahl (für den Hinweis „zusätzlich“) */
+  extra?: Record<string, number>;
   userEmail?: string;
   /** Häkchen „Newsletter abonnieren“ anbieten (Admin-Einstellung; nur ohne Anmeldung) */
   newsletterOption?: boolean;
@@ -92,7 +95,13 @@ export function StartForm({
   const [kind, setKind] = useState<ProductKind>(startKind);
   const bot = kind === 'discord';
   const plans = products[kind].plans;
-  const serverTypes = serverTypesOf(kind);
+  // Software eines Pakets: feste Software (z. B. Proxy-Paket) oder die im Bestellformular für alle freigegebene
+  const typesFor = (pid: string, k: ProductKind = kind) => {
+    const pl = products[k].plans.find((x) => x.id === pid);
+    const all = serverTypesOf(k);
+    if (pl && pl.serverTypes?.length) return all.filter((x) => pl.serverTypes.includes(x.id));
+    return all.filter((x) => products[k].serverTypes.find((a) => a.id === x.id)?.general !== false);
+  };
   const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && !lockedPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false);
   const typeOk = (id: string, k: ProductKind = kind) => products[k].serverTypes.find((a) => a.id === id)?.available ?? true;
 
@@ -100,12 +109,15 @@ export function StartForm({
     const list = products[k].plans;
     return (list.find((p) => p.highlighted && p.available) ?? list.find((p) => p.available) ?? list[0])?.id ?? '';
   };
-  const defaultType = (k: ProductKind) => {
-    const list = serverTypesOf(k);
-    return list.find((t) => t.recommended && typeOk(t.id, k)) ?? list.find((t) => typeOk(t.id, k)) ?? list[0]!;
+  const defaultType = (k: ProductKind, pid: string) => {
+    const list = typesFor(pid, k);
+    const all = list.length ? list : serverTypesOf(k);
+    return all.find((t) => t.recommended && typeOk(t.id, k)) ?? all.find((t) => typeOk(t.id, k)) ?? all[0]!;
   };
-  const firstType = defaultType(startKind);
-  const [planId, setPlanId] = useState(initialPlan && planOk(initialPlan, startKind) ? initialPlan : defaultPlan(startKind));
+  const firstPlan = initialPlan && planOk(initialPlan, startKind) ? initialPlan : defaultPlan(startKind);
+  const firstType = defaultType(startKind, firstPlan);
+  const [planId, setPlanId] = useState(firstPlan);
+  const serverTypes = typesFor(planId);
   const [typeId, setTypeId] = useState(firstType.id);
   const [version, setVersion] = useState(() => {
     // Versionsliste aus dem Admin-Bereich – die Standardversion nur, wenn sie darin vorkommt
@@ -114,9 +126,10 @@ export function StartForm({
   });
   function switchKind(k: ProductKind) {
     if (k === kind) return;
-    const type = defaultType(k);
+    const pid = defaultPlan(k);
+    const type = defaultType(k, pid);
     setKind(k);
-    setPlanId(defaultPlan(k));
+    setPlanId(pid);
     setTypeId(type.id);
     setVersion(firstVersion(type.id, k));
   }
@@ -139,6 +152,15 @@ export function StartForm({
     return preferred && list.includes(preferred) ? preferred : list[0]!;
   };
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // Anderes Paket: Passt die gewählte Software nicht (z. B. Proxy-Paket), die erste passende wählen
+  function selectPlan(pid: string) {
+    setPlanId(pid);
+    if (!typesFor(pid).some((x) => x.id === typeId)) {
+      const next = defaultType(kind, pid);
+      setTypeId(next.id);
+      setVersion(firstVersion(next.id));
+    }
+  }
 
   const loggedIn = !!userEmail;
   const form = useForm(loggedIn ? createServerSchema : startSchema);
@@ -266,7 +288,7 @@ export function StartForm({
                   !ok && 'cursor-not-allowed opacity-50',
                 )}
               >
-                <input type="radio" name="plan" className="sr-only" checked={selected} disabled={!ok} onChange={() => setPlanId(p.id)} />
+                <input type="radio" name="plan" className="sr-only" checked={selected} disabled={!ok} onChange={() => selectPlan(p.id)} />
                 <span className="flex items-center justify-between">
                   <span className="font-medium text-white">{p.name}</span>
                   <span className={cn('flex size-5 items-center justify-center rounded-full border', selected ? 'border-blue-500 bg-blue-500' : 'border-line-strong')}>
@@ -276,6 +298,10 @@ export function StartForm({
                 <span className="mt-1 block text-[13px] text-muted">
                   {s.planSpecs(formatMb(p.memoryMb, lang), formatMb(p.diskMb, lang), p.cpuPercent)}
                 </span>
+                {p.serverTypes?.length > 0 && (
+                  <span className="mt-1 block text-[13px] text-blue-300">{s.planOnly(p.serverTypes.map((id) => serverTypesOf(kind).find((x) => x.id === id)?.name ?? id).join(', '))}</span>
+                )}
+                {extra[p.id] !== undefined && extra[p.id]! > 0 && <span className="mt-1 block text-[13px] text-emerald-300">{s.planExtra(extra[p.id]!)}</span>}
                 {!ok && <span className="mt-1 block text-[13px] text-amber-300">{takenPlans.includes(p.id) ? s.planTaken : lockedPlans.includes(p.id) ? s.planLocked : s.soldOut}</span>}
                 {ok && p.capacity != null && p.remaining != null && (
                   <span className="mt-1 block text-[13px] text-emerald-300">

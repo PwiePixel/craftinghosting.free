@@ -275,6 +275,8 @@ return {
     stepAccount: 'Account',
     stepEmail: 'Your email address',
     planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · up to ${cpu} % CPU`,
+    planOnly: (names: string) => `${names} only`,
+    planExtra: (n: number) => (n === 1 ? 'In addition to your other servers' : `Up to ${n}× in addition to your other servers`),
     soldOut: 'Currently fully booked',
     planTaken: 'You already have this plan',
     planLocked: 'Not available with your free slots',

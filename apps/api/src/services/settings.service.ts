@@ -17,6 +17,9 @@ import {
   websiteEpycSlots,
   type BrandSettings,
   type PlanAvailabilityDTO,
+  type PlanSetting,
+  type PublicPlanDTO,
+  type ServerTypeConfig,
   type ProductKind,
   type PublicProductDTO,
   type PublicSiteDTO,
@@ -282,12 +285,42 @@ export async function capacityState(
  * Ist ein Servertyp bestellbar? Es braucht ein Egg – und Discord-Bots zusätzlich eine eigene Node
  * (Admin → Pterodactyl), damit sie nie auf den Minecraft-Nodes landen.
  */
-export function serverTypeAvailable(serverType: string, settings: SiteSettings): boolean {
+/**
+ * Kann diese Software auf der Website bestellt werden? Ohne Paket bzw. bei einem Paket ohne feste Software: nur, was im
+ * Software-Katalog für die Website freigegeben ist. Paket mit fester Software (z. B. ein Proxy-Paket): nur diese
+ * Software – unabhängig vom Schalter „Auf der Website anbieten“, aber nur, wenn sie sich installieren lässt.
+ */
+export function serverTypeAvailable(serverType: string, settings: SiteSettings, plan?: { kind: ProductKind; serverTypes: string[] }): boolean {
   const type = getServerType(serverType);
-  // Im Software-Katalog für die Website abgeschaltet?
-  if (!type || type.website === false) return false;
+  if (!type) return false;
+  if (plan && plan.serverTypes.length > 0) {
+    if (type.kind !== plan.kind || !plan.serverTypes.includes(serverType)) return false;
+  } else if (type.website === false) return false;
   if (installMethodOf(serverType, settings) === null) return false;
   return type.kind === 'minecraft' || env.PTERODACTYL_MODE === 'mock' || settings.products.discord.nodeIds.length > 0;
+}
+
+/**
+ * Software, die im Bestellformular vorkommen kann: alles für die Website Freigegebene (general) und zusätzlich die feste
+ * Software aktiver Pakete (z. B. Velocity im Proxy-Paket – nur über dieses Paket wählbar).
+ */
+function offeredTypes(kind: ProductKind, s: SiteSettings): (ServerTypeConfig & { general: boolean })[] {
+  const general = websiteTypesOf(kind);
+  const ids = new Set(general.map((t) => t.id));
+  const fixed = s.products[kind].plans
+    .filter((p) => p.enabled)
+    .flatMap((p) => p.serverTypes)
+    .filter((id, i, all) => all.indexOf(id) === i && !ids.has(id))
+    .map((id) => getServerType(id))
+    .filter((t): t is ServerTypeConfig => !!t && t.kind === kind);
+  return [...general.map((t) => ({ ...t, general: true })), ...fixed.map((t) => ({ ...t, general: false }))];
+}
+
+/** Paket für die Website (ohne interne Felder) mit Belegung */
+export function publicPlan(plan: PlanSetting, kind: ProductKind, capacity: Awaited<ReturnType<typeof capacityState>>): PublicPlanDTO {
+  const { enabled: _enabled, reserved: _reserved, ...rest } = plan;
+  const { kind: _k, ...availability } = capacity.plans.find((a) => a.id === plan.id)!;
+  return { ...rest, ...availability, kind };
 }
 
 let publicCache: { value: PublicSiteDTO; at: number } | null = null;
@@ -324,7 +357,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     },
     plans: capacity.plans.map(({ kind: _kind, ...p }) => p),
     // Minecraft-Software im Bestellformular: Name und Beschreibung aus dem Katalog, Versionen wie angeboten
-    software: websiteTypesOf('minecraft').map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: offeredVersionsCached(s, t.id), defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
+    software: offeredTypes('minecraft', s).map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: offeredVersionsCached(s, t.id), defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
     products: Object.fromEntries(
       productKinds.map((kind): [ProductKind, PublicProductDTO] => {
         const p = s.products[kind];
@@ -336,10 +369,11 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
             enabled: p.enabled,
             fairUse: p.fairUse,
             ...c,
+            // Nur für freigeschaltete Nutzer: nicht in der öffentlichen Liste (die Nutzer bekommen sie über /servers)
             plans: p.plans
-              .filter((plan) => plan.enabled)
-              .map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, ...capacity.plans.find((a) => a.id === plan.id)! })),
-            serverTypes: websiteTypesOf(kind).map((t) => ({ id: t.id, available: serverTypeAvailable(t.id, s), versions: offeredVersionsCached(s, t.id) })),
+              .filter((plan) => plan.enabled && plan.audience === 'all')
+              .map((plan) => publicPlan(plan, kind, capacity)),
+            serverTypes: offeredTypes(kind, s).map((t) => ({ id: t.id, available: t.general ? serverTypeAvailable(t.id, s) : installMethodOf(t.id, s) !== null, versions: offeredVersionsCached(s, t.id), general: t.general })),
           },
         ];
       }),

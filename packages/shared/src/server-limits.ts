@@ -60,6 +60,36 @@ export interface BonusSlot {
   planId: string | null;
 }
 
+/**
+ * Zusatzpakete: Paket-ID → erlaubte Anzahl je Person. Server dieser Pakete zählen nur gegen diese Zahl, nicht gegen die
+ * Grenzen des Angebots oder die Gesamtgrenze.
+ */
+export type ExtraAllowances = Record<string, number>;
+
+const isExtra = (extra: ExtraAllowances, planId: string) => Object.hasOwn(extra, planId);
+
+/** Erlaubte Zusatzpakete: aus den Paketen (eigene Grenze / nur freigeschaltet) und den Freischaltungen des Nutzers */
+export function extraAllowances(plans: readonly { id: string; perUser: number | null; audience: 'all' | 'granted' }[], overrides?: { plans: Record<string, number> } | null): ExtraAllowances {
+  const out: ExtraAllowances = {};
+  for (const p of plans) {
+    if (p.perUser === null && p.audience === 'all') continue;
+    const own = overrides && Object.hasOwn(overrides.plans, p.id) ? overrides.plans[p.id]! : null;
+    out[p.id] = Math.max(0, own ?? (p.audience === 'granted' ? 0 : (p.perUser ?? 0)));
+  }
+  return out;
+}
+
+/** Grenzen mit den Abweichungen eines Nutzers */
+export function applyLimitOverrides(limits: ServerLimits, overrides?: { minecraft: number | null; discord: number | null; total: number | null } | null): ServerLimits {
+  if (!overrides) return limits;
+  return {
+    ...limits,
+    minecraft: overrides.minecraft ?? limits.minecraft,
+    discord: overrides.discord ?? limits.discord,
+    total: overrides.total ?? limits.total,
+  };
+}
+
 /** kind = Grenze des Angebots erreicht · total = Gesamtgrenze erreicht · plan = dieses Paket hat die Person schon */
 export type ServerLimitBlock = 'kind' | 'total' | 'plan';
 
@@ -81,7 +111,10 @@ function uncovered(owned: OwnedServerRef[], bonus: BonusSlot[]): OwnedServerRef[
  * Darf die Person noch einen Server dieses Angebots (und, falls angegeben, dieses Pakets) anlegen? null = ja.
  * Bonus-Slots ohne Paketbindung erhöhen die Grenze des Angebots (und die Gesamtgrenze) um eins.
  */
-export function serverLimitBlock(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planId?: string, bonus: BonusSlot[] = []): ServerLimitBlock | null {
+export function serverLimitBlock(limits: ServerLimits, ownedAll: OwnedServerRef[], kind: ProductKind, planId?: string, bonus: BonusSlot[] = [], extra: ExtraAllowances = {}): ServerLimitBlock | null {
+  // Zusatzpaket: nur die eigene Grenze zählt
+  if (planId && isExtra(extra, planId)) return ownedAll.filter((o) => o.planId === planId).length >= extra[planId]! ? 'plan' : null;
+  const owned = ownedAll.filter((o) => !isExtra(extra, o.planId));
   const counted = uncovered(owned, bonus);
   // Deckt ein paketgebundener Bonus-Slot den neuen Server, ist er immer möglich
   if (planId && uncovered([...owned, { kind, planId }], bonus).length === counted.length) return null;
@@ -93,15 +126,15 @@ export function serverLimitBlock(limits: ServerLimits, owned: OwnedServerRef[], 
 }
 
 /** Pakete eines Angebots, die die Person nicht (mehr) wählen kann, weil sie sie schon hat */
-export function takenPlanIds(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, bonus: BonusSlot[] = []): string[] {
-  if (!limits.uniquePlan[kind]) return [];
-  return [...new Set(owned.filter((o) => o.kind === kind).map((o) => o.planId))].filter((id) => serverLimitBlock(limits, owned, kind, id, bonus) === 'plan');
+export function takenPlanIds(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, bonus: BonusSlot[] = [], extra: ExtraAllowances = {}): string[] {
+  const ids = new Set(owned.filter((o) => o.kind === kind).map((o) => o.planId));
+  return [...ids].filter((id) => (limits.uniquePlan[kind] || isExtra(extra, id)) && serverLimitBlock(limits, owned, kind, id, bonus, extra) === 'plan');
 }
 
 /** Ist das Angebot für die Person ganz ausgeschöpft? `planIds` = die buchbaren Pakete dieses Angebots */
-export function kindExhausted(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planIds: string[], bonus: BonusSlot[] = []): boolean {
-  if (planIds.length === 0) return serverLimitBlock(limits, owned, kind, undefined, bonus) !== null;
-  return planIds.every((id) => serverLimitBlock(limits, owned, kind, id, bonus) !== null);
+export function kindExhausted(limits: ServerLimits, owned: OwnedServerRef[], kind: ProductKind, planIds: string[], bonus: BonusSlot[] = [], extra: ExtraAllowances = {}): boolean {
+  if (planIds.length === 0) return serverLimitBlock(limits, owned, kind, undefined, bonus, extra) !== null;
+  return planIds.every((id) => serverLimitBlock(limits, owned, kind, id, bonus, extra) !== null);
 }
 
 /** Die Grenzen als Satz für Website, Regeln und FAQ. `offered` = die Angebote, die es gerade gibt */

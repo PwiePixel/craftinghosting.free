@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { Check } from 'lucide-react';
-import { describeServerLimits, isProductKind, kindExhausted, localePath, productKinds, serverLimitBlock, takenPlanIds, type BonusSlot, type ServerDTO } from '@chfree/shared';
+import { describeServerLimits, extraAllowances, isProductKind, kindExhausted, localePath, productKinds, serverLimitBlock, takenPlanIds, type BonusSlot, type ServerDTO, type UserLimitsDTO } from '@chfree/shared';
 import { VerifyFlow } from '@/components/start/verify-flow';
 import { Alert } from '@/components/ui/primitives';
 import { StartForm } from '@/components/start/start-form';
@@ -44,29 +44,38 @@ export default async function StartPage({ params, searchParams }: Props) {
   // /start?type=discord öffnet direkt das Discord-Bot-Formular
   const initialKind = isProductKind(query.type) ? query.type : undefined;
   const mode = settings.registration.mode;
-  const limits = settings.registration.limits;
+  let limits = settings.registration.limits;
   const early = mode === 'preregistration';
 
   let servers: ServerDTO[] = [];
   // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
   let bonusSlots: BonusSlot[] = [];
+  // Zusatzpakete (eigene Grenze je Person) und nur für diesen Nutzer freigeschaltete Pakete
+  let extra: Record<string, number> = extraAllowances(productKinds.flatMap((k) => settings.products[k].plans));
+  let products = settings.products;
   if (me) {
-    const res = await apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[] }>('/servers', lang);
+    const res = await apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[]; limits?: UserLimitsDTO }>('/servers', lang);
     if (res.ok) {
       servers = res.data.servers;
       bonusSlots = res.data.bonusSlots ?? [];
+      if (res.data.limits) {
+        limits = res.data.limits.limits;
+        extra = res.data.limits.extra;
+        const granted = res.data.limits.plans;
+        products = Object.fromEntries(productKinds.map((k) => [k, { ...settings.products[k], plans: [...settings.products[k].plans, ...granted.filter((p) => p.kind === k)] }])) as typeof products;
+      }
     }
   }
   const ownedServers = servers.filter((srv) => srv.status !== 'pending' && srv.status !== 'waitlist');
   const owned = ownedServers.length;
-  const offered = productKinds.filter((k) => settings.products[k].enabled && settings.products[k].plans.length > 0);
+  const offered = productKinds.filter((k) => products[k].enabled && products[k].plans.length > 0);
   // Grenzen aus dem Admin-Bereich: je Angebot, zusammen und – falls eingestellt – jedes Paket nur einmal
   const ownedRefs = ownedServers.map((srv) => ({ kind: srv.kind, planId: srv.planId }));
-  const blockedKinds = productKinds.filter((k) => kindExhausted(limits, ownedRefs, k, settings.products[k].plans.map((p) => p.id), bonusSlots));
-  const takenPlans = productKinds.flatMap((k) => takenPlanIds(limits, ownedRefs, k, bonusSlots));
+  const blockedKinds = productKinds.filter((k) => kindExhausted(limits, ownedRefs, k, products[k].plans.map((p) => p.id), bonusSlots, extra));
+  const takenPlans = productKinds.flatMap((k) => takenPlanIds(limits, ownedRefs, k, bonusSlots, extra));
   // Pakete, für die gerade kein Slot frei ist (z. B. wenn nur noch ein paketgebundener Bonus-Slot übrig ist)
   const lockedPlans = productKinds.flatMap((k) =>
-    settings.products[k].plans.map((p) => p.id).filter((id) => !takenPlans.includes(id) && serverLimitBlock(limits, ownedRefs, k, id, bonusSlots) !== null),
+    products[k].plans.map((p) => p.id).filter((id) => !takenPlans.includes(id) && serverLimitBlock(limits, ownedRefs, k, id, bonusSlots, extra) !== null),
   );
   const allBlocked = offered.length > 0 && offered.every((k) => blockedKinds.includes(k));
   const waitlistEntry = servers.find((srv) => srv.status === 'waitlist' && srv.waitlist);
@@ -123,13 +132,14 @@ export default async function StartPage({ params, searchParams }: Props) {
     }
     content = (
       <StartForm
-        products={settings.products}
+        products={products}
         initialPlan={initialPlan}
         initialKind={initialKind}
         blockedKinds={early ? [] : blockedKinds}
         takenPlans={early ? [] : takenPlans}
         lockedPlans={early || !me ? [] : lockedPlans}
         bonusSlots={bonusSlots.length}
+        extra={extra}
         userEmail={me?.user.email}
         early={early}
         newsletterOption={settings.newsletter.signupCheckbox}

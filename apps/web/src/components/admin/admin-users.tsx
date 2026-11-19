@@ -8,6 +8,7 @@
  *  – per eingefügter E-Mail-Liste
  * Eigene Konten und Admins werden nie gelöscht.
  */
+import { UserLimitsButton } from '@/components/admin/admin-user-limits';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { ArrowUpRight, ListX, Trash2 } from 'lucide-react';
@@ -345,6 +346,7 @@ export function UsersTable({
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap gap-1.5">
                     <UserActions user={u} self={u.id === meId} />
+                    <UserLimitsButton user={u} />
                     {deletable(u) && (
                       <ActionButton
                         label="Löschen"

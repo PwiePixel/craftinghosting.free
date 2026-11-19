@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowUpRight, Bot, FlaskConical, Pickaxe, Plus, ShieldAlert, SquareTerminal } from 'lucide-react';
 import { TileUsage } from '@/components/my/server-tile';
-import { kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
+import { kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type ProductKind, type UserLimitsDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink, buttonClasses } from '@/components/ui/button';
@@ -272,7 +272,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const t = d.my;
   const query = await searchParams;
   const { user, panelUrl } = await requireUser(lang, 'myServers');
-  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[]; warnings?: WarningStatusDTO }>('/servers', lang), getSite()]);
+  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[]; warnings?: WarningStatusDTO; limits?: UserLimitsDTO }>('/servers', lang), getSite()]);
   // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
   const bonusSlots: BonusSlot[] = res.ok ? (res.data.bonusSlots ?? []) : [];
   // Discord-Verknüpfung nur abfragen, wenn die Anbindung eingerichtet ist
@@ -291,16 +291,20 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const mode = settings.registration.mode;
   const x = siteTexts(settings, lang);
   // Ein weiterer Server ist möglich, solange ein Angebot noch nicht ausgeschöpft ist (Grenzen je Angebot, zusammen und je Paket)
+  // Grenzen dieses Nutzers (mit Abweichungen, Zusatzpaketen und freigeschalteten Paketen)
+  const userLimits = res.ok ? res.data.limits : undefined;
+  const planIdsOf = (k: ProductKind) => [...settings.products[k].plans.map((p) => p.id), ...(userLimits?.plans.filter((p) => p.kind === k).map((p) => p.id) ?? [])];
   const freeKind = productKinds.some(
     (k) =>
       settings.products[k].enabled &&
-      settings.products[k].plans.length > 0 &&
+      planIdsOf(k).length > 0 &&
       !kindExhausted(
-        settings.registration.limits,
+        userLimits?.limits ?? settings.registration.limits,
         ownedServers.map((s) => ({ kind: s.kind, planId: s.planId })),
         k,
-        settings.products[k].plans.map((p) => p.id),
+        planIdsOf(k),
         bonusSlots,
+        userLimits?.extra ?? {},
       ),
   );
   const maintenance = settings.maintenance.enabled;

@@ -21,6 +21,14 @@ import {
   type PendingReason,
   type ServerLimitBlock,
   type ServerLimits,
+  applyLimitOverrides,
+  extraAllowances,
+  normalizeLimitOverrides,
+  productKinds,
+  type BonusSlot,
+  type ExtraAllowances,
+  type SiteSettings,
+  type UserLimitsDTO,
 } from '@chfree/shared';
 import { affectedRows, db, writeTx } from '../db/client';
 import { servers, users, type Server, type User } from '../db/schema';
@@ -41,7 +49,7 @@ import { panelServerUrl, trySyncPanelDescription } from './panel';
 import { closeOpenSession } from './power-state';
 import { provisionServer } from './provisioning.service';
 import { computeRuntimeState, loadWeekSessions } from './runtime';
-import { capacityState, getSettings, serverTypeAvailable, waitlistRank } from './settings.service';
+import { capacityState, getSettings, publicPlan, serverTypeAvailable, waitlistRank } from './settings.service';
 import { confirmWaitlist, hasWaitlistEntry } from './waitlist.service';
 
 const { cycle: cycleRules } = freeHostingConfig;
@@ -168,7 +176,7 @@ export async function assertConfigAvailable(input: ServerConfigInput, opts: { ig
   if (!settings.products[plan.kind].enabled) {
     throw Errors.conflict('product_disabled', L('Dieses Angebot ist aktuell nicht verfügbar.', 'This offer is currently not available.'));
   }
-  if (!serverTypeAvailable(input.serverType, settings)) {
+  if (!serverTypeAvailable(input.serverType, settings, plan)) {
     throw Errors.badRequest('server_type_unavailable', L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'), {
       serverType: L('Dieser Servertyp ist aktuell nicht verfügbar.', 'This server type is currently not available.'),
     });
@@ -239,9 +247,8 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
   // Discord-Pflicht: Die Anfrage bleibt offen, bis das Konto verknüpft und der Nutzer Mitglied des Discord-Servers ist
   if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
-  const limits = (await getSettings()).registration.limits;
-  // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
-  const bonus = await bonusSlotsFor(user);
+  // Grenzen des Nutzers (mit Abweichungen, Bonus-Slots aus Belohnungen und Zusatzpaketen)
+  const { limits, bonus, extra } = await limitContextFor(user);
   await writeTx(async (tx) => {
     const pending = await tx
       .select()
@@ -255,7 +262,7 @@ export async function activatePendingServers(user: User, ip?: string): Promise<s
       .where(and(eq(servers.userId, user.id), inArray(servers.status, [...OWNED_STATUSES])));
     const now = new Date();
     for (const p of pending) {
-      if (serverLimitBlock(limits, owned, p.kind, p.planId, bonus) === null) {
+      if (serverLimitBlock(limits, owned, p.kind, p.planId, bonus, extra) === null) {
         await tx
           .update(servers)
           .set({ status: 'provisioning', cycleStartedAt: now, cycleEndsAt: cycleEndFor(p.kind, now, cycleRules) })
@@ -333,9 +340,39 @@ export async function ownedServerRefs(userId: string): Promise<OwnedServerRef[]>
     .where(and(eq(servers.userId, userId), inArray(servers.status, [...OWNED_STATUSES])));
 }
 
+/**
+ * Grenzen, die für diesen Nutzer gelten: die aus den Einstellungen mit seinen Abweichungen (Admin → Nutzer → Grenzen),
+ * Bonus-Slots aus Belohnungen und Zusatzpakete (eigene Grenze je Person bzw. freigeschaltete Pakete).
+ */
+export async function limitContextFor(user: Pick<User, 'id' | 'discordId' | 'limitOverrides'>, settings?: SiteSettings): Promise<{ limits: ServerLimits; bonus: BonusSlot[]; extra: ExtraAllowances }> {
+  const s = settings ?? (await getSettings());
+  const overrides = user.limitOverrides ? normalizeLimitOverrides(user.limitOverrides) : null;
+  const plans = productKinds.flatMap((k) => s.products[k].plans);
+  return { limits: applyLimitOverrides(s.registration.limits, overrides), bonus: await bonusSlotsFor(user).catch(() => []), extra: extraAllowances(plans, overrides) };
+}
+
+/** Grenzen und freigeschaltete Pakete für „Meine Server“ und das Bestellformular */
+export async function userLimitsDTO(user: User): Promise<UserLimitsDTO> {
+  const settings = await getSettings();
+  const ctx = await limitContextFor(user, settings);
+  const capacity = await capacityState(settings);
+  const plans = productKinds.flatMap((k) =>
+    settings.products[k].plans.filter((p) => p.enabled && p.audience === 'granted' && (ctx.extra[p.id] ?? 0) > 0).map((p) => publicPlan(p, k, capacity)),
+  );
+  return { limits: ctx.limits, extra: ctx.extra, plans };
+}
+
 /** Meldung, warum kein weiterer Server möglich ist – passend zur Grenze, die greift */
-export const serverLimitReached = (block: ServerLimitBlock, limits: ServerLimits, kind: ProductKind) => {
+export const serverLimitReached = (block: ServerLimitBlock, limits: ServerLimits, kind: ProductKind, extra?: { planName: string; allowed: number }) => {
   const all = L(describeServerLimits(limits, 'de'), describeServerLimits(limits, 'en'));
+  if (block === 'plan' && extra) {
+    return Errors.conflict(
+      'server_limit_reached',
+      extra.allowed === 0
+        ? L(`Das Paket „${extra.planName}“ ist für dein Konto nicht freigeschaltet.`, `The plan “${extra.planName}” is not enabled for your account.`)
+        : L(`Vom Paket „${extra.planName}“ sind höchstens ${extra.allowed} Server möglich – die hast du schon.`, `At most ${extra.allowed} servers of the plan “${extra.planName}” are possible – you already have them.`),
+    );
+  }
   const message =
     block === 'plan'
       ? L(`Dieses Paket hast du bereits – jedes Paket ist pro Account nur einmal möglich. Wähle ein anderes Paket. ${all.de}`, `You already have this plan – each plan can only be used once per account. Please choose another plan. ${all.en}`)
@@ -374,10 +411,11 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
   await assertConfigAvailable(input);
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
-  const limits = settings.registration.limits;
-  const kind = findPlan(settings, input.planId)?.kind ?? 'minecraft';
-  const block = serverLimitBlock(limits, await ownedServerRefs(user.id), kind, input.planId, await bonusSlotsFor(user));
-  if (block) throw serverLimitReached(block, limits, kind);
+  const { limits, bonus, extra } = await limitContextFor(user, settings);
+  const plan = findPlan(settings, input.planId);
+  const kind = plan?.kind ?? 'minecraft';
+  const block = serverLimitBlock(limits, await ownedServerRefs(user.id), kind, input.planId, bonus, extra);
+  if (block) throw serverLimitReached(block, limits, kind, plan && Object.hasOwn(extra, plan.id) ? { planName: plan.name, allowed: extra[plan.id]! } : undefined);
   if (settings.registration.mode === 'preregistration') {
     // Early Access: angemeldete Nutzer kommen direkt (bestätigt) auf die Warteliste – ein Platz pro Person
     if (await hasWaitlistEntry(user.id)) throw alreadyOnWaitlist();
@@ -415,7 +453,8 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
   // Vom Team aufgewertete Server sind ausgenommen – das Upgrade soll nicht an einer Boost-Grenze scheitern.
   if (!server.upgradedAt && (await hadBoostRewards(user.discordId))) {
     const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
-    if (serverLimitBlock((await getSettings()).registration.limits, others, server.kind, server.planId, await bonusSlotsFor(user)) !== null) {
+    const ctx = await limitContextFor(user);
+    if (serverLimitBlock(ctx.limits, others, server.kind, server.planId, ctx.bonus, ctx.extra) !== null) {
       throw Errors.conflict(
         'boost_reward_ended',
         L(

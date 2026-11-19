@@ -4,7 +4,7 @@ import { assertNotMaintenance } from '../lib/maintenance';
 import { z } from 'zod';
 import { createServerSchema, deleteServerSchema } from '@chfree/shared';
 import { currentUser, requireAuth } from '../plugins/auth';
-import { createServerForUser, deleteServer, listServers, reactivateServer } from '../services/server.service';
+import { createServerForUser, deleteServer, listServers, reactivateServer, userLimitsDTO } from '../services/server.service';
 import { warningStatus } from '../services/warnings.service';
 import { addServerPort, getServerDetail, getServerLive, listServersLive, removeServerPort, serverCommand, serverPower, streamWebConsole } from '../services/server-manage.service';
 
@@ -24,7 +24,7 @@ export async function serverRoutes(app: FastifyInstance) {
   app.get('/servers', async (request) => {
     const user = currentUser(request);
     // bonusSlots: zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts) – für die Anzeige der Grenzen
-    return { servers: await listServers(user), bonusSlots: await bonusSlotsFor(user).catch(() => []), warnings: await warningStatus(user) };
+    return { servers: await listServers(user), bonusSlots: await bonusSlotsFor(user).catch(() => []), warnings: await warningStatus(user), limits: await userLimitsDTO(user) };
   });
 
   app.post('/servers', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (request, reply) => {

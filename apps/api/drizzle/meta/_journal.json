@@ -169,6 +169,13 @@
       "when": 1795078069822,
       "tag": "0023_eula_consent_ban_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795085580135,
+      "tag": "0024_user_limit_overrides",
+      "breakpoints": true
     }
   ]
 }

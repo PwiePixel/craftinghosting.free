@@ -8,7 +8,9 @@ import type {
   DomainSetting,
   EggRef,
   HardwareLocation,
+  PlanRules,
   PlanSetting,
+  UserLimitOverrides,
   ProductSettings,
   RegistrationMode,
   RuleSettings,
@@ -22,7 +24,7 @@ import { defaultDiscordSettings, normalizeDiscordSettings } from './discord-sett
 import type { Locale, Localized } from './i18n';
 import { defaultStatusSettings, normalizeStatusSettings } from './status-settings';
 
-const toSetting = (p: PlanConfig): PlanSetting => ({ ...p, highlighted: p.highlighted ?? false, enabled: true, reserved: 0 });
+const toSetting = (p: PlanConfig): PlanSetting => ({ ...p, highlighted: p.highlighted ?? false, enabled: true, reserved: 0, serverTypes: [], audience: 'all', perUser: null });
 
 /** Standard-Pakete eines Produkts (aus der Konfigurationsdatei) */
 export function defaultPlans(kind: ProductKind): PlanSetting[] {
@@ -363,7 +365,27 @@ function normalizePlan(raw: unknown, kind: ProductKind, usedIds: Set<string>): P
     features,
     enabled: bool(v.enabled, true),
     reserved: int(v.reserved, 0, 0, 1_000_000),
+    // Feste Software: nur gültige Kennungen (geprüft wird gegen den Katalog, sobald er bekannt ist)
+    serverTypes: Array.isArray(v.serverTypes) ? [...new Set(v.serverTypes.filter((x): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{1,23}$/.test(x)))].slice(0, 20) : [],
+    audience: v.audience === 'granted' ? 'granted' : 'all',
+    perUser: v.perUser === null || v.perUser === undefined || v.perUser === '' ? null : int(v.perUser, 1, 0, 10),
   };
+}
+
+/** Abweichende Grenzen eines Nutzers prüfen und vereinheitlichen */
+export function normalizeLimitOverrides(input: unknown): UserLimitOverrides {
+  const v = obj(input);
+  const opt = (x: unknown, max: number) => (x === null || x === undefined || x === '' ? null : int(x, 0, 0, max));
+  const plans: Record<string, number> = {};
+  for (const [id, n] of Object.entries(obj(v.plans))) {
+    if (/^[a-z0-9][a-z0-9-]{0,31}$/.test(id) && Object.keys(plans).length < 50) plans[id] = int(n, 0, 0, 10);
+  }
+  return { minecraft: opt(v.minecraft, 20), discord: opt(v.discord, 20), total: opt(v.total, 40), plans };
+}
+
+/** Software eines Pakets: die feste Liste oder – ohne feste Software – `general` (die im Bestellformular freigegebene) */
+export function planServerTypes(plan: Pick<PlanRules, 'serverTypes'>, general: readonly string[]): string[] {
+  return plan.serverTypes.length > 0 ? [...plan.serverTypes] : [...general];
 }
 
 function normalizeEggs(raw: unknown): Record<string, EggRef> {

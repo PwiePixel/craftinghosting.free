@@ -38,7 +38,7 @@ import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.s
 import { rememberUserLocale } from './locale.service';
 import { linkExistingPanelAccount } from './provisioning.service';
 import { bonusSlotsFor } from '../discord/rewards';
-import { activatePendingServers, assertConfigAvailable, countOwnedServers, ownedServerRefs, registrationClosed, savePendingServer } from './server.service';
+import { activatePendingServers, assertConfigAvailable, countOwnedServers, ownedServerRefs, registrationClosed, savePendingServer, limitContextFor } from './server.service';
 
 type TokenType = 'verify_email' | 'login';
 
@@ -258,7 +258,8 @@ export async function finishDiscordSignup(user: User, input: StartInput, meta: {
   }
   const waitlistMode = settings.registration.mode === 'preregistration';
   const owned = await countOwnedServers(user.id);
-  const limitBlock = serverLimitBlock(settings.registration.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId, await bonusSlotsFor(user));
+  const ctx = await limitContextFor(user, settings);
+  const limitBlock = serverLimitBlock(ctx.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId, ctx.bonus, ctx.extra);
   const [open] = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, user.id), eq(servers.status, 'pending'))).limit(1);
   // Grenze erreicht oder schon eine offene Anfrage (z. B. doppelt abgeschickt): Es bleibt bei der Anmeldung
   if (settings.registration.mode !== 'closed' && limitBlock === null && !open && !(waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
@@ -492,7 +493,8 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   // Hat der Nutzer schon einen Server (bzw. in der Early-Access-Phase einen Wartelisten-Platz), schicken wir nur einen Anmeldecode.
   // Die Grenzen gelten je Angebot, zusammen und je Paket (Admin → Einstellungen); auf der Warteliste ist ein Platz pro Person möglich
   const owned = await countOwnedServers(user.id);
-  const limitBlock = serverLimitBlock(settings.registration.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId, await bonusSlotsFor(user));
+  const ctx = await limitContextFor(user, settings);
+  const limitBlock = serverLimitBlock(ctx.limits, await ownedServerRefs(user.id), findPlan(settings, input.planId)?.kind ?? 'minecraft', input.planId, ctx.bonus, ctx.extra);
   if (limitBlock !== null || (waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
     await sendCodeMail(user, 'login', (code) => loginMail(code, meta.locale)).catch(() => {
       throw mailFailed();

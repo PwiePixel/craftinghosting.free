@@ -8,7 +8,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { Plus, Save, Wrench } from 'lucide-react';
-import { describeServerLimits, productKinds, serverLimitBounds, type ProductKind, type RegistrationMode, type ServerLimits, type SiteSettings } from '@chfree/shared';
+import { builtinServerTypes, describeServerLimits, productKinds, serverLimitBounds, type ProductKind, type RegistrationMode, type ServerLimits, type SiteSettings } from '@chfree/shared';
 import { ActionButton } from '@/components/admin/admin-actions';
 import { ProductEditor } from '@/components/admin/admin-plans';
 import { MoreSettings } from '@/components/admin/admin-settings-more';
@@ -287,6 +287,11 @@ export function SettingsForm({
               planCounts={planCounts}
               productCount={productCounts[kind] ?? null}
               savedPlans={saved.products[kind].plans}
+              software={
+                kind === 'minecraft'
+                  ? s.software.map((x) => ({ id: x.id, name: x.name, general: x.website, note: x.eggOnly ? 'nur über ein eigenes Egg (Reiter „Pterodactyl“)' : undefined }))
+                  : builtinServerTypes.filter((t) => t.kind === 'discord').map((t) => ({ id: t.id, name: t.name, general: true }))
+              }
             />
           ))}
         </div>

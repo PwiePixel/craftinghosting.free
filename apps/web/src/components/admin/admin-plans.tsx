@@ -57,7 +57,88 @@ function newPlan(kind: ProductKind): PlanSetting {
     features: [],
     enabled: true,
     reserved: 0,
+    serverTypes: [],
+    audience: 'all',
+    perUser: null,
   };
+}
+
+/** Software, aus der ein Paket wählen kann (Minecraft: Katalog unter „Server-Software“) */
+export interface SoftwareOption {
+  id: string;
+  name: string;
+  /** Im Bestellformular für alle freigegeben */
+  general: boolean;
+  /** Bedrock, Proxy oder nur über ein eigenes Egg */
+  note?: string;
+}
+
+/** Wer bestellen darf, mit welcher Software, wie oft (Zusatzpaket) */
+function PlanRules({ plan: p, software, onChange }: { plan: PlanSetting; software: SoftwareOption[]; onChange: (v: Partial<PlanSetting>) => void }) {
+  const fixed = p.serverTypes.length > 0;
+  const extra = p.perUser !== null || p.audience === 'granted';
+  const toggle = (id: string) => onChange({ serverTypes: p.serverTypes.includes(id) ? p.serverTypes.filter((x) => x !== id) : [...p.serverTypes, id] });
+  return (
+    <div className="space-y-4 rounded-lg border border-line bg-black/20 p-4">
+      <div>
+        <p className="text-sm font-medium text-gray-200">Software</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-subtle">
+          Ohne Auswahl gilt die Software, die im Bestellformular für alle freigegeben ist. Mit Auswahl ist dieses Paket fest an diese Software gebunden – z. B. ein
+          Proxy-Paket nur mit Velocity oder ein Bedrock-Paket. Software, die nur über ein festes Paket kommen soll, schaltest du unter „Server-Software“ für die Website
+          aus; über dieses Paket bleibt sie trotzdem bestellbar (ein Egg muss zugeordnet sein).
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {software.map((s) => {
+            const on = p.serverTypes.includes(s.id);
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => toggle(s.id)}
+                aria-pressed={on}
+                title={s.note}
+                className={cn('rounded-lg border px-2.5 py-1.5 text-[13px] transition-colors', on ? 'border-blue-500/60 bg-blue-500/15 text-white' : 'border-line text-muted hover:text-white')}
+              >
+                {s.name}
+                {!s.general && <span className="ml-1.5 text-[11px] text-subtle">nicht frei wählbar</span>}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[12px] text-subtle">{fixed ? `Fest: ${p.serverTypes.map((id) => software.find((s) => s.id === id)?.name ?? id).join(', ')}` : 'Keine feste Software – Auswahl wie im Bestellformular'}</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Labeled label="Wer darf bestellen?" hint={p.audience === 'granted' ? 'Steht nicht im Bestellformular. Freischalten unter Admin → Nutzer → Grenzen (dort auch die Anzahl).' : 'Steht für alle im Bestellformular.'}>
+          <select className="input" value={p.audience} onChange={(e) => onChange({ audience: e.target.value === 'granted' ? 'granted' : 'all', ...(e.target.value === 'granted' && p.perUser === null ? { perUser: 0 } : {}) })}>
+            <option value="all">Alle</option>
+            <option value="granted">Nur freigeschaltete Nutzer</option>
+          </select>
+        </Labeled>
+        <Labeled
+          label="Eigene Grenze je Person (Zusatzpaket)"
+          hint={
+            p.audience === 'granted'
+              ? 'Bei freigeschalteten Paketen legt die Freischaltung beim Nutzer fest, wie viele er haben darf.'
+              : extra
+                ? 'Zählt nicht gegen die normale Grenze (z. B. ein Bedrock-Server zusätzlich zu den Java-Servern). Pro Nutzer änderbar.'
+                : 'Leer = normales Paket, zählt zur Grenze „Server pro Person“.'
+          }
+        >
+          <input
+            className="input"
+            inputMode="numeric"
+            disabled={p.audience === 'granted'}
+            value={p.audience === 'granted' ? '' : (p.perUser ?? '')}
+            placeholder={p.audience === 'granted' ? 'je Nutzer' : 'leer = normal'}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              onChange({ perUser: v === '' ? null : Math.max(0, Math.min(10, Math.round(Number(v) || 0))) });
+            }}
+          />
+        </Labeled>
+      </div>
+    </div>
+  );
 }
 
 function Badge({ tone, children }: { tone: 'blue' | 'gray' | 'amber'; children: ReactNode }) {
@@ -131,6 +212,7 @@ function ApplySlots({ planId, count, unsaved }: { planId: string; count: number;
 
 function PlanRow({
   plan: p,
+  software,
   saved,
   count,
   open,
@@ -142,6 +224,7 @@ function PlanRow({
   onRemove,
 }: {
   plan: PlanSetting;
+  software: SoftwareOption[];
   /** Gespeicherter Stand dieses Pakets (fehlt bei einem neuen Paket) */
   saved?: PlanSetting;
   /** Bestehende Server mit diesem Paket (über die Website) */
@@ -166,6 +249,9 @@ function PlanRow({
               {p.name.trim() || <span className="text-muted">Neues Paket</span>}
               {p.highlighted && <Badge tone="blue">hervorgehoben</Badge>}
               {!p.enabled && <Badge tone="gray">inaktiv</Badge>}
+              {p.audience === 'granted' && <Badge tone="amber">nur freigeschaltet</Badge>}
+              {p.audience === 'all' && p.perUser !== null && <Badge tone="blue">Zusatzpaket ×{p.perUser}</Badge>}
+              {p.serverTypes.length > 0 && <Badge tone="gray">{p.serverTypes.map((id) => software.find((s) => s.id === id)?.name ?? id).join(', ')}</Badge>}
               {!p.id && <Badge tone="amber">neu</Badge>}
               {issues.length > 0 && <Badge tone="amber">prüfen</Badge>}
             </span>
@@ -223,6 +309,7 @@ function PlanRow({
               </p>
             </div>
           </div>
+          <PlanRules plan={p} software={software} onChange={onChange} />
           <div className="rounded-lg border border-line bg-black/20 p-4">
             <p className="text-sm font-medium text-gray-200">Slots im Panel</p>
             <p className="mt-1 text-[13px] leading-relaxed text-subtle">
@@ -300,8 +387,11 @@ export function ProductEditor({
   planCounts,
   productCount,
   savedPlans = [],
+  software = [],
 }: {
   kind: ProductKind;
+  /** Software, an die sich Pakete binden lassen */
+  software?: SoftwareOption[];
   product: ProductSettings;
   onChange: (v: Partial<ProductSettings>) => void;
   /** Über die Website belegte Plätze je Paket-ID */
@@ -373,6 +463,7 @@ export function ProductEditor({
               <PlanRow
                 key={index}
                 plan={p}
+                software={software}
                 saved={p.id ? savedPlans.find((x) => x.id === p.id) : undefined}
                 count={planCounts[p.id] ?? 0}
                 open={open === index}

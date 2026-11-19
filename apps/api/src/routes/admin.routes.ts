@@ -31,8 +31,7 @@ import {
   serverAction,
   updateIncident,
   userAction,
-  applyPlanSlots,
-} from '../services/admin.service';
+  applyPlanSlots, setUserLimits } from '../services/admin.service';
 import { audit } from '../services/audit.service';
 import { deleteLogo, saveLogo } from '../services/logo.service';
 import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } from '../services/settings.service';
@@ -112,6 +111,11 @@ export async function adminRoutes(app: FastifyInstance) {
     const admin = currentUser(request);
     await endTimeout(z.object({ id: z.string().uuid() }).parse(request.params).id, admin.email);
     return { abuse: await listAbuse() };
+  });
+  /** Abweichende Grenzen und freigeschaltete Pakete eines Nutzers */
+  app.post('/admin/users/:id/limits', async (request) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    return { limitOverrides: await setUserLimits(currentUser(request), id, request.body, request.ip) };
   });
   /** Ban aufheben (Konto, Server und Sperrliste) */
   app.post('/admin/users/:id/unban', async (request) => {

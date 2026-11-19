@@ -302,6 +302,8 @@ return {
     stepAccount: 'Konto',
     stepEmail: 'Deine E-Mail-Adresse',
     planSpecs: (ram: string, disk: string, cpu: number) => `${ram} RAM · ${disk} NVMe · bis ${cpu} % CPU`,
+    planOnly: (names: string) => `Nur ${names}`,
+    planExtra: (n: number) => (n === 1 ? 'Zusätzlich zu deinen anderen Servern' : `Bis zu ${n}× zusätzlich zu deinen anderen Servern`),
     soldOut: 'Aktuell ausgebucht',
     planTaken: 'Dieses Paket hast du bereits',
     planLocked: 'Mit deinen freien Slots nicht wählbar',

@@ -157,6 +157,8 @@ function PlanCard({
         {plan.highlighted && <span className="shrink-0 rounded-md bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-300">{h.morePower}</span>}
       </div>
       {tr(plan.tagline, lang) && <p className="mt-1 text-sm text-muted">{tr(plan.tagline, lang)}</p>}
+      {plan.serverTypes?.length > 0 && <p className="mt-1 text-[13px] text-blue-300">{t.start.planOnly(plan.serverTypes.map((id) => serverTypesOf(plan.kind).find((x) => x.id === id)?.name ?? id).join(', '))}</p>}
+      {plan.perUser !== null && plan.perUser !== undefined && plan.perUser > 0 && <p className="mt-1 text-[13px] text-emerald-300">{t.start.planExtra(plan.perUser)}</p>}
       <p className="mt-6 flex items-baseline gap-1.5">
         <span className="text-4xl font-semibold tracking-tight text-white">{lang === 'en' ? '€0' : '0 €'}</span>
         <span className="text-sm text-subtle">{t.common.perMonth}</span>

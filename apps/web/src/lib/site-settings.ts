@@ -27,7 +27,7 @@ function fallbackProduct(kind: ProductKind): PublicProductDTO {
     remaining: p.capacity,
     available: true,
     plans: p.plans.map(({ enabled: _enabled, reserved: _reserved, ...plan }) => ({ ...plan, kind, used: 0, remaining: plan.capacity, available: true })),
-    serverTypes: websiteTypesOf(kind).map((t) => ({ id: t.id, available: true, versions: t.versions })),
+    serverTypes: websiteTypesOf(kind).map((t) => ({ id: t.id, available: true, general: true, versions: t.versions })),
   };
 }
 

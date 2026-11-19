@@ -1,3 +1,4 @@
+import type { UserLimitOverrides } from '@chfree/shared';
 /**
  * Datenbankschema (SQLite, verschlüsselte Datei über libSQL) – Drizzle ORM.
  * Migrationen erzeugen: npm run db:generate  ·  anwenden: npm run db:migrate
@@ -22,6 +23,8 @@ export const users = sqliteTable(
     status: text('status', { enum: ['active', 'locked'] }).notNull().default('active'),
     /** Verwarnungs-System: Auszeit – bis dahin sind alle Dienste des Nutzers offline (null = keine) */
     suspendedUntil: ts('suspended_until'),
+    /** Abweichende Grenzen und freigeschaltete Pakete (Admin → Nutzer → Grenzen) */
+    limitOverrides: text('limit_overrides', { mode: 'json' }).$type<UserLimitOverrides | null>(),
     /** Verwarnungs-System: dauerhaft gesperrt seit (null = nicht gebannt) und wann die Server gelöscht werden */
     bannedAt: ts('banned_at'),
     banDeleteAt: ts('ban_delete_at'),
