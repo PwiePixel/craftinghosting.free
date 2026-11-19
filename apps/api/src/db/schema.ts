@@ -767,6 +767,16 @@ export interface SoftwareJob {
   /** Nach einem Fehlschlag: wann, und wie oft schon automatisch neu versucht wurde (nur Server der Website) */
   failedAt?: number;
   retries?: number;
+  /** Fehlschlag, bei dem ein erneuter Versuch nichts ändert (z. B. Version gibt es nicht) – kein automatischer Neuversuch */
+  permanent?: boolean;
+  /** Frist der Einrichtung; verschiebt sich, solange der Server gesperrt ist oder noch angelegt wird */
+  deadlineAt?: number;
+  /** Wann der Server (im Panel gestartet) zum Anhalten aufgefordert wurde – nach einer Wartezeit wird er beendet */
+  stopSentAt?: number | null;
+  /** Ist die Grundinstallation im Panel fehlgeschlagen, wird sie einmal von selbst wiederholt */
+  reinstalled?: boolean;
+  /** Der richtige Startbefehl ist wieder gesetzt (während der Einrichtung steht dort nur ein Hinweis) */
+  finalized?: boolean;
   startedAt: number;
   error: string | null;
 }

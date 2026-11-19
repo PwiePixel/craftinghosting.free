@@ -32,6 +32,7 @@ import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactylConfig } from '../config/pterodactyl.config';
 import { offeredVersions } from './software-directory';
+import { softwareGaveUp } from './partner-software.service';
 import { assertNoTimeout, inTimeout } from './sanction-gate';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
@@ -81,6 +82,7 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     // Solange die gewählte Software eingerichtet wird, gilt der Server als „wird installiert“
     powerState: server.softwareJob && !server.softwareJob.error ? 'installing' : server.powerState,
     softwareFailed: !!server.softwareJob?.error,
+    softwareGaveUp: softwareGaveUp(server.softwareJob),
     address: server.address,
     limits: { memoryMb: server.memoryMb, cpuPercent: server.cpuPercent, diskMb: server.diskMb },
     cycle: state.cycle,

@@ -418,6 +418,8 @@ export class PterodactylMockClient implements PterodactylGateway {
     this.settle(s, now);
     switch (signal) {
       case 'start':
+        // Startbefehl ist nur ein Hinweis (Software wird eingerichtet): Der Prozess endet sofort wieder
+        if (s.files?.['/.startup']?.startsWith('echo ')) break;
         if (s.state === 'offline' && !s.target) {
           s.target = 'running';
           s.transitionAt = now + START_MS;
@@ -593,7 +595,7 @@ export class PterodactylMockClient implements PterodactylGateway {
   async updateServerStartup(id: number, spec: { eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }): Promise<void> {
     this.mutate(id, (s) => {
       s.eggId = spec.eggId;
-      s.files = { ...(s.files ?? {}), '/.startup-env.json': JSON.stringify(spec.environment), '/.docker-image': spec.dockerImage };
+      s.files = { ...(s.files ?? {}), '/.startup-env.json': JSON.stringify(spec.environment), '/.docker-image': spec.dockerImage, '/.startup': spec.startup };
     });
   }
 

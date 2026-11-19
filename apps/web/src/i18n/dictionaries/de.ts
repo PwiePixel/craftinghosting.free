@@ -552,6 +552,8 @@ return {
     deleteAt: (dt: string) => `Ohne Reaktivierung wird der Server am ${dt} automatisch gelöscht.`,
     lockedText: 'Dieser Server wurde vom Team gesperrt. Bitte wende dich an den Support.',
     softwareFailed: 'Die gewählte Server-Software konnte noch nicht eingerichtet werden. Wir versuchen es automatisch erneut – du musst nichts tun. Dauert es länger, öffne bitte ein Ticket.',
+    softwareGaveUp: 'Die gewählte Server-Software konnte nicht eingerichtet werden. Bitte öffne ein Ticket auf unserem Discord-Server – wir kümmern uns darum.',
+    softwareInstalling: 'Die gewählte Server-Software wird gerade eingerichtet. Das dauert meist nur wenige Minuten – bis dahin startet der Server nicht.',
     lockedTextWarning: 'Dieser Server ist wegen einer Verwarnung vorübergehend offline. Wie lange noch, steht oben unter „Verwarnungen“ – danach wird er automatisch wieder freigegeben.',
     lockedTextBan: 'Dieser Server ist gesperrt, weil dein Konto dauerhaft gesperrt wurde.',
     abuseBadge: 'Abuse',

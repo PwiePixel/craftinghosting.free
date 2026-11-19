@@ -14,6 +14,7 @@ import { enforceBotFairUse } from '../services/bot-fair-use';
 import { applyPowerState } from '../services/power-state';
 import { getSettings } from '../services/settings.service';
 import { runPostProvision } from '../services/provisioning.service';
+import { requestSiteSoftware } from '../services/partner-software.service';
 import { mapLimit, type JobDefinition } from './types';
 
 function endReasonFor(server: Server, now: Date) {
@@ -74,6 +75,17 @@ export const syncPowerStatesJob: JobDefinition = {
         await audit({ serverId: server.id, userId: server.userId, actor: 'system', action: 'reconcile.unsuspend', message: 'Entsperrung im Panel nachgezogen' });
       }
       if (server.status === 'suspended') return;
+
+      // Im Panel neu installiert (z. B. „Reinstall Server“ des Besitzers): Das Panel spielt dabei die Software der Grundlage
+      // auf – die gewählte Software danach wieder einrichten, sonst liefe plötzlich etwas anderes
+      // Erkennbar daran, dass der Server vorher schon fertig war (nicht „installing“/„unknown“ wie direkt nach dem Anlegen –
+      // dort besteht der Auftrag ohnehin schon)
+      const wasReady = server.powerState !== 'installing' && server.powerState !== 'unknown';
+      if (res.state === 'installing' && wasReady && !server.softwareJob && !server.partnerId && server.kind === 'minecraft') {
+        if (await requestSiteSoftware(server, { onlyIfNone: true })) {
+          await audit({ serverId: server.id, userId: server.userId, actor: 'system', action: 'server.software_rearmed', message: `Neuinstallation im Panel erkannt – ${server.serverType} ${server.version} wird danach wieder eingerichtet` });
+        }
+      }
 
       const result = await applyPowerState(server, res.state, now, endReasonFor(server, now));
       if (res.state !== server.powerState) stats.changed++;

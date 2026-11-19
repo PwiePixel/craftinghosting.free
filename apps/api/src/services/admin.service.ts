@@ -435,6 +435,12 @@ export async function serverAction(admin: User, id: string, action: ServerAction
       // Die gewählte Server-Software (ohne eigenes Egg) noch einmal einrichten – z. B. nach einem Fehlschlag
       if (!['active', 'expiring'].includes(server.status)) throw stateChanged();
       if (!(await requestSiteSoftware(server))) {
+        // Inzwischen über ein eigenes Egg: Einen alten, fehlgeschlagenen Auftrag aufräumen, damit der Server nicht als fehlerhaft gilt
+        if (server.softwareJob) {
+          await db.update(servers).set({ softwareJob: null }).where(eq(servers.id, id));
+          await log('admin.server_software', `Alter Einrichtungs-Auftrag von „${server.name}“ entfernt (Typ läuft jetzt über ein eigenes Egg)`);
+          return;
+        }
         throw Errors.conflict('not_applicable', L('Dieser Servertyp wird über ein eigenes Egg installiert – hier gibt es nichts neu einzurichten.', 'This server type is installed through its own egg – there is nothing to set up again here.'));
       }
       await log('admin.server_software', `Server-Software von „${server.name}“ wird neu eingerichtet (${server.serverType} ${server.version})`);

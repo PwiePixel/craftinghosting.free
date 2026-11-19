@@ -21,6 +21,7 @@ import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
+import { notify } from './notification.service';
 import { baseStartup } from './provisioning.service';
 import { pendingSoftwareJob, softwareDirectory } from './software-directory';
 import { getSettings } from './settings.service';
@@ -164,8 +165,17 @@ export async function assertInstallSlot(partnerId: string, exceptServerId?: stri
 const PULL_TIMEOUT_MS = 15 * 60_000;
 const UNZIP_TIMEOUT_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 8;
-/** Gesamtfrist einer Einrichtung (inklusive der Grundinstallation im Panel) */
+/** Gesamtfrist einer Einrichtung (inklusive der Grundinstallation im Panel) – Zeit, in der der Server gesperrt ist, zählt nicht */
 const JOB_DEADLINE_MS = 60 * 60_000;
+/** So lange darf ein im Panel gestarteter Server nach der Stopp-Aufforderung herunterfahren, bevor er beendet wird */
+const STOP_GRACE_MS = 60_000;
+/**
+ * Startbefehl während der Einrichtung: Wer den Server in der Zeit im Panel startet, bekommt nur diesen Hinweis in der
+ * Konsole, und der Prozess endet sofort wieder. So läuft nie eine halb eingerichtete Software (oder die der Grundlage),
+ * und wir müssen niemandem den Server unter den Füßen wegziehen. Bewusst ohne Zeichen, die eine Shell deuten würde.
+ */
+export const SETUP_STARTUP =
+  'echo Die Server-Software wird gerade eingerichtet. Bitte warte ein paar Minuten und starte den Server dann erneut. / The server software is being set up. Please wait a few minutes, then start the server again.';
 /** Je Lauf höchstens so viele Einrichtungen anfassen – begrenzt die Panel-Aufrufe unabhängig von der Zahl offener Aufträge */
 const PER_RUN = 20;
 
@@ -203,19 +213,28 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
     await save();
     return 'waiting' as const;
   };
-  /** `detail` (z. B. die Meldung des Panels) steht nur in unserem Protokoll, nicht in der Antwort an den Partner */
-  const fail = async (message: string, detail?: string) => {
+  /**
+   * `detail` (z. B. die Meldung des Panels) steht nur in unserem Protokoll, nicht in der Antwort an den Partner.
+   * `permanent`: Ein neuer Versuch würde genauso enden – dann wird (bei Servern der Website) nicht automatisch wiederholt.
+   */
+  const fail = async (message: string, detail?: string, permanent = false) => {
     job.error = message.slice(0, 240);
     job.failedAt = now.getTime();
+    if (permanent) job.permanent = true;
     await save();
     await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_failed', message: `Server-Software für „${server.name}“ konnte nicht eingerichtet werden (${job.serverType} ${job.resolvedVersion}): ${job.error}${detail ? ` – ${detail.slice(0, 300)}` : ''}` });
     await store.failed(job).catch(() => {});
     return 'failed' as const;
   };
   try {
-    if (now.getTime() - job.startedAt > JOB_DEADLINE_MS) return await fail('Die Einrichtung hat zu lange gedauert.');
-    if (server.status === 'provisioning_failed') return await fail('Der Server konnte im Panel nicht angelegt werden.');
-    if (server.status !== 'active' || !server.pteroIdentifier || !server.pteroServerId) return await wait(); // wird noch im Panel angelegt (oder ist gesperrt)
+    if (server.status === 'provisioning_failed') return await fail('Der Server konnte im Panel nicht angelegt werden.', undefined, true);
+    const deadline = job.deadlineAt ?? job.startedAt + JOB_DEADLINE_MS;
+    if (server.status !== 'active' || !server.pteroIdentifier || !server.pteroServerId) {
+      // Wird noch im Panel angelegt oder ist gesperrt (z. B. Auszeit): Die Zeit zählt nicht gegen die Frist
+      job.deadlineAt = Math.max(deadline, now.getTime() + JOB_DEADLINE_MS);
+      return await wait();
+    }
+    if (now.getTime() > deadline) return await fail('Die Einrichtung hat zu lange gedauert.');
     const identifier = server.pteroIdentifier;
     const ptero = pterodactyl();
     try {
@@ -225,7 +244,7 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
         try {
           software = await resolveSoftware(job.serverType, job.version);
         } catch (err) {
-          if (err instanceof ApiError && err.code === 'version_unavailable') return await fail('Diese Version gibt es für die gewählte Server-Software nicht.');
+          if (err instanceof ApiError && err.code === 'version_unavailable') return await fail('Diese Version gibt es für die gewählte Server-Software nicht.', undefined, true);
           return await wait(); // Verzeichnis gerade nicht erreichbar
         }
         Object.assign(job, { resolvedVersion: software.resolvedVersion, build: software.build, java: software.java, steps: software.steps, polls: 0 });
@@ -234,27 +253,38 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
       if (job.waitInstall) {
         const p = await ptero.getServer(server.pteroServerId);
         if (p?.status === 'installing') return await wait();
-        if (p?.status === 'install_failed') return await fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
+        if (p?.status === 'install_failed') {
+          // Einmal von selbst neu anstoßen (z. B. Download im Installationsskript kurz nicht erreichbar)
+          if (job.reinstalled) return await fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
+          await ptero.reinstallServer(server.pteroServerId);
+          job.reinstalled = true;
+          job.polls = 0;
+          return await wait();
+        }
         job.waitInstall = false;
         job.polls = 0;
         await save();
       }
-      if (!job.prepared) {
-        // Läuft der Server (z. B. im Panel gestartet), zuerst beenden – ihm würde sonst die Software unter den Füßen ausgetauscht
-        const state = (await ptero.getResources(identifier)).state;
-        if (state === 'running' || state === 'starting' || state === 'stopping') {
+      // Läuft der Server (im Panel gestartet), zuerst anhalten – vor jedem Schritt, nicht nur am Anfang. Erst freundlich
+      // („stop“, die Welt wird gespeichert), nach einer Wartezeit hart. Solange er läuft, wird nichts verändert.
+      const state = (await ptero.getResources(identifier)).state;
+      if (state === 'running' || state === 'starting' || state === 'stopping') {
+        if (!job.stopSentAt) {
+          job.stopSentAt = now.getTime();
+          await ptero.sendPowerSignal(identifier, 'stop').catch(() => {});
+        } else if (now.getTime() - job.stopSentAt > STOP_GRACE_MS) {
           await ptero.sendPowerSignal(identifier, 'kill').catch(() => {});
-          return await wait();
         }
-        // Startbefehl des Grund-Eggs, passende Java-Version, Startdatei „server.jar“ – Ressourcen bleiben unverändert
-        const base = await baseStartup(await getSettings());
-        const image = pickJavaImage(base.dockerImages, job.java);
-        if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`);
-        const environment = { ...base.environment };
-        // Startdatei: Die Software aus dem Verzeichnis heißt immer „server.jar“ (die Variable heißt je nach Egg unterschiedlich)
-        for (const name of ['SERVER_JARFILE', 'JARFILE', 'JAR_FILE']) if (name in environment) environment[name] = 'server.jar';
-        await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: base.startup, environment });
+        return await wait();
+      }
+      if (job.stopSentAt) job.stopSentAt = null;
+      if (!job.prepared) {
+        // Grund-Egg und passende Java-Version setzen – als Startbefehl vorerst nur der Hinweis „wird eingerichtet“
+        const { image, base, environment } = await startupFor(job);
+        if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`, true);
+        await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: SETUP_STARTUP, environment });
         job.prepared = true;
+        job.finalized = false;
         await save();
       }
       while (job.pos < job.steps.length) {
@@ -291,6 +321,14 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
         job.polls = 0;
         await save();
       }
+      if (job.finalized !== true) {
+        // Alles da: jetzt erst den richtigen Startbefehl setzen – ab hier startet die gewählte Software
+        const { image, base, environment } = await startupFor(job);
+        if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`, true);
+        await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: base.startup, environment });
+        job.finalized = true;
+        await save();
+      }
     } catch (err) {
       if (err instanceof Replaced) throw err;
       job.attempts++;
@@ -312,6 +350,16 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
   }
 }
 
+/** Grund-Egg, Java-Image passend zur Version und Umgebung (Startdatei „server.jar“) – Ressourcen bleiben unverändert */
+async function startupFor(job: SoftwareJob) {
+  const base = await baseStartup(await getSettings());
+  const image = pickJavaImage(base.dockerImages, job.java);
+  const environment = { ...base.environment };
+  // Die Software aus dem Verzeichnis heißt immer „server.jar“ (die Variable heißt je nach Egg unterschiedlich)
+  for (const name of ['SERVER_JARFILE', 'JARFILE', 'JAR_FILE']) if (name in environment) environment[name] = 'server.jar';
+  return { base, image, environment };
+}
+
 const sameJob = (column: typeof partnerServers.softwareJob | typeof servers.softwareJob, job: SoftwareJob) => sql`json_extract(${column}, '$.startedAt') = ${job.startedAt}`;
 
 function partnerStore(server: Server, ps: PartnerServer): JobStore {
@@ -324,25 +372,49 @@ function partnerStore(server: Server, ps: PartnerServer): JobStore {
   };
 }
 
+/** Wie oft und in welchem Abstand eine fehlgeschlagene Einrichtung eines Website-Servers von selbst neu versucht wird */
+export const SITE_RETRIES = 5;
+const SITE_RETRY_AFTER_MS = 15 * 60_000;
+
+/** Wird nicht mehr von selbst neu versucht (alle Versuche verbraucht oder ein Fehler, den ein Versuch nicht behebt) */
+export const softwareGaveUp = (job: SoftwareJob | null | undefined): boolean => !!job?.error && (!!job.permanent || (job.retries ?? 0) >= SITE_RETRIES);
+
 function siteStore(server: Server): JobStore {
   const mine = and(eq(servers.id, server.id), sameJob(servers.softwareJob, server.softwareJob!));
   return {
     job: server.softwareJob!,
     save: async (job) => affectedRows(await db.update(servers).set({ softwareJob: job }).where(mine)) === 1,
     finish: async () => affectedRows(await db.update(servers).set({ softwareJob: null }).where(mine)) === 1,
-    failed: async () => {},
+    failed: async (job) => {
+      if (!softwareGaveUp(job)) return; // wird automatisch erneut versucht – erst Bescheid geben, wenn das nichts mehr bringt
+      await notify({
+        userId: server.userId,
+        serverId: server.id,
+        type: 'server.software_failed',
+        title: L('Server-Software konnte nicht eingerichtet werden', 'Server software could not be set up'),
+        body: L(
+          `Für „${server.name}“ konnte die gewählte Software (${job.serverType} ${job.version}) nicht eingerichtet werden. Bitte öffne ein Ticket auf unserem Discord-Server – wir kümmern uns darum.`,
+          `The selected software (${job.serverType} ${job.version}) could not be set up for “${server.name}”. Please open a ticket on our Discord server – we will take care of it.`,
+        ),
+        dedupeKey: `software-failed:${server.id}:${job.startedAt}`,
+        email: true,
+      });
+    },
   };
 }
 
-/** Wie oft und in welchem Abstand eine fehlgeschlagene Einrichtung eines Website-Servers von selbst neu versucht wird */
-const SITE_RETRIES = 5;
-const SITE_RETRY_AFTER_MS = 15 * 60_000;
-
-/** Einrichtung der Software eines Website-Servers (neu) anstoßen – z. B. vom Team nach einem Fehlschlag */
-export async function requestSiteSoftware(server: Pick<Server, 'id' | 'serverType' | 'version' | 'partnerId'>, waitInstall = false): Promise<boolean> {
+/**
+ * Einrichtung der Software eines Website-Servers (neu) anstoßen – z. B. vom Team nach einem Fehlschlag oder nach einer
+ * Neuinstallation im Panel. Wartet zuerst auf das Panel (läuft dort gerade eine Installation oder ist sie fehlgeschlagen,
+ * wird das berücksichtigt). `onlyIfNone`: nur, wenn gerade kein Auftrag besteht.
+ */
+export async function requestSiteSoftware(server: Pick<Server, 'id' | 'serverType' | 'version' | 'partnerId'>, opts: { onlyIfNone?: boolean } = {}): Promise<boolean> {
   if (server.partnerId || !installsViaDirectory(server.serverType, await getSettings())) return false;
-  await db.update(servers).set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, waitInstall) }).where(eq(servers.id, server.id));
-  return true;
+  const res = await db
+    .update(servers)
+    .set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, true) })
+    .where(and(eq(servers.id, server.id), ...(opts.onlyIfNone ? [sql`${servers.softwareJob} is null`] : [])));
+  return affectedRows(res) === 1;
 }
 
 /** Läuft alle paar Sekunden: bringt offene Einrichtungen einen Schritt weiter */
@@ -380,13 +452,24 @@ export async function runSoftwareJobs(now = new Date()) {
   const failedSite = await db
     .select()
     .from(servers)
-    .where(and(sql`${servers.softwareJob} is not null`, sql`json_extract(${servers.softwareJob}, '$.error') is not null`, sql`coalesce(json_extract(${servers.softwareJob}, '$.retries'), 0) < ${SITE_RETRIES}`, sql`coalesce(json_extract(${servers.softwareJob}, '$.failedAt'), 0) <= ${now.getTime() - SITE_RETRY_AFTER_MS}`))
+    .where(
+      and(
+        sql`${servers.softwareJob} is not null`,
+        sql`json_extract(${servers.softwareJob}, '$.error') is not null`,
+        sql`coalesce(json_extract(${servers.softwareJob}, '$.permanent'), 0) = 0`,
+        sql`coalesce(json_extract(${servers.softwareJob}, '$.retries'), 0) < ${SITE_RETRIES}`,
+        sql`coalesce(json_extract(${servers.softwareJob}, '$.failedAt'), 0) <= ${now.getTime() - SITE_RETRY_AFTER_MS}`,
+        // Gesperrte Server (Auszeit, Ablauf …) verbrauchen keine Versuche – es geht weiter, sobald sie wieder aktiv sind
+        eq(servers.status, 'active'),
+        sql`${servers.partnerId} is null`,
+      ),
+    )
     .limit(20);
   for (const server of failedSite) {
     const old = server.softwareJob!;
     await db
       .update(servers)
-      .set({ softwareJob: { ...pendingSoftwareJob(old.serverType, old.version, false), retries: (old.retries ?? 0) + 1 } })
+      .set({ softwareJob: { ...pendingSoftwareJob(old.serverType, old.version, true), retries: (old.retries ?? 0) + 1 } })
       .where(and(eq(servers.id, server.id), sameJob(servers.softwareJob, old)));
   }
   const dueSite = await db

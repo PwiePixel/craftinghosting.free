@@ -281,8 +281,21 @@ async function startBlocked(ctx: Ctx, state: Server['powerState']): Promise<bool
   return true;
 }
 
+/** Wird gerade die gewählte Server-Software eingerichtet (oder ist das fehlgeschlagen)? Dann nicht starten. */
+async function softwareNotReady(ctx: Ctx): Promise<boolean> {
+  const job = ctx.server.softwareJob;
+  if (!job) return false;
+  await ctx.say(
+    job.error
+      ? { de: `❌ Für ${ctx.name} konnte die Server-Software noch nicht eingerichtet werden. Schau unter „Meine Server“ nach oder öffne ein Ticket.`, en: `❌ The server software for ${ctx.name} could not be set up yet. Check “My servers” or open a ticket.` }
+      : { de: `⏳ Für ${ctx.name} wird gerade die Server-Software eingerichtet. Bitte versuche es in ein paar Minuten erneut.`, en: `⏳ The server software for ${ctx.name} is being set up. Please try again in a few minutes.` },
+  );
+  return true;
+}
+
 async function startServer(ctx: Ctx, opts: { eulaAccepted?: boolean } = {}) {
   const { ptero, server, name, say } = ctx;
+  if (await softwareNotReady(ctx)) return;
   // Aktuellen Zustand direkt aus dem Panel lesen – nicht aus dem (bis zu eine Minute alten) Stand der Datenbank
   const before = await ptero.getResources(server.pteroIdentifier);
   if (before.isSuspended) return void (await say({ de: `❌ ${name} ist gesperrt und kann nicht gestartet werden.`, en: `❌ ${name} is suspended and cannot be started.` }));
@@ -359,6 +372,7 @@ async function stopServer(ctx: Ctx) {
 
 async function restartServer(ctx: Ctx) {
   const { ptero, server, name, say } = ctx;
+  if (await softwareNotReady(ctx)) return;
   const before = await ptero.getResources(server.pteroIdentifier);
   if (before.isSuspended) return void (await say({ de: `❌ ${name} ist gesperrt und kann nicht neu gestartet werden.`, en: `❌ ${name} is suspended and cannot be restarted.` }));
   if (before.state === 'installing') return void (await say({ de: `⏳ ${name} wird gerade installiert. Bitte versuche es in ein paar Minuten erneut.`, en: `⏳ ${name} is being installed. Please try again in a few minutes.` }));

@@ -523,6 +523,8 @@ return {
     deleteAt: (dt: string) => `Without reactivation, the server will be deleted automatically on ${dt}.`,
     lockedText: 'This server was suspended by the team. Please contact support.',
     softwareFailed: 'The selected server software could not be set up yet. We retry automatically – you do not need to do anything. If it takes longer, please open a ticket.',
+    softwareGaveUp: 'The selected server software could not be set up. Please open a ticket on our Discord server – we will take care of it.',
+    softwareInstalling: 'The selected server software is being set up. This usually takes only a few minutes – until then the server will not start.',
     lockedTextWarning: 'This server is temporarily offline because of a warning. How much longer is shown above under “Warnings” – after that it is released automatically.',
     lockedTextBan: 'This server is suspended because your account has been banned permanently.',
     abuseBadge: 'Abuse',

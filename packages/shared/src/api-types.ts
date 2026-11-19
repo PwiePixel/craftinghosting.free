@@ -92,6 +92,8 @@ export interface ServerDTO {
   deleteLocked: boolean;
   /** Die gewählte Server-Software konnte (noch) nicht eingerichtet werden – das System versucht es erneut */
   softwareFailed: boolean;
+  /** … und es wird nicht mehr automatisch erneut versucht (Ticket nötig) */
+  softwareGaveUp: boolean;
   /** Minecraft-Server oder Discord-Bot */
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */

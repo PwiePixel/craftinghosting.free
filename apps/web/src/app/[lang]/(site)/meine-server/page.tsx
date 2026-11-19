@@ -253,10 +253,17 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
         )}
       </div>
 
-      {s.softwareFailed && (
+      {s.softwareFailed ? (
         <div className="border-t border-line px-6 py-3">
-          <p className="text-sm text-amber-200">{t.softwareFailed}</p>
+          <p className={`text-sm ${s.softwareGaveUp ? 'text-red-300' : 'text-amber-200'}`}>{s.softwareGaveUp ? t.softwareGaveUp : t.softwareFailed}</p>
         </div>
+      ) : (
+        s.status === 'active' &&
+        s.powerState === 'installing' && (
+          <div className="border-t border-line px-6 py-3">
+            <p className="text-sm text-blue-200">{t.softwareInstalling}</p>
+          </div>
+        )
       )}
       <div className="flex border-t border-line px-6 py-3">
         {s.deleteLocked ? <p className="text-[13px] leading-relaxed text-subtle">{t.deleteLocked}</p> : <DeleteServer server={s} />}
