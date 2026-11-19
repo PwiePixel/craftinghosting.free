@@ -5,15 +5,18 @@
  * Das Verzeichnis wird zwischengespeichert. Ist es nicht erreichbar, gilt der letzte bekannte Stand – und wenn es noch
  * keinen gibt, unsere fest hinterlegte Liste.
  */
-import { getServerType, versionsFor, type SiteSettings } from '@chfree/shared';
+import { DIRECTORY_NOT_GAME_SERVERS, getServerType, versionsFor, type SiteSettings } from '@chfree/shared';
 import type { SoftwareJob } from '../db/schema';
 import { env } from '../env';
 import { Errors, L } from '../lib/errors';
 
 /** Bezeichnung eines Servertyps im Verzeichnis (aus dem Software-Katalog) – null = dort nicht vorhanden */
 export const directoryName = (serverType: string): string | null => {
-  const name = getServerType(serverType)?.directory;
-  return name && /^[A-Z][A-Z0-9_]{1,23}$/.test(name) ? name : null;
+  const type = getServerType(serverType);
+  const name = type?.directory;
+  // Bedrock und Proxys werden nie aus dem Verzeichnis eingerichtet – sie laufen ausschließlich über ein eigenes Egg
+  if (!type || type.eggOnly || type.edition === 'bedrock') return null;
+  return name && /^[A-Z][A-Z0-9_]{1,23}$/.test(name) && !DIRECTORY_NOT_GAME_SERVERS.includes(name) ? name : null;
 };
 
 export interface DirectoryBuild {

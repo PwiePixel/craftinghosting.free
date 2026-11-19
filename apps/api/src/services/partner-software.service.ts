@@ -11,7 +11,7 @@
  * Ports des Servers werden dabei nie angefasst.
  */
 import { and, count, eq, inArray, ne, sql } from 'drizzle-orm';
-import { getServerType } from '@chfree/shared';
+import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, getServerType, type ServerTypeConfig } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
@@ -29,10 +29,25 @@ import type { SiteSettings } from '@chfree/shared';
 /** Wird dieser Typ über das Verzeichnis eingerichtet (statt über ein eigenes Egg)? */
 export const installsViaDirectory = (serverType: string, settings: Pick<SiteSettings, 'products' | 'softwareBase'>): boolean => installMethodOf(serverType, settings) === 'directory';
 
-/** Steht der Typ für Partner zur Verfügung? (im Software-Katalog freigegeben, Java Edition, installierbar) */
+/**
+ * Feste Regel, unabhängig von allen Einstellungen: Über die Partner-API gibt es ausschließlich Java-Spielserver.
+ * Bedrock (Bedrock, PocketMine-MP, Nukkit …), Proxys (Velocity, BungeeCord, Waterfall …) und alles, was nur über ein
+ * eigenes Egg läuft, kann ein Partner weder erstellen noch per Typwechsel erreichen – auch dann nicht, wenn der
+ * Katalog durch einen Fehler oder von Hand etwas anderes sagt.
+ */
+export function partnerTypeAllowed(type: ServerTypeConfig | undefined): type is ServerTypeConfig {
+  if (!type || type.kind !== 'minecraft') return false;
+  if (type.edition === 'bedrock' || type.eggOnly) return false;
+  if (!type.directory || DIRECTORY_NOT_GAME_SERVERS.includes(type.directory.toUpperCase())) return false;
+  // Die mitgelieferten Bedrock- und Proxy-Einträge zusätzlich über ihre Kennung – unabhängig davon, was zur Laufzeit im Katalog steht
+  const builtin = builtinServerTypes.find((b) => b.id === type.id);
+  return !(builtin && (builtin.eggOnly || builtin.edition === 'bedrock'));
+}
+
+/** Steht der Typ für Partner zur Verfügung? (Java-Spielserver, im Software-Katalog freigegeben, installierbar) */
 export function partnerTypeAvailable(serverType: string, settings: SiteSettings): boolean {
   const type = getServerType(serverType);
-  if (!type || type.kind !== 'minecraft' || !type.partner || type.edition === 'bedrock') return false;
+  if (!partnerTypeAllowed(type) || !type.partner) return false;
   return installMethodOf(serverType, settings) !== null;
 }
 

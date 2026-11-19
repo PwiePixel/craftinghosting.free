@@ -20,7 +20,7 @@
  * ============================================================================
  */
 
-import { getServerType, type EggRef, type SiteSettings } from '@chfree/shared';
+import { DIRECTORY_NOT_GAME_SERVERS, getServerType, type EggRef, type SiteSettings } from '@chfree/shared';
 
 export interface EggMapping {
   nestId: number;
@@ -117,7 +117,7 @@ export function installMethodOf(serverType: string, settings?: EggSettings): 'eg
   const type = getServerType(serverType);
   if (!type) return null;
   const own = getEggMapping(serverType, settings);
-  if (type.kind !== 'minecraft' || type.eggOnly || type.edition === 'bedrock' || !type.directory) return own ? 'egg' : null;
+  if (type.kind !== 'minecraft' || type.eggOnly || type.edition === 'bedrock' || !type.directory || DIRECTORY_NOT_GAME_SERVERS.includes(type.directory.toUpperCase())) return own ? 'egg' : null;
   // Ohne eigens gewählte Grundlage ist das Egg von Paper die Grundlage – Paper selbst kommt dann einfach aus seinem Egg
   if (serverType === BASE_SERVER_TYPE && !settings?.softwareBase) return own ? 'egg' : null;
   const base = baseEggMapping(settings);
