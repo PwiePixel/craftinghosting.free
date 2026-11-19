@@ -11,9 +11,14 @@ import { audit } from './audit.service';
 import { removeSubscriberByEmail } from './newsletter.service';
 import { hardDeleteServer } from './server.service';
 import { invalidatePublicSite } from './settings.service';
+import { carryWarnings } from './warnings.service';
 
 export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admin?: Pick<User, 'email'> }, ip?: string): Promise<{ servers: number }> {
   const owned = await db.select().from(servers).where(eq(servers.userId, user.id));
+  // Verwarnungs-System: Aktive Verwarnungen bleiben als Fingerabdruck bestehen und gehen auf ein neues Konto derselben
+  // Person über (vor dem Lösen der Discord-Verknüpfung – der Fingerabdruck des Discord-Kontos gehört dazu)
+  const [full] = await db.select({ id: users.id, email: users.email, discordId: users.discordId }).from(users).where(eq(users.id, user.id)).limit(1);
+  if (full) await carryWarnings(full);
   await releaseDiscordFor(user.id);
   let deletedServers = 0;
   for (const server of owned) {

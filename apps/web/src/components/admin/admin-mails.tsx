@@ -165,7 +165,15 @@ const AUTO_LABEL: Record<string, string> = {
 };
 
 type AbuseServer = { id: string; name: string; kind: string; status: string; flagged: boolean };
-type AbusePreview = { title: { de: string; en: string }; body: { de: string; en: string }; locale: 'de' | 'en' | null };
+type WarningEffect = { count: number; sanction: 'none' | 'timeout' | 'ban' };
+type AbusePreview = { title: { de: string; en: string }; body: { de: string; en: string }; locale: 'de' | 'en' | null; warning: WarningEffect | null };
+/** Was eine Verwarnung auslöst – in Worten */
+const effectText = (w: WarningEffect, rules: AdminAbuseDTO['warnings']['rules']) =>
+  w.sanction === 'ban'
+    ? `Das wird die ${w.count}. Verwarnung: Das Konto wird dauerhaft gesperrt (Ban), die Server werden nach ${rules.banDeleteDays} Tagen gelöscht.`
+    : w.sanction === 'timeout'
+      ? `Das wird die ${w.count}. Verwarnung: Alle Dienste des Nutzers gehen für ${rules.timeoutHours} Stunden offline.`
+      : `Das wird die ${w.count}. Verwarnung (noch ohne Folge).`;
 const validEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim());
 const SERVER_STATUS: Record<string, string> = { active: 'aktiv', expiring: 'läuft ab', suspended: 'gesperrt', provisioning: 'wird eingerichtet', provisioning_failed: 'Einrichtung fehlgeschlagen' };
 
@@ -177,6 +185,11 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
   const [reason, setReason] = useState(initial.reasons[0]?.id ?? 'other');
   const [note, setNote] = useState({ de: '', en: '' });
   const [suspend, setSuspend] = useState(false);
+  // Verwarnungs-System: Jede Abuse-Mail zählt als Verwarnung – abwählbar („nur ein Hinweis“)
+  const [warning, setWarning] = useState(true);
+  const [manual, setManual] = useState({ email: '', note: '' });
+  const [warnMessage, setWarnMessage] = useState<Message>(null);
+  const [warnBusy, setWarnBusy] = useState<string | null>(null);
   // Wer den Verstoß festgestellt hat – Standard: das System
   const [source, setSource] = useState<'system' | 'manual'>('system');
   const [toggling, setToggling] = useState<string | null>(null);
@@ -214,7 +227,7 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
     let stop = false;
     const timer = setTimeout(() => {
       api<{ preview: AbusePreview }>('/admin/abuse/preview', {
-        body: { email: validEmail(email) ? email.trim() : 'vorschau@example.com', reason, note: { de: noteDe, en: noteEn }, suspend, serverId: serverId || null },
+        body: { email: validEmail(email) ? email.trim() : 'vorschau@example.com', reason, note: { de: noteDe, en: noteEn }, suspend, serverId: serverId || null, warning },
       })
         .then((r) => {
           if (stop) return;
@@ -227,17 +240,18 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
       stop = true;
       clearTimeout(timer);
     };
-  }, [email, reason, noteDe, noteEn, suspend, serverId]);
+  }, [email, reason, noteDe, noteEn, suspend, serverId, warning]);
 
   async function send() {
     const target = servers?.find((x) => x.id === serverId);
-    if (!window.confirm(`Abuse-Mail an ${email} senden${target ? ` – Server „${target.name}“ wird als Abuse markiert` : ''}${suspend ? (target ? ' und gesperrt' : ' und alle Server dieses Nutzers werden gesperrt') : ''}?`)) return;
+    const effect = warning && preview?.warning ? `\n\n${effectText(preview.warning, data.warnings.rules)}` : warning ? '' : '\n\nZählt NICHT als Verwarnung (nur ein Hinweis).';
+    if (!window.confirm(`Abuse-Mail an ${email} senden${target ? ` – Server „${target.name}“ wird als Abuse markiert` : ''}${suspend ? (target ? ' und gesperrt' : ' und alle Server dieses Nutzers werden gesperrt') : ''}?${effect}`)) return;
     setPending(true);
     setMessage(null);
     try {
-      const res = await api<{ suspended: number; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend, serverId: serverId || null, source } });
+      const res = await api<{ suspended: number; warning: (WarningEffect & { until: string | null }) | null; abuse: AdminAbuseDTO }>('/admin/abuse', { body: { email: email.trim(), reason, note, suspend, serverId: serverId || null, source, warning } });
       setData(res.abuse);
-      setMessage({ ok: true, text: `Abuse-Mail wird versendet${target ? ' – Server ist als Abuse markiert' : ''}${res.suspended ? ` – ${res.suspended} Server gesperrt` : ''}.` });
+      setMessage({ ok: true, text: `Abuse-Mail wird versendet${target ? ' – Server ist als Abuse markiert' : ''}${res.suspended ? ` – ${res.suspended} Server gesperrt` : ''}${res.warning ? ` – ${res.warning.count}. Verwarnung${res.warning.sanction === 'timeout' ? `, Auszeit bis ${res.warning.until ? dateTime(res.warning.until) : ''}` : res.warning.sanction === 'ban' ? ', Konto gebannt' : ''}` : ' – ohne Verwarnung'}.` });
       setNote({ de: '', en: '' });
       setSuspend(false);
       router.refresh();
@@ -245,6 +259,22 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
       setMessage({ ok: false, text: errorText(err) });
     } finally {
       setPending(false);
+    }
+  }
+
+  /** Aktion im Verwarnungs-System ausführen und die Liste neu laden */
+  async function warnAction(key: string, path: string, body: unknown, done: string, ask?: string) {
+    if (ask && !window.confirm(ask)) return;
+    setWarnBusy(key);
+    setWarnMessage(null);
+    try {
+      setData((await api<{ abuse: AdminAbuseDTO }>(path, { body })).abuse);
+      setWarnMessage({ ok: true, text: done });
+      router.refresh();
+    } catch (err) {
+      setWarnMessage({ ok: false, text: errorText(err) });
+    } finally {
+      setWarnBusy(null);
     }
   }
 
@@ -323,6 +353,16 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
               label={serverId ? 'Diesen Server sofort sperren' : 'Alle Server dieses Nutzers sofort sperren'}
               hint="Die Mail nennt dann die Sperre. Entsperren geht im Reiter „Server“."
             />
+            <Toggle
+              checked={warning}
+              onChange={setWarning}
+              label="Als Verwarnung zählen"
+              hint={
+                warning
+                  ? (preview?.warning ? effectText(preview.warning, data.warnings.rules) : `Ab der ${data.warnings.rules.timeoutFrom}. Verwarnung: ${data.warnings.rules.timeoutHours} Stunden offline, bei der ${data.warnings.rules.banAt}.: Ban.`) + ' Die Mail nennt das.'
+                  : 'Nur ein Hinweis: Die Mail geht raus, zählt aber nicht als Verwarnung.'
+              }
+            />
           </div>
 
           <div>
@@ -372,6 +412,84 @@ export function AbuseManager({ initial }: { initial: AdminAbuseDTO }) {
           </Button>
           <Note message={message} />
         </div>
+      </section>
+
+      <section className="surface p-5 sm:p-6">
+        <h2 className="text-[15px] font-semibold text-white">Verwarnungen</h2>
+        <p className="mt-1 text-sm text-muted">
+          Jede Abuse-Mail zählt als eine Verwarnung (oben abwählbar). Ab der {data.warnings.rules.timeoutFrom}. aktiven Verwarnung gehen alle Dienste des Nutzers für {data.warnings.rules.timeoutHours} Stunden offline, bei der{' '}
+          {data.warnings.rules.banAt}. wird das Konto dauerhaft gesperrt und die Server werden nach {data.warnings.rules.banDeleteDays} Tagen gelöscht. Verwarnungen verfallen nach {data.warnings.rules.expireDays} Tagen. Eine
+          zurückgenommene Verwarnung hebt eine laufende Auszeit oder einen Ban nicht von selbst auf – dafür gibt es die Knöpfe beim Nutzer.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] sm:items-end">
+          <Labeled label="Verwarnung ohne Abuse-Mail">
+            <input className="input" type="email" placeholder="E-Mail-Adresse des Nutzers" value={manual.email} onChange={(e) => setManual({ ...manual, email: e.target.value })} />
+          </Labeled>
+          <Labeled label="Grund (steht in der Nachricht an den Nutzer)">
+            <input className="input" maxLength={500} value={manual.note} onChange={(e) => setManual({ ...manual, note: e.target.value })} />
+          </Labeled>
+          <Button
+            variant="secondary"
+            loading={warnBusy === 'manual'}
+            disabled={!validEmail(manual.email) || !manual.note.trim()}
+            onClick={() =>
+              void warnAction('manual', '/admin/warnings', { email: manual.email.trim(), note: { de: manual.note.trim(), en: '' } }, 'Verwarnung eingetragen – der Nutzer wird benachrichtigt.', `${manual.email} verwarnen? Der Nutzer bekommt eine Nachricht; je nach Stand folgt eine Auszeit oder der Ban.`).then(() => setManual({ email: '', note: '' }))
+            }
+          >
+            Verwarnen
+          </Button>
+        </div>
+        <div className="mt-3">
+          <Note message={warnMessage} />
+        </div>
+        {data.warnings.users.length === 0 ? (
+          <p className="mt-4 text-sm text-subtle">Noch keine Verwarnungen.</p>
+        ) : (
+          <ul className="mt-4 divide-y divide-line">
+            {data.warnings.users.map((u) => (
+              <li key={u.userId} className="py-3.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <p className="min-w-0 break-all text-sm font-medium text-white">{u.email}</p>
+                  <span className={cn('rounded px-1.5 py-0.5 text-[11px]', u.active >= data.warnings.rules.timeoutFrom ? 'bg-red-400/15 text-red-200' : u.active > 0 ? 'bg-amber-400/15 text-amber-200' : 'bg-white/5 text-subtle')}>
+                    {u.active} von {data.warnings.rules.banAt} aktiv
+                  </span>
+                  {u.bannedAt && <span className="rounded bg-red-500 px-1.5 py-0.5 text-[11px] text-white">gebannt seit {dateTime(u.bannedAt)}</span>}
+                  {u.bannedAt && u.banDeleteAt && <span className="text-[12px] text-subtle">Server werden gelöscht am {dateTime(u.banDeleteAt)}</span>}
+                  {u.suspendedUntil && <span className="rounded bg-red-400/15 px-1.5 py-0.5 text-[11px] text-red-200">Auszeit bis {dateTime(u.suspendedUntil)}</span>}
+                  <span className="ml-auto flex flex-wrap gap-2">
+                    {u.suspendedUntil && (
+                      <Button variant="secondary" size="sm" loading={warnBusy === `t:${u.userId}`} onClick={() => void warnAction(`t:${u.userId}`, `/admin/users/${u.userId}/timeout/end`, {}, 'Auszeit beendet – die Server sind wieder freigegeben.', `Auszeit von ${u.email} jetzt beenden?`)}>
+                        Auszeit beenden
+                      </Button>
+                    )}
+                    {u.bannedAt && (
+                      <Button variant="secondary" size="sm" loading={warnBusy === `b:${u.userId}`} onClick={() => void warnAction(`b:${u.userId}`, `/admin/users/${u.userId}/unban`, {}, 'Ban aufgehoben – Konto und Server sind wieder freigegeben.', `Ban von ${u.email} aufheben? Konto und Server werden wieder freigegeben. Bleiben ${data.warnings.rules.banAt} Verwarnungen aktiv, führt schon die nächste wieder zum Ban.`)}>
+                        Ban aufheben
+                      </Button>
+                    )}
+                  </span>
+                </div>
+                <ul className="mt-2 space-y-1.5">
+                  {u.items.map((w) => (
+                    <li key={w.id} className={cn('flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]', w.state === 'active' ? 'text-gray-200' : 'text-subtle line-through decoration-white/20')}>
+                      <span>{dateTime(w.at)}</span>
+                      <span>· {w.reason}</span>
+                      {w.serverName && <span>· Server „{w.serverName}“</span>}
+                      {w.note && <span className="break-words">· {w.note}</span>}
+                      {w.by && <span>· von {w.by}</span>}
+                      <span className="no-underline">· {w.state === 'active' ? `verfällt am ${dateTime(w.expiresAt)}` : w.state === 'revoked' ? 'zurückgenommen' : 'verfallen'}</span>
+                      {w.state === 'active' && (
+                        <button type="button" className="text-blue-300 underline-offset-2 hover:underline disabled:opacity-50" disabled={warnBusy === w.id} onClick={() => void warnAction(w.id, `/admin/warnings/${w.id}/revoke`, {}, 'Verwarnung zurückgenommen.', 'Diese Verwarnung zurücknehmen? Sie zählt dann nicht mehr mit.')}>
+                          zurücknehmen
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="surface p-5 sm:p-6">

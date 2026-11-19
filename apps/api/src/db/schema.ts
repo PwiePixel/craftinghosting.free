@@ -20,6 +20,11 @@ export const users = sqliteTable(
     email: text('email').notNull(),
     role: text('role', { enum: ['user', 'admin'] }).notNull().default('user'),
     status: text('status', { enum: ['active', 'locked'] }).notNull().default('active'),
+    /** Verwarnungs-System: Auszeit – bis dahin sind alle Dienste des Nutzers offline (null = keine) */
+    suspendedUntil: ts('suspended_until'),
+    /** Verwarnungs-System: dauerhaft gesperrt seit (null = nicht gebannt) und wann die Server gelöscht werden */
+    bannedAt: ts('banned_at'),
+    banDeleteAt: ts('ban_delete_at'),
     emailVerifiedAt: ts('email_verified_at'),
     /** Zustellung: aufeinanderfolgende Fehlversuche, bei denen der Mailserver die Adresse abgelehnt hat */
     emailFailCount: integer('email_fail_count').notNull().default(0),
@@ -133,7 +138,7 @@ export const servers = sqliteTable(
 
     /** pending = wartet auf E-Mail-Bestätigung bzw. Panel-Zugang */
     status: text('status', { enum: SERVER_STATUSES }).notNull().default('pending'),
-    suspensionReason: text('suspension_reason', { enum: ['cycle_expired', 'admin', 'abuse'] }),
+    suspensionReason: text('suspension_reason', { enum: ['cycle_expired', 'admin', 'abuse', 'warning', 'ban'] }),
     powerState: text('power_state', { enum: POWER_STATES }).notNull().default('unknown'),
     powerStateAt: ts('power_state_at'),
 
@@ -398,6 +403,70 @@ export const dedupeMarks = sqliteTable('dedupe_marks', {
 
 /* ------------------------------------------------------------------- jobs */
 
+/** Verwarnungen eines Nutzers (Verwarnungs-System) */
+export const userWarnings = sqliteTable(
+  'user_warnings',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Betroffener Server (bleibt als Text erhalten, auch wenn der Server gelöscht wird) */
+    serverId: text('server_id'),
+    serverName: text('server_name'),
+    /** Grund: ID aus services/abuse-reasons bzw. „manual“ für eine Verwarnung ohne Abuse-Nachricht */
+    reason: text('reason').notNull(),
+    note: text('note'),
+    /** Zugehörige Abuse-Nachricht (falls vorhanden) */
+    notificationKey: text('notification_key'),
+    createdBy: text('created_by'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    /** Ab dann zählt die Verwarnung nicht mehr */
+    expiresAt: ts('expires_at').notNull(),
+    revokedAt: ts('revoked_at'),
+    revokedBy: text('revoked_by'),
+  },
+  (t) => [index('user_warnings_user_idx').on(t.userId, t.createdAt)],
+);
+
+/**
+ * Gesperrte Identitäten (Ban): Fingerabdruck von E-Mail-Adresse bzw. Discord-Konto. Bleibt bestehen, auch wenn das
+ * Konto gelöscht wird – sonst ließe sich ein Ban durch Neuanmeldung umgehen. Gespeichert wird nur der Fingerabdruck.
+ */
+export const bannedIdentities = sqliteTable(
+  'banned_identities',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['email', 'discord'] }).notNull(),
+    hash: text('hash').notNull(),
+    /** Konto, zu dem der Ban gehört (ohne Fremdschlüssel: der Eintrag überlebt das Konto) */
+    userId: text('user_id'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [uniqueIndex('banned_identities_uq').on(t.kind, t.hash), index('banned_identities_user_idx').on(t.userId)],
+);
+
+/**
+ * Verwarnungen eines gelöschten Kontos: Sie bleiben (nur als Fingerabdruck von E-Mail-Adresse bzw. Discord-Konto)
+ * bis zu ihrem Verfall bestehen und gehen auf ein neues Konto mit derselben Adresse bzw. demselben Discord-Konto über –
+ * sonst ließe sich das Verwarnungs-System durch Löschen und Neuanmelden zurücksetzen.
+ */
+export const warningCarry = sqliteTable(
+  'warning_carry',
+  {
+    id: text('id').primaryKey(),
+    /** Eine Verwarnung kann unter zwei Fingerabdrücken liegen (E-Mail und Discord) – beide tragen dieselbe Gruppe */
+    groupId: text('group_id').notNull(),
+    kind: text('kind', { enum: ['email', 'discord'] }).notNull(),
+    hash: text('hash').notNull(),
+    reason: text('reason').notNull(),
+    serverName: text('server_name'),
+    warnedAt: ts('warned_at').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+  },
+  (t) => [index('warning_carry_hash_idx').on(t.kind, t.hash), index('warning_carry_group_idx').on(t.groupId)],
+);
+
 export const jobLocks = sqliteTable('job_locks', {
   name: text('name').primaryKey(),
   owner: text('owner'),
@@ -589,6 +658,7 @@ export const statusChecks = sqliteTable(
 );
 
 export type User = typeof users.$inferSelect;
+export type UserWarning = typeof userWarnings.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ServerSession = typeof serverSessions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;

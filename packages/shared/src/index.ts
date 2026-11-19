@@ -10,3 +10,4 @@ export * from './status-settings';
 export * from './server-limits';
 export * from './discord-settings';
 export * from './chat-settings';
+export * from './rules/warnings';

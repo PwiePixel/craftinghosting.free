@@ -1,7 +1,7 @@
 import { EmailCard } from '@/components/my/email-card';
 import type { Metadata } from 'next';
-import { ArrowUpRight, FlaskConical, Plus } from 'lucide-react';
-import { kindExhausted, localePath, productKinds, type BonusSlot, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO } from '@chfree/shared';
+import { ArrowUpRight, FlaskConical, Plus, ShieldAlert } from 'lucide-react';
+import { kindExhausted, localePath, productKinds, type BonusSlot, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
 import { SecurityCard } from '@/components/my/security-card';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
@@ -91,7 +91,7 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
     case 'expiring':
       return { tone: 'amber', label: t.expiring };
     case 'suspended':
-      return { tone: 'red', label: s.suspensionReason !== 'cycle_expired' ? t.locked : s.cycle.unlimited ? t.released : t.expired };
+      return { tone: 'red', label: s.suspensionReason === 'warning' ? t.lockedWarning : s.suspensionReason === 'ban' ? t.lockedBan : s.suspensionReason !== 'cycle_expired' ? t.locked : s.cycle.unlimited ? t.released : t.expired };
     default:
       if (s.powerState === 'installing') return { tone: 'blue', label: t.installing };
       if (s.fairUse.isPaused) return { tone: 'amber', label: t.paused };
@@ -200,7 +200,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
             )}
           </div>
         ) : s.status === 'suspended' ? (
-          <p className="text-sm text-muted">{t.lockedText}</p>
+          <p className="text-sm text-muted">{s.suspensionReason === 'warning' ? t.lockedTextWarning : s.suspensionReason === 'ban' ? t.lockedTextBan : t.lockedText}</p>
         ) : s.status === 'pending' ? (
           <div>
             <p className="text-sm text-muted">{discordWait ? d.discord.pendingBlocked : t.pendingText}</p>
@@ -254,7 +254,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
       </div>
 
       <div className="flex border-t border-line px-6 py-3">
-        <DeleteServer server={s} />
+        {s.deleteLocked ? <p className="text-[13px] leading-relaxed text-subtle">{t.deleteLocked}</p> : <DeleteServer server={s} />}
       </div>
     </article>
   );
@@ -266,7 +266,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const t = d.my;
   const query = await searchParams;
   const { user, panelUrl } = await requireUser(lang, 'myServers');
-  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[] }>('/servers', lang), getSite()]);
+  const [res, settings] = await Promise.all([apiServer<{ servers: ServerDTO[]; bonusSlots?: BonusSlot[]; warnings?: WarningStatusDTO }>('/servers', lang), getSite()]);
   // Zusätzliche Slots aus Belohnungen (Einladungen, Server-Boosts)
   const bonusSlots: BonusSlot[] = res.ok ? (res.data.bonusSlots ?? []) : [];
   // Discord-Verknüpfung nur abfragen, wenn die Anbindung eingerichtet ist
@@ -276,6 +276,9 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const securityRes = await apiServer<{ security: SecurityDTO }>('/account/security', lang);
   const security = securityRes.ok ? securityRes.data.security : null;
   const servers = res.ok ? res.data.servers : [];
+  // Verwarnungs-System: aktive Verwarnungen und eine laufende Auszeit
+  const warnings = res.ok ? (res.data.warnings ?? null) : null;
+  const fmt = formatters(lang);
   const hasPending = servers.some((s) => s.status === 'pending');
   const onWaitlist = servers.some((s) => s.status === 'waitlist');
   const transitional = servers.some((s) => ['provisioning', 'provisioning_failed', 'expiring'].includes(s.status) || s.powerState === 'installing');
@@ -335,6 +338,25 @@ export default async function MyServersPage({ params, searchParams }: Props) {
             <Alert tone="info" title={t.maintenanceTitle}>
               {t.maintenanceText}
             </Alert>
+          )}
+          {warnings && (warnings.active > 0 || warnings.suspendedUntil) && (
+            <div className={cn('surface p-5', warnings.suspendedUntil ? 'border-red-400/60 ring-1 ring-red-400/30' : 'border-amber-400/50')}>
+              <p className="flex items-center gap-2 text-[15px] font-semibold text-white">
+                <ShieldAlert className={cn('size-4', warnings.suspendedUntil ? 'text-red-400' : 'text-amber-300')} aria-hidden /> {t.warningsTitle(warnings.active, warnings.banAt)}
+              </p>
+              {warnings.suspendedUntil && <p className="mt-2 text-sm font-medium text-red-200">{t.warningsTimeout(fmt.dateTime(warnings.suspendedUntil))}</p>}
+              <p className="mt-2 text-sm leading-relaxed text-muted">{t.warningsText(warnings.timeoutFrom, warnings.timeoutHours, warnings.banAt, warnings.expireDays)}</p>
+              {warnings.items.length > 0 && (
+                <ul className="mt-3 space-y-1.5 text-[13px] text-subtle">
+                  {warnings.items.map((w) => (
+                    <li key={w.id}>
+                      <span className="text-white/90">{w.reason[lang]}</span>
+                      {w.serverName && <> · {t.warningServer(w.serverName)}</>} · {t.warningItem(fmt.date(w.at), fmt.date(w.expiresAt))}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           {user.beta && settings.beta.url && !settings.beta.instance && (
             <div className="surface flex flex-col gap-4 border-blue-500/40 p-5 sm:flex-row sm:items-center sm:justify-between">

@@ -32,6 +32,7 @@ import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactylConfig } from '../config/pterodactyl.config';
 import { offeredVersions } from './software-directory';
+import { assertNoTimeout, inTimeout } from './sanction-gate';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
@@ -74,6 +75,8 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     status: server.status,
     pendingDeadlineAt: server.status === 'pending' && server.pendingDeadlineAt ? server.pendingDeadlineAt.toISOString() : null,
     abuse: server.abuseAt ? { at: server.abuseAt.toISOString(), reason: abuseReasonTitle(server.abuseReason), source: server.abuseSource ?? 'system' } : null,
+    // Löschen gesperrt, solange ein Abuse-Fall offen ist
+    deleteLocked: !!server.abuseAt || (server.status === 'suspended' && (server.suspensionReason === 'abuse' || server.suspensionReason === 'warning' || server.suspensionReason === 'ban')),
     suspensionReason: server.suspensionReason,
     powerState: server.powerState,
     address: server.address,
@@ -222,6 +225,8 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
  */
 export async function activatePendingServers(user: User, ip?: string): Promise<string[]> {
   if (!identityConfirmed(user) || !user.pteroUserId) return [];
+  // Verwarnungs-System: Während einer Auszeit (und bei gesperrtem Konto) werden keine offenen Anfragen eingerichtet
+  if (inTimeout(user) || user.status !== 'active') return [];
   // Discord-Pflicht: Die Anfrage bleibt offen, bis das Konto verknüpft und der Nutzer Mitglied des Discord-Servers ist
   if (!(await discordGate(user)).ok) return [];
   const activated: string[] = [];
@@ -344,6 +349,8 @@ export const alreadyOnWaitlist = () =>
 
 /** Weiterer Server für angemeldete Nutzer (z. B. nach dem Löschen des alten). */
 export async function createServerForUser(user: User, input: ServerConfigInput, ip?: string): Promise<ServerDTO> {
+  // Verwarnungs-System: während einer Auszeit keine neuen Server
+  assertNoTimeout(user);
   // Konten ohne verknüpftes Discord-Konto (und ohne bestätigte E-Mail-Adresse) können einen Server anfragen – erstellt
   // wird er erst nach dem Verbinden. Bis dahin ist eine offene Anfrage möglich.
   if (!identityConfirmed(user)) {
@@ -384,6 +391,7 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
 export async function reactivateServer(user: User, id: string, ip?: string): Promise<ServerDTO> {
   const server = await getOwnedServer(user, id);
   const now = new Date();
+  assertNoTimeout(user, now);
   const gate = await discordGate(user);
   if (!gate.ok) {
     throw Errors.conflict(
@@ -486,8 +494,26 @@ export async function deleteServer(user: User, id: string, confirmName: string, 
     });
   }
   if (server.status === 'provisioning') throw Errors.conflict('not_ready', L('Der Server wird gerade eingerichtet. Bitte warte einen Moment.', 'The server is being set up. Please wait a moment.'));
+  assertDeletable(server);
   await hardDeleteServer(server);
   await audit({ userId: user.id, serverId: server.id, actor: 'user', action: 'server.deleted', message: `Server „${server.name}“ gelöscht`, ip });
+}
+
+/**
+ * Ein Server mit Abuse-Markierung lässt sich vom Nutzer nicht löschen: Der Vorfall soll erst geklärt werden
+ * (das Team hebt die Markierung danach im Admin-Bereich auf). Dasselbe gilt für Server, die wegen einer Verwarnung
+ * oder eines Bans gesperrt sind.
+ */
+export function assertDeletable(server: Pick<Server, 'abuseAt' | 'status' | 'suspensionReason'>): void {
+  if (server.abuseAt || (server.status === 'suspended' && (server.suspensionReason === 'abuse' || server.suspensionReason === 'warning' || server.suspensionReason === 'ban'))) {
+    throw Errors.conflict(
+      'abuse_locked',
+      L(
+        'Zu diesem Server liegt eine Abuse-Meldung vor. Er lässt sich erst löschen, wenn das geklärt ist – öffne dazu bitte ein Ticket auf unserem Discord-Server.',
+        'There is an abuse report for this server. It can only be deleted once this has been resolved – please open a ticket on our Discord server.',
+      ),
+    );
+  }
 }
 
 export async function hardDeleteServer(server: Server): Promise<void> {

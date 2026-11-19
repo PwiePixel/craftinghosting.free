@@ -88,6 +88,8 @@ export interface ServerDTO {
   pendingDeadlineAt: string | null;
   /** Abuse-Markierung: Auf diesem Server wurde ein Regelverstoß festgestellt (null = keine) */
   abuse: { at: string; reason: Localized; /** Festgestellt von unserem System (automatisch) oder von unserem Team */ source: 'system' | 'manual' } | null;
+  /** Der Nutzer kann den Server gerade nicht löschen (offene Abuse-Meldung bzw. Sperre wegen einer Verwarnung) */
+  deleteLocked: boolean;
   /** Minecraft-Server oder Discord-Bot */
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
@@ -443,8 +445,36 @@ export interface AdminDiscordWaitingDTO {
 }
 
 /** Abuse-Bereich: versendete Abuse-Mails (von Hand und automatisch) und die Gründe für neue */
+/** Verwarnungen eines Nutzers („Meine Server“) */
+export interface WarningStatusDTO {
+  /** Aktive Verwarnungen (nicht zurückgenommen, nicht verfallen) */
+  active: number;
+  timeoutFrom: number;
+  banAt: number;
+  timeoutHours: number;
+  expireDays: number;
+  /** Auszeit: bis dahin sind alle Dienste offline (null = keine) */
+  suspendedUntil: string | null;
+  items: { id: string; at: string; expiresAt: string; reason: Localized; serverName: string | null }[];
+}
+
+/** Verwarnungen im Admin-Bereich */
+export interface AdminWarningsDTO {
+  rules: { timeoutFrom: number; banAt: number; timeoutHours: number; expireDays: number; banDeleteDays: number };
+  users: {
+    userId: string;
+    email: string;
+    active: number;
+    suspendedUntil: string | null;
+    bannedAt: string | null;
+    banDeleteAt: string | null;
+    items: { id: string; at: string; expiresAt: string; reason: string; note: string | null; serverName: string | null; by: string | null; state: 'active' | 'expired' | 'revoked' }[];
+  }[];
+}
+
 export interface AdminAbuseDTO {
   reasons: { id: string; label: string }[];
+  warnings: AdminWarningsDTO;
   /** Server, die gerade als Abuse markiert sind */
   flagged: { id: string; name: string; ownerEmail: string; reason: string; /** Festgestellt vom System oder von Hand */ source: 'system' | 'manual'; at: string; status: string }[];
   mails: { id: string; createdAt: string; userEmail: string; type: string; manual: boolean; title: string; body: string; emailStatus: string; emailLastError: string | null; serverName: string | null }[];

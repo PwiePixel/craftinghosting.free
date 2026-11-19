@@ -32,6 +32,7 @@ import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
 import { activateSignupSubscription, subscribe } from './newsletter.service';
 import { getSettings } from './settings.service';
+import { bannedError, isBannedIdentity, lockedError } from './sanction-gate';
 import { checkSecondFactor, type SecondFactorInput } from './two-factor.service';
 import { confirmWaitlist, hasWaitlistEntry, waitlistForUser } from './waitlist.service';
 import { rememberUserLocale } from './locale.service';
@@ -189,6 +190,7 @@ export async function prepareSignup(input: StartInput) {
   if (settings.registration.mode === 'closed') throw registrationClosed();
   // Sperrliste (Admin → Einstellungen): gesperrte Adressen/Domains und Wegwerf-Anbieter
   if (isEmailBlocked(input.email, settings.blocklist)) throw emailBlocked();
+  if (await isBannedIdentity({ email: input.email })) throw bannedError();
   await assertConfigAvailable(input);
   return settings;
 }
@@ -220,6 +222,8 @@ export async function accountForDiscordLogin(discord: DiscordIdentity): Promise<
 export async function accountForDiscordSignup(discord: DiscordIdentity, email: string, meta: { ip?: string; locale: Locale }): Promise<DiscordAccount> {
   const known = await findUserByDiscord(discord.id);
   if (known) return known.status === 'active' ? { ok: true, user: known, created: false } : { ok: false, reason: 'locked' };
+  // Ein Ban gilt für die E-Mail-Adresse und das Discord-Konto – auch nachdem das alte Konto gelöscht wurde
+  if (await isBannedIdentity({ email, discordId: discord.id })) return { ok: false, reason: 'locked' };
   const link = { discordId: discord.id, discordUsername: discord.username.slice(0, 64), discordLinkedAt: new Date(), discordCustomerRole: false, discordSyncAt: null };
   const byEmail = await findUserByEmail(email);
   try {
@@ -291,6 +295,7 @@ export async function registerAccount(input: { email: string; password: string; 
   const settings = await getSettings();
   if (settings.registration.mode === 'closed') throw registrationClosed();
   if (isEmailBlocked(input.email, settings.blocklist)) throw emailBlocked();
+  if (await isBannedIdentity({ email: input.email })) throw bannedError();
   const user = await createPasswordAccount(input.email, input.password, meta);
   if (input.newsletter && settings.newsletter.enabled) await subscribe(user.email, meta.locale, { ip: meta.ip, source: 'signup', sendMail: false }).catch(() => {});
   // Bestätigungsmail – freiwillig; schlägt der Versand fehl, geht es trotzdem weiter
@@ -351,7 +356,7 @@ export async function loginWithPassword(email: string, password: string, meta: {
       .where(eq(users.id, user.id));
     throw wrong();
   }
-  if (user.status !== 'active') throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));
+  if (user.status !== 'active') throw lockedError(user);
   if (user.loginFails > 0 || user.loginLockedUntil) await db.update(users).set({ loginFails: 0, loginLockedUntil: null }).where(eq(users.id, user.id));
   if (user.twoFactorMethod) return { kind: 'two_factor', method: user.twoFactorMethod, ticket: twoFactorTicket(user.id) };
   return { kind: 'done', ...(await completeLogin(user.id, meta, 'password')) };
@@ -428,6 +433,7 @@ export async function changeEmail(user: User, email: string, meta: { ip?: string
     throw Errors.badRequest('email_same', msg, { email: msg });
   }
   if (isEmailBlocked(email, (await getSettings()).blocklist)) throw emailBlocked();
+  if (await isBannedIdentity({ email })) throw bannedError();
   if (await findUserByEmail(email)) throw taken();
   if (user.pteroUserId) {
     try {
@@ -547,9 +553,7 @@ export async function verifyLogin(input: { token: string } | { email: string; co
     }
   }
   const user = await getUser(userId);
-  if (user.status !== 'active') {
-    throw Errors.forbidden(L('Dein Account ist gesperrt. Bitte kontaktiere den Support.', 'Your account is locked. Please contact support.'));
-  }
+  if (user.status !== 'active') throw lockedError(user);
   if (user.twoFactorMethod) return { kind: 'two_factor', method: user.twoFactorMethod, ticket: twoFactorTicket(userId) };
   return { kind: 'done', ...(await completeLogin(userId, meta)) };
 }

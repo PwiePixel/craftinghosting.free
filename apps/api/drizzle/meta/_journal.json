@@ -141,6 +141,20 @@
       "when": 1795030963616,
       "tag": "0019_partner_software",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1795063215963,
+      "tag": "0020_warnings",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1795064208346,
+      "tag": "0021_warning_carry",
+      "breakpoints": true
     }
   ]
 }

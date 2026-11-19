@@ -27,6 +27,7 @@ import {
   type DiscordUser,
 } from './rest';
 import { getDiscordSecrets, getDiscordState, patchDiscordState } from './store';
+import { isBannedIdentity } from '../services/sanction-gate';
 
 /** Server in diesen Zuständen machen ihren Besitzer zum „Customer“ */
 const CUSTOMER_STATUSES = ['provisioning', 'provisioning_failed', 'active', 'expiring', 'suspended'] as const;
@@ -162,6 +163,8 @@ export async function linkDiscordAccount(user: User, code: string, ip?: string):
   const result = await exchangeDiscordCode(code, async (discordUser) => {
     const [other] = await db.select({ id: users.id }).from(users).where(and(eq(users.discordId, discordUser.id), ne(users.id, user.id))).limit(1);
     if (other) return 'taken';
+    // Ein gebanntes Discord-Konto lässt sich mit keinem (neuen) Konto verknüpfen
+    if (await isBannedIdentity({ discordId: discordUser.id })) return 'locked';
     try {
       await db
         .update(users)

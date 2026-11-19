@@ -273,7 +273,8 @@ export function getStartGate(input: {
 /*  Reaktivierung                                                              */
 /* -------------------------------------------------------------------------- */
 
-export type SuspensionReason = 'cycle_expired' | 'admin' | 'abuse';
+/** warning = Auszeit nach einer Verwarnung (endet von selbst) · ban = Konto dauerhaft gesperrt */
+export type SuspensionReason = 'cycle_expired' | 'admin' | 'abuse' | 'warning' | 'ban';
 
 export type ReactivationBlockReason =
   | 'not_suspended'

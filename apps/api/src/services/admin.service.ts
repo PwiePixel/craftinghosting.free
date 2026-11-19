@@ -51,6 +51,7 @@ import { trySyncPanelDescription } from './panel';
 import { provisionServer } from './provisioning.service';
 import { activatePendingServers, hardDeleteServer, pendingReasonFor } from './server.service';
 import { destroyAllSessions } from './session.service';
+import { liftBan } from './warnings.service';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 const panelServerAdminUrl = (id: number | null) => (id ? `${panelPublicUrl}/admin/servers/view/${id}` : null);
@@ -701,6 +702,8 @@ export async function userAction(admin: User, id: string, action: UserAction, ip
       await log('admin.user_locked', `Konto ${user.email} gesperrt`);
       return;
     case 'unlock':
+      // Ein Ban (Verwarnungs-System) wird vollständig aufgehoben: Sperrliste, Server, Löschfrist
+      if (user.bannedAt) return liftBan(admin, id, ip);
       await db.update(users).set({ status: 'active' }).where(eq(users.id, id));
       await log('admin.user_unlocked', `Konto ${user.email} entsperrt`);
       return;

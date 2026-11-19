@@ -4,6 +4,7 @@ import { adminEmails, cookieSecure, env } from '../env';
 import type { User } from '../db/schema';
 import { Errors, L } from '../lib/errors';
 import { getSessionUser } from '../services/session.service';
+import { lockedError } from '../services/sanction-gate';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -57,7 +58,7 @@ export const authPlugin = fp(async function authPlugin(app: FastifyInstance) {
 
 export async function requireAuth(request: FastifyRequest) {
   if (!request.user) throw Errors.unauthorized();
-  if (request.user.status !== 'active') throw Errors.forbidden(L('Dein Account ist gesperrt.', 'Your account is locked.'));
+  if (request.user.status !== 'active') throw lockedError(request.user);
 }
 
 export function currentUser(request: FastifyRequest): User {

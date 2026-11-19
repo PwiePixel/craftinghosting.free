@@ -38,6 +38,7 @@ import { deleteLogo, saveLogo } from '../services/logo.service';
 import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } from '../services/settings.service';
 import { addWaitlistEntries, nextWaitlistIds, releaseWaitlist, removeWaitlistEntry } from '../services/waitlist.service';
 import { explainSmtpError } from '../services/mail/mailer';
+import { endTimeout, liftBan, revokeWarning, warnManually } from '../services/warnings.service';
 
 const idParams = z.object({ id: z.string().uuid() });
 const listQuery = z.object({
@@ -82,6 +83,8 @@ export async function adminRoutes(app: FastifyInstance) {
     serverId: z.string().uuid().nullable().optional(),
     // Wer den Verstoß festgestellt hat – ohne Angabe: das System
     source: z.enum(['system', 'manual']).default('system'),
+    // Zählt als Verwarnung (Standard) – false = nur ein Hinweis
+    warning: z.boolean().default(true),
   });
   app.post('/admin/abuse', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (request) => {
     return { ...(await sendAbuseMail(currentUser(request), abuseSchema.parse(request.body), request.ip)), abuse: await listAbuse() };
@@ -89,6 +92,29 @@ export async function adminRoutes(app: FastifyInstance) {
   /** Vorschau: Betreff und Text der Mail in beiden Sprachen */
   app.post('/admin/abuse/preview', { config: { rateLimit: { max: 600, timeWindow: '10 minutes' } } }, async (request) => ({ preview: await previewAbuse(abuseSchema.parse(request.body)) }));
   /** Server eines Nutzers zur Auswahl */
+  /* ---- Verwarnungs-System ---- */
+  /** Verwarnung ohne Abuse-Nachricht (der Nutzer bekommt eine eigene Nachricht mit dem angegebenen Grund) */
+  app.post('/admin/warnings', { config: { rateLimit: { max: 60, timeWindow: '10 minutes' } } }, async (request) => {
+    const input = z.object({ email: emailSchema, note: localizedMail(3000) }).parse(request.body);
+    const warning = await warnManually(currentUser(request), input, request.ip);
+    return { warning: { count: warning.count, sanction: warning.sanction, until: warning.until?.toISOString() ?? null }, abuse: await listAbuse() };
+  });
+  app.post('/admin/warnings/:id/revoke', async (request) => {
+    await revokeWarning(currentUser(request), z.object({ id: z.string().uuid() }).parse(request.params).id, request.ip);
+    return { abuse: await listAbuse() };
+  });
+  /** Auszeit vorzeitig beenden */
+  app.post('/admin/users/:id/timeout/end', async (request) => {
+    const admin = currentUser(request);
+    await endTimeout(z.object({ id: z.string().uuid() }).parse(request.params).id, admin.email);
+    return { abuse: await listAbuse() };
+  });
+  /** Ban aufheben (Konto, Server und Sperrliste) */
+  app.post('/admin/users/:id/unban', async (request) => {
+    await liftBan(currentUser(request), z.object({ id: z.string().uuid() }).parse(request.params).id, request.ip);
+    return { abuse: await listAbuse() };
+  });
+
   app.get('/admin/abuse/servers', async (request) => {
     const { email } = z.object({ email: emailSchema }).parse(request.query);
     return { servers: await listAbuseServers(email) };

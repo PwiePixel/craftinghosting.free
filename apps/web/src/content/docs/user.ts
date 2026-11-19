@@ -140,6 +140,21 @@ export const userDocs: DocPage[] = [
           { p: { de: 'Stellt unser System oder unser Team einen Verstoß fest, wird der Server unter „Meine Server“ rot als „Abuse“ markiert und kann gesperrt werden. Dort steht auch, ob das System oder das Team den Verstoß festgestellt hat. Öffne in diesem Fall ein Ticket auf unserem Discord-Server, damit wir das klären können.', en: 'If our system or our team detects a violation, the server is marked red as “Abuse” under “My servers” and may be suspended. It also says whether the system or the team detected it. In that case open a ticket on our Discord server so that we can sort it out.' } },
         ],
       },
+      {
+        heading: { de: 'Verwarnungen', en: 'Warnings' },
+        blocks: [
+          { p: { de: 'Jede Abuse-Nachricht von uns zählt als eine Verwarnung. Wie viele du hast, steht unter „Meine Server“.', en: 'Every abuse notice from us counts as one warning. How many you have is shown under “My servers”.' } },
+          {
+            ul: [
+              { de: '1. Verwarnung: noch keine Folge – bitte stelle den Verstoß ab.', en: '1st warning: no consequence yet – please stop the violation.' },
+              { de: '2. und 3. Verwarnung: Alle deine Dienste sind jeweils 48 Stunden offline. Danach kannst du sie wieder starten.', en: '2nd and 3rd warning: all your services are offline for 48 hours each time. After that you can start them again.' },
+              { de: '4. Verwarnung: Dein Konto wird dauerhaft gesperrt. Deine Server werden gesperrt und nach 14 Tagen samt Daten gelöscht. E-Mail-Adresse und Discord-Konto bleiben gesperrt.', en: '4th warning: your account is banned permanently. Your servers are suspended and deleted including their data after 14 days. Email address and Discord account stay banned.' },
+              { de: 'Eine Verwarnung verfällt nach 180 Tagen. Hältst du eine für unberechtigt, öffne bitte ein Ticket auf unserem Discord-Server – wir können sie zurücknehmen.', en: 'A warning expires after 180 days. If you think one is unjustified, please open a ticket on our Discord server – we can revoke it.' },
+              { de: 'Solange zu einem Server eine Abuse-Meldung offen ist, lässt er sich nicht löschen; auch dein Konto lässt sich so lange nicht löschen. Das wird wieder möglich, sobald der Fall per Ticket geklärt ist.', en: 'While an abuse report is open for a server, it cannot be deleted; your account cannot be deleted during that time either. This becomes possible again once the case has been resolved via a ticket.' },
+            ],
+          },
+        ],
+      },
     ],
   },
   {

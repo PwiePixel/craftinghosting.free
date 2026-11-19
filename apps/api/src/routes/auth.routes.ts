@@ -35,6 +35,7 @@ import { createPanelAccount } from '../services/provisioning.service';
 import { activatePendingServers, hardDeleteServer } from '../services/server.service';
 import { createSession, destroySession, setStaySignedIn } from '../services/session.service';
 import { confirmTotp, disableSecondFactor, enablePasswordFactor, setupTotp, toSecurityDTO } from '../services/two-factor.service';
+import { assertAccountDeletable } from '../services/warnings.service';
 
 const strict = (max: number, timeWindow: string) => ({ config: { rateLimit: { max, timeWindow } } });
 
@@ -273,6 +274,8 @@ export async function authRoutes(app: FastifyInstance) {
         confirmEmail: L('Bitte gib deine E-Mail-Adresse exakt ein.', 'Please enter your email address exactly.'),
       });
     }
+    // Verwarnungs-System: Ein offener Abuse-Fall oder eine laufende Auszeit lässt sich nicht durch Löschen des Kontos umgehen
+    await assertAccountDeletable(user);
     await deleteAccount(user, {}, request.ip);
     clearSessionCookie(reply);
     return { ok: true };
