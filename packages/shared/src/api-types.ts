@@ -1210,3 +1210,36 @@ export interface AdminPartnerDTO extends AdminPartnerInput {
   lastUsedAt: string | null;
   createdAt: string;
 }
+
+/* ------------------------------------------------------------ Server verwalten (Website, „Meine Server“ → Server) */
+
+/** Live-Werte eines Servers (direkt aus dem Panel) */
+export interface ServerLiveDTO {
+  state: 'offline' | 'starting' | 'running' | 'stopping' | 'installing' | 'unknown';
+  cpuPercent: number;
+  memoryBytes: number;
+  memoryLimitBytes: number;
+  diskBytes: number;
+  uptimeMs: number;
+}
+
+export interface ServerPortDTO {
+  id: number;
+  /** Adresse zum Verbinden (Alias der Node oder IP) */
+  host: string;
+  port: number;
+  notes: string | null;
+  /** Hauptport – lässt sich nicht entfernen */
+  primary: boolean;
+}
+
+export interface ServerDetailDTO {
+  server: ServerDTO;
+  /** null = Panel gerade nicht erreichbar oder Server noch nicht angelegt */
+  live: ServerLiveDTO | null;
+  ports: { items: ServerPortDTO[]; limit: number } | null;
+  /** Minecraft-EULA für diesen Server akzeptiert (sonst fragt die Website vor dem Start) */
+  eulaAccepted: boolean;
+}
+
+export type ServerPowerAction = 'start' | 'stop' | 'restart' | 'kill';

@@ -55,6 +55,17 @@ export interface PteroAllocation {
   port: number;
 }
 
+/** Port eines Servers aus Sicht des Besitzers (Client-API) */
+export interface PteroServerPort {
+  id: number;
+  ip: string;
+  alias: string | null;
+  port: number;
+  notes: string | null;
+  /** Hauptport (darüber verbinden sich Spieler) – lässt sich nicht entfernen */
+  primary: boolean;
+}
+
 export interface PteroResources {
   state: PowerState;
   isSuspended: boolean;
@@ -197,6 +208,12 @@ export interface PterodactylGateway {
   sendPowerSignal(identifier: string, signal: PowerAction): Promise<void>;
   /** Konsolenbefehl senden (z. B. `say …` für In-Game-Hinweise). */
   sendCommand(identifier: string, command: string): Promise<void>;
+  /** Ports des Servers (Hauptport zuerst) */
+  listServerPorts(identifier: string): Promise<PteroServerPort[]>;
+  /** Weiteren Port zuweisen (das Panel wählt ihn; Obergrenze laut Paket prüft das Panel) */
+  addServerPort(identifier: string): Promise<PteroServerPort>;
+  /** Zusätzlichen Port entfernen (nicht den Hauptport) */
+  removeServerPort(identifier: string, allocationId: number): Promise<void>;
   createBackupSchedule(identifier: string, spec: BackupScheduleSpec): Promise<number>;
   /** Textdatei eines Servers lesen, z. B. `/eula.txt` (null = Datei gibt es nicht) */
   readFile(identifier: string, path: string): Promise<string | null>;

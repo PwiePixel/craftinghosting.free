@@ -8,7 +8,7 @@
  *    parallele Läufe (API + Worker) überspringen sich gegenseitig.
  */
 import { partnerNodeIds } from './partner-nodes';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { findPlan, getServerType, type SiteSettings } from '@chfree/shared';
 import { baseEggMapping, getEggMapping, installMethodOf, pterodactylConfig, versionVariableIn } from '../config/pterodactyl.config';
 import { env, panelPublicUrl } from '../env';
@@ -22,9 +22,10 @@ import { notify } from './notification.service';
 import { getUserLocale } from './locale.service';
 import { desiredPanelDescription } from './panel';
 import { getSettings } from './settings.service';
-import { pendingSoftwareJob } from './software-directory';
-import { SETUP_STARTUP, installerReady, installerStartup, resolveSoftware } from './partner-software.service';
+import { directoryName, pendingSoftwareJob } from './software-directory';
+import { INSTALLER_VARIABLE, SETUP_STARTUP, installerStartup, resolveSoftware } from './partner-software.service';
 import { inTimeout } from './sanction-gate';
+import { computeRuntimeState, loadWeekSessions } from './runtime';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
 
@@ -217,7 +218,11 @@ function formatAddress(p: PteroServer): string | null {
 }
 
 /** Das Software-Verzeichnis ist gerade nicht erreichbar – kein Fehlversuch der Anlage */
-class DirectoryUnavailable extends Error {}
+class DirectoryUnavailable extends Error {
+  constructor() {
+    super('Das Software-Verzeichnis (MCJars) ist nicht erreichbar oder kennt diese Software nicht.');
+  }
+}
 
 export async function provisionServer(serverId: string, actor: 'user' | 'system', ip?: string): Promise<'active' | 'failed' | 'skipped'> {
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
@@ -250,26 +255,29 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     const viaDirectory = installMethodOf(server.serverType, settings) === 'directory';
     const egg = viaDirectory ? baseEggMapping(settings) : getEggMapping(server.serverType, settings);
     if (!type || !egg) throw new Error(`Für den Servertyp „${server.serverType}“ ist kein Egg eingerichtet (Admin → Pterodactyl)`);
-    // Ist die Grundlage das mitgelieferte Egg, installiert das Panel die gewählte Software gleich beim Anlegen selbst
-    // (ein Durchgang, kein nachgelagerter Job) – sonst wie bisher: Grundinstallation, danach der Software-Job
-    const software =
-      viaDirectory && (await installerReady(settings))
-        ? await resolveSoftware(server.serverType, server.version).catch((err: unknown) => {
-            // Verzeichnis gerade nicht erreichbar: kein Fehlversuch – der Job versucht es gleich erneut
-            if (err instanceof ApiError && err.statusCode === 503) throw new DirectoryUnavailable();
-            throw err;
-          })
-        : null;
-    // Minecraft-EULA: Kunden der Website stimmen ihr beim Bestellen zu; Partner bestätigen sie beim Start über die API
-    const installer = software ? await installerStartup(software, settings, { eula: !server.partnerId }) : null;
+    const eggInfo = await getEggCached(egg.nestId, egg.eggId);
+    // Ist das verwendete Egg das mitgelieferte (mit Installationsskript) – als Grundlage oder einem Typ direkt zugeordnet –,
+    // installiert das Panel die gewählte Software gleich beim Anlegen selbst (ein Durchgang, kein nachgelagerter Job).
+    // Sonst wie bisher: Grundinstallation, danach der Software-Job.
+    const eggInstalls = type.kind === 'minecraft' && eggInfo.variables.some((v) => v.envVariable === INSTALLER_VARIABLE) && !!directoryName(server.serverType);
+    const software = eggInstalls
+      ? await resolveSoftware(server.serverType, server.version).catch((err: unknown) => {
+          // Verzeichnis gerade nicht erreichbar: kein Fehlversuch – der Job versucht es gleich erneut
+          if (err instanceof ApiError && err.statusCode === 503) throw new DirectoryUnavailable();
+          throw err;
+        })
+      : null;
 
     const ptero = pterodactyl();
     const externalId = `${pterodactylConfig.externalIdPrefix.server}${server.id}`;
     const description = desiredPanelDescription({ ...server, status: 'active' }, new Date(), await getUserLocale(server.userId), settings.products[server.kind].fairUse);
 
     let pServer = await ptero.findServerByExternalId(externalId);
+    // Minecraft-EULA: nur mit Zustimmung beim Bestellen; Partner bestätigen sie beim Start über die API
+    const installer = software && !pServer ? await installerStartup(software, settings, { eula: !server.partnerId && !!server.eulaAcceptedAt, egg }) : null;
+    // Gab es den Server im Panel schon (früherer Versuch), zählt, wie er dort angelegt wurde – nicht die heutigen Einstellungen
+    const panelInstalls = pServer ? !!pServer.environment?.SOFTWARE_STEPS : !!installer;
     if (!pServer) {
-      const eggInfo = await getEggCached(egg.nestId, egg.eggId);
       const environment: Record<string, string> = {};
       for (const v of eggInfo.variables) environment[v.envVariable] = v.defaultValue;
       Object.assign(environment, egg.environment ?? {});
@@ -301,8 +309,13 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     // Partner-Server: Ob das Panel die Software selbst installiert oder der Job sie einrichtet, gilt so, wie hier angelegt
     // wurde (die Einstellungen können sich seit der Anfrage geändert haben, z. B. bei einem späteren Versuch)
     if (server.partnerId && viaDirectory) {
-      if (installer) await db.update(partnerServers).set({ softwareJob: null }).where(eq(partnerServers.serverId, server.id));
-      else await db.update(partnerServers).set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, true) }).where(and(eq(partnerServers.serverId, server.id), isNull(partnerServers.softwareJob)));
+      if (panelInstalls) await db.update(partnerServers).set({ softwareJob: null }).where(eq(partnerServers.serverId, server.id));
+      else
+        await db
+          .update(partnerServers)
+          .set({ softwareJob: pendingSoftwareJob(server.serverType, server.version, true) })
+          // Auch einen Auftrag ersetzen, der bei einem früheren Versuch gescheitert ist (sonst bliebe der Server „fehlgeschlagen“)
+          .where(and(eq(partnerServers.serverId, server.id), or(isNull(partnerServers.softwareJob), sql`json_extract(${partnerServers.softwareJob}, '$.error') is not null`)));
     }
 
     const res = await db
@@ -318,9 +331,9 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
         provisioningError: null,
         // Server der Website mit Software ohne eigenes Egg: Nach der Grundinstallation richtet der Software-Job sie ein
         // (Server der Partner-API haben ihren Auftrag schon beim Erstellen bekommen)
-        ...(viaDirectory && !installer && !server.partnerId ? { softwareJob: pendingSoftwareJob(server.serverType, server.version, true) } : {}),
+        ...(viaDirectory && !panelInstalls && !server.partnerId ? { softwareJob: pendingSoftwareJob(server.serverType, server.version, true) } : {}),
         // „latest“ wird zur tatsächlich installierten Version (Launcher und Mod-Suche brauchen sie)
-        ...(software ? { version: software.resolvedVersion } : {}),
+        ...(software && panelInstalls ? { version: software.resolvedVersion } : {}),
         panelDescription: pServer.description || description,
       })
       .where(and(eq(servers.id, server.id), inArray(servers.status, ['provisioning', 'provisioning_failed'])));
@@ -349,7 +362,8 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     }
     return 'active';
   } catch (err) {
-    if (err instanceof DirectoryUnavailable) {
+    // Nur eine Weile: Bleibt das Verzeichnis länger weg (oder kennt den Typ nicht), zählt es als normaler Fehlversuch
+    if (err instanceof DirectoryUnavailable && Date.now() - server.createdAt.getTime() < 2 * 60 * 60_000) {
       await db.update(servers).set({ provisioningAttempts: server.provisioningAttempts }).where(eq(servers.id, server.id));
       return 'skipped';
     }
@@ -385,8 +399,31 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
 
 /**
  * Nacharbeiten nach der Installation (automatischer Backup-Zeitplan)
- * und Info-Mail „Server ist bereit – im Panel starten“.
+ * und Info-Mail „Server läuft“ bzw. „Server ist bereit“ (Minecraft-Server der Website starten automatisch).
  */
+/**
+ * Nach der ersten Installation: Minecraft-Server der Website gleich starten – wenn der Kunde der Minecraft-EULA beim
+ * Bestellen zugestimmt hat (sonst endete der Start sofort mit dem EULA-Hinweis) und die Regeln einen Start erlauben.
+ */
+async function autoStart(server: Server): Promise<boolean> {
+  if (server.kind !== 'minecraft' || server.partnerId || !server.pteroIdentifier || !server.eulaAcceptedAt) return false;
+  const [user] = await db.select().from(users).where(eq(users.id, server.userId)).limit(1);
+  if (!user || user.status !== 'active' || inTimeout(user)) return false;
+  const settings = await getSettings();
+  const now = new Date();
+  const { startGate } = computeRuntimeState({ ...server, powerState: 'offline' }, user, await loadWeekSessions(server.id, now), now, settings.products[server.kind].fairUse);
+  if (!startGate.allowed) return false;
+  try {
+    const ptero = pterodactyl();
+    await ptero.writeFile(server.pteroIdentifier, '/eula.txt', '# Zugestimmt beim Bestellen auf CraftingHosting.free\neula=true\n');
+    await ptero.sendPowerSignal(server.pteroIdentifier, 'start');
+  } catch {
+    return false;
+  }
+  await db.update(servers).set({ powerState: 'starting', powerStateAt: now }).where(eq(servers.id, server.id));
+  return true;
+}
+
 export async function runPostProvision(server: Server): Promise<boolean> {
   if (server.postProvisionDone || !server.pteroIdentifier || server.status !== 'active') return false;
   if (server.powerState === 'installing' || server.powerState === 'unknown') return false;
@@ -403,18 +440,20 @@ export async function runPostProvision(server: Server): Promise<boolean> {
     .set({ postProvisionDone: true, backupScheduleId: scheduleId })
     .where(and(eq(servers.id, server.id), eq(servers.postProvisionDone, false)));
   if (affectedRows(res) === 1) {
+    // Minecraft-Server der Website gleich starten – dann ist er sofort spielbereit und der Kunde sieht, dass er läuft
+    const started = !bot && (await autoStart(server));
     await audit({
       userId: server.userId,
       serverId: server.id,
       actor: 'system',
       action: 'server.ready',
-      message: 'Installation abgeschlossen – Server ist startbereit',
+      message: started ? 'Installation abgeschlossen – Server automatisch gestartet' : 'Installation abgeschlossen – Server ist startbereit',
     });
     await notify({
       userId: server.userId,
       serverId: server.id,
       type: 'server.ready',
-      title: bot ? L('Dein Discord-Bot-Server ist bereit', 'Your Discord bot server is ready') : L('Dein Minecraft-Server ist bereit', 'Your Minecraft server is ready'),
+      title: bot ? L('Dein Discord-Bot-Server ist bereit', 'Your Discord bot server is ready') : started ? L('Dein Minecraft-Server läuft', 'Your Minecraft server is running') : L('Dein Minecraft-Server ist bereit', 'Your Minecraft server is ready'),
       body: bot
         ? L(
             [
@@ -428,14 +467,27 @@ export async function runPostProvision(server: Server): Promise<boolean> {
               'Tip: keep your bot token only in a .env or config file on the server and never share it.',
             ].join('\n'),
           )
-        : L(
+        : started
+          ? L(
+              [
+                `„${server.name}“ ist fertig installiert und wurde gestartet – in wenigen Sekunden kannst du dich verbinden.`,
+                server.address ? `Adresse für Minecraft: ${server.address}` : '',
+                `Konsole, Start/Stopp und Ports findest du auf unserer Website unter „Meine Server“; Dateien, Plugins und Backups im Panel: ${panelPublicUrl}`,
+              ].join('\n'),
+              [
+                `“${server.name}” has been installed and started – you can connect in a few seconds.`,
+                server.address ? `Address for Minecraft: ${server.address}` : '',
+                `Console, start/stop and ports are on our website under “My servers”; files, plugins and backups in the panel: ${panelPublicUrl}`,
+              ].join('\n'),
+            )
+          : L(
         [
-          `„${server.name}“ ist fertig installiert. Starte ihn jetzt im Pterodactyl-Panel – dort findest du Konsole, Dateien, Plugins und Backups.`,
+          `„${server.name}“ ist fertig installiert. Starte ihn jetzt auf unserer Website unter „Meine Server“ → „Verwalten“ (dort auch Konsole und Ports) oder im Pterodactyl-Panel (Dateien, Plugins, Backups).`,
           `Panel: ${panelPublicUrl} · Anmeldung mit deiner E-Mail-Adresse und deinem Panel-Passwort.`,
           server.address ? `Adresse für Minecraft: ${server.address}` : '',
         ].join('\n'),
         [
-          `“${server.name}” has been installed. Start it now in the Pterodactyl panel – there you will find the console, files, plugins and backups.`,
+          `“${server.name}” has been installed. Start it now on our website under “My servers” → “Manage” (console and ports are there too) or in the Pterodactyl panel (files, plugins, backups).`,
           `Panel: ${panelPublicUrl} · Sign in with your email address and your panel password.`,
           server.address ? `Address for Minecraft: ${server.address}` : '',
         ].join('\n'),

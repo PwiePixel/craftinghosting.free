@@ -15,14 +15,14 @@ import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, getServerType, type Ser
 import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
-import { baseEggMapping, installMethodOf } from '../config/pterodactyl.config';
+import { baseEggMapping, installMethodOf, type EggMapping } from '../config/pterodactyl.config';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { emitPartnerEvent } from './partner-webhooks.service';
 import { notify } from './notification.service';
-import { baseStartup, getEggCached } from './provisioning.service';
+import { baseStartup, getEggCached, startupFor as startupForType } from './provisioning.service';
 import { pendingSoftwareJob, softwareDirectory } from './software-directory';
 import { getSettings } from './settings.service';
 import type { SiteSettings } from '@chfree/shared';
@@ -135,14 +135,17 @@ export function encodeSteps(steps: SoftwareStep[]): string {
   return Buffer.from(`${lines.join('\n')}\n`, 'utf8').toString('base64');
 }
 
-/** Ist die Grundlage das mitgelieferte Egg (mit Installationsskript für das Verzeichnis)? */
+/**
+ * Ist die Grundlage das mitgelieferte Egg (mit Installationsskript für das Verzeichnis)? Ist das Panel gerade nicht
+ * erreichbar, wird das nicht als „nein“ gewertet (sonst entstünde ein Server auf dem falschen Weg), sondern abgebrochen.
+ */
 export async function installerReady(settings: SiteSettings): Promise<boolean> {
   const egg = baseEggMapping(settings);
   if (!egg) return false;
   try {
     return (await getEggCached(egg.nestId, egg.eggId)).variables.some((v) => v.envVariable === INSTALLER_VARIABLE);
   } catch {
-    return false;
+    throw Errors.unavailable(L('Das Panel ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.', 'The panel cannot be reached right now. Please try again shortly.'));
   }
 }
 
@@ -150,8 +153,8 @@ export async function installerReady(settings: SiteSettings): Promise<boolean> {
  * Egg, Image, Startbefehl und Variablen, mit denen das Panel die Software selbst installiert. Java-Version passend zur
  * Minecraft-Version aus den Images der Grundlage. Wirft, wenn es kein passendes Image gibt.
  */
-export async function installerStartup(software: ResolvedSoftware, settings: SiteSettings, opts: { eula: boolean }): Promise<{ eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }> {
-  const egg = baseEggMapping(settings);
+export async function installerStartup(software: ResolvedSoftware, settings: SiteSettings, opts: { eula: boolean; egg?: EggMapping | null }): Promise<{ eggId: number; dockerImage: string; startup: string; environment: Record<string, string> }> {
+  const egg = opts.egg ?? baseEggMapping(settings);
   if (!egg) throw new Error('Für die Software-Einrichtung ist keine Grundlage (Egg) eingerichtet (Admin → Einstellungen → Server-Software)');
   const eggInfo = await getEggCached(egg.nestId, egg.eggId);
   const image = pickJavaImage(eggInfo.dockerImages ?? {}, software.java);
@@ -291,8 +294,21 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
       return await wait();
     }
     if (now.getTime() > deadline) return await fail('Die Einrichtung hat zu lange gedauert.');
-    // Typ inzwischen entfernt oder über ein eigenes Egg eingestellt: hier gibt es nichts mehr einzurichten
-    if (!installsViaDirectory(job.serverType, await getSettings())) return await fail('Diese Server-Software wird nicht mehr über das Verzeichnis eingerichtet.', undefined, true);
+    // Inzwischen anders eingestellt: Läuft der Typ jetzt über ein eigenes Egg, den Server darauf umstellen und im Panel
+    // neu installieren (statt ihn mit dem Hinweis-Startbefehl stehen zu lassen). Ist er gerade gar nicht verfügbar
+    // (kein Egg, keine Grundlage), abwarten – vielleicht ordnet das Team gleich eines zu; sonst endet es an der Frist.
+    const settingsNow = await getSettings();
+    const method = installMethodOf(job.serverType, settingsNow);
+    if (method === null) return await wait();
+    if (method === 'egg') {
+      const ptero = pterodactyl();
+      await ptero.updateServerStartup(server.pteroServerId, await startupForType(job.serverType, job.version, settingsNow));
+      await ptero.reinstallServer(server.pteroServerId);
+      if (!(await store.finish())) return 'waiting';
+      await db.update(servers).set({ powerState: 'installing', powerStateAt: now }).where(eq(servers.id, server.id));
+      await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_installed', message: `„${server.name}“ wird über das eigene Egg von ${job.serverType} installiert (Einstellung geändert)` });
+      return 'done';
+    }
     const identifier = server.pteroIdentifier;
     const ptero = pterodactyl();
     try {
@@ -314,6 +330,12 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
         if (p?.status === 'install_failed') {
           // Einmal von selbst neu anstoßen (z. B. Download im Installationsskript kurz nicht erreichbar)
           if (job.reinstalled) return await fail('Die Grundinstallation im Panel ist fehlgeschlagen.');
+          // Ist die Grundlage das mitgelieferte Egg, braucht dessen Installationsskript die Schritte (sonst installiert es nichts)
+          const { image, base, environment } = await startupFor(job);
+          if (INSTALLER_VARIABLE in environment) {
+            if (image === false) return await fail(`Für diese Version wird Java ${job.java} gebraucht – dafür ist kein passendes Image eingerichtet.`, `Images des Eggs: ${Object.keys(base.dockerImages).join(', ')}`, true);
+            await ptero.updateServerStartup(server.pteroServerId, { eggId: base.eggId, dockerImage: image ?? base.dockerImage, startup: SETUP_STARTUP, environment });
+          }
           await ptero.reinstallServer(server.pteroServerId);
           job.reinstalled = true;
           job.polls = 0;
@@ -542,9 +564,12 @@ export async function runSoftwareJobs(now = new Date()) {
   const settings = await getSettings();
   for (const server of failedSite) {
     const old = server.softwareJob!;
-    if (!installsViaDirectory(old.serverType, settings)) {
-      // Nicht mehr über das Verzeichnis: kein Neuversuch (und kein weiterer „wird eingerichtet“)
-      await db.update(servers).set({ softwareJob: { ...old, permanent: true } }).where(and(eq(servers.id, server.id), sameJob(servers.softwareJob, old)));
+    if (installMethodOf(old.serverType, settings) === null) {
+      // Gerade weder Egg noch Grundlage: kein Neuversuch – endgültig fehlgeschlagen (mit Nachricht an den Kunden)
+      const gaveUp = { ...old, permanent: true };
+      if (affectedRows(await db.update(servers).set({ softwareJob: gaveUp }).where(and(eq(servers.id, server.id), sameJob(servers.softwareJob, old)))) === 1) {
+        await siteStore(server).failed(gaveUp).catch(() => {});
+      }
       continue;
     }
     await db

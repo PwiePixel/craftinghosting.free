@@ -296,7 +296,7 @@ export async function adminRoutes(app: FastifyInstance) {
       eggs,
       baseEgg: !!baseEggMapping(settings),
       // Ist die Grundlage das mitgelieferte Egg? Dann installiert das Panel die Software selbst (Server in Sekunden bereit)
-      installer: await installerReady(settings),
+      installer: await installerReady(settings).catch(() => false),
       status: Object.fromEntries(settings.software.map((item) => [item.id, { method: installMethodOf(item.id, settings), ownEgg: !!getEggMapping(item.id, settings) }])),
     };
   });

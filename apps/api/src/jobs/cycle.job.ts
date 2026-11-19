@@ -29,7 +29,7 @@ import {
   type Locale,
 } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
-import { servers, users, type Server } from '../db/schema';
+import { notifications, servers, users, type Server } from '../db/schema';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from '../services/audit.service';
 import { notify } from '../services/notification.service';
@@ -134,6 +134,16 @@ const t = {
       ? `“${server.name}” was not reactivated after the ${rules.days} days and the rest period, so it has been deleted automatically. You can create a new free server at any time.`
       : `„${server.name}“ wurde nach den ${rules.days} Tagen und der Ruhezeit nicht reaktiviert und deshalb automatisch gelöscht. Du kannst jederzeit einen neuen kostenlosen Server erstellen.`,
 };
+
+/** Wurde diese Nachricht schon unter dem früheren Schlüssel verschickt – nach `since` (z. B. Beginn der Sperre)? */
+async function sentUnderLegacyKey(key: string, since: Date | null): Promise<boolean> {
+  const [hit] = await db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(and(eq(notifications.dedupeKey, key), ...(since ? [gt(notifications.createdAt, since)] : [])))
+    .limit(1);
+  return !!hit;
+}
 
 async function handleExpiring(server: Server, now: Date): Promise<'suspended' | 'stopping' | 'waiting'> {
   const ptero = pterodactyl();
@@ -309,6 +319,8 @@ export const cycleJob: JobDefinition = {
         if (held(server)) continue;
         // Discord-Bots haben keine Ruhezeit – sie sind sofort reaktivierbar
         if (isBot(server)) continue;
+        // Schon unter dem früheren Schlüssel (ohne Frist) verschickt? Dann nicht noch einmal (einmalig nach dem Update)
+        if (await sentUnderLegacyKey(`cycle-reactivatable:${server.id}:${server.cycleNumber}`, server.suspendedAt)) continue;
         const created = await notify({
           userId: server.userId,
           serverId: server.id,
@@ -338,7 +350,7 @@ export const cycleJob: JobDefinition = {
         const at = deleteAtOf(server);
         if (!at) continue;
         const msLeft = at.getTime() - now.getTime();
-        if (msLeft > 0 && msLeft <= rules.deleteReminderHours * 3_600_000) {
+        if (msLeft > 0 && msLeft <= rules.deleteReminderHours * 3_600_000 && !(await sentUnderLegacyKey(`cycle-delete-soon:${server.id}:${server.cycleNumber}`, server.suspendedAt))) {
           if (
             await notify({
               userId: server.userId,

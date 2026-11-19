@@ -438,7 +438,7 @@ export async function serverAction(admin: User, id: string, action: ServerAction
       if (!server.partnerId && server.pteroServerId && installsViaDirectory(server.serverType, settings) && (await installerReady(settings))) {
         // Mitgeliefertes Egg: Software in die Variablen und im Panel neu installieren (Welt und übrige Dateien bleiben)
         const software = await resolveSoftware(server.serverType, server.version);
-        await ptero.updateServerStartup(server.pteroServerId, await installerStartup(software, settings, { eula: true }));
+        await ptero.updateServerStartup(server.pteroServerId, await installerStartup(software, settings, { eula: !!server.eulaAcceptedAt }));
         await ptero.reinstallServer(server.pteroServerId);
         await db.update(servers).set({ softwareJob: null, version: software.resolvedVersion, powerState: 'installing', powerStateAt: new Date() }).where(eq(servers.id, id));
         await log('admin.server_software', `Server-Software von „${server.name}“ wird im Panel neu installiert (${server.serverType} ${software.resolvedVersion})`);

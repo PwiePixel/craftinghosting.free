@@ -1,10 +1,10 @@
-import { EmailCard } from '@/components/my/email-card';
+import { DiscordCard } from '@/components/my/discord-card';
 import type { Metadata } from 'next';
-import { ArrowUpRight, FlaskConical, Plus, ShieldAlert } from 'lucide-react';
-import { kindExhausted, localePath, productKinds, type BonusSlot, type DiscordMeDTO, type Locale, type SecurityDTO, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
-import { SecurityCard } from '@/components/my/security-card';
+import Link from 'next/link';
+import { ArrowUpRight, FlaskConical, Plus, ShieldAlert, SquareTerminal } from 'lucide-react';
+import { kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
 import { DiscordIcon } from '@/components/discord/discord-note';
-import { AccountActions, AutoRefresh, CopyText, DeleteServer, DiscordRecheck, DiscordUnlink, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
+import { AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink, buttonClasses } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Alert, StatusDot } from '@/components/ui/primitives';
@@ -13,62 +13,6 @@ import { apiServer, requireUser } from '@/lib/api/server';
 import { pageMetadata } from '@/lib/seo';
 import { getSite } from '@/lib/site-settings';
 import { siteTexts } from '@/lib/site-texts';
-
-/** Discord: verbinden, Mitgliedschaft prüfen, Verknüpfung lösen */
-function DiscordCard({ me, lang, inviteUrl, autoJoin, note, waiting }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; autoJoin: boolean; note: string; waiting: boolean }) {
-  const t = getDict(lang).discord;
-  const connectHref = `/api/v1/discord/connect?lang=${lang}`;
-  const attention = me.blocked !== null;
-  const title = !me.linked ? (me.required ? t.requiredTitle : t.cardTitle) : me.blocked === 'not_member' ? t.notMemberTitle : t.connectedAs(me.linked.username);
-  const text = !me.linked
-    ? me.required
-      ? note || t.requiredText
-      : t.optionalText
-    : me.blocked === 'not_member'
-      ? t.notMemberText
-      : me.blocked === 'unavailable'
-        ? t.unavailableText
-        : t.connectedText;
-  return (
-    <div className={`surface p-5 ${attention ? 'border-[#5865f2]/50' : ''}`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-3.5">
-          <DiscordIcon className="mt-0.5 size-5 shrink-0 text-[#8b93ff]" />
-          <div>
-            <p className="text-[15px] font-semibold text-white">{title}</p>
-            <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted">{text}</p>
-            {waiting && attention && <p className="mt-2 text-sm text-amber-300">{t.pendingBlocked}</p>}
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {!me.linked ? (
-            // Normaler Link: Die API leitet zu Discord weiter
-            <a href={connectHref} className={buttonClasses('primary', 'sm')}>
-              {t.connect}
-            </a>
-          ) : me.blocked ? (
-            <>
-              {/* Kein Mitglied (mehr): Neu verbinden tritt automatisch bei – der Einladungslink nur, wenn das ausgeschaltet ist */}
-              {me.blocked === 'not_member' && autoJoin && (
-                <a href={connectHref} className={buttonClasses('primary', 'sm')}>
-                  {t.connect}
-                </a>
-              )}
-              {me.blocked === 'not_member' && !autoJoin && inviteUrl && (
-                <a href={inviteUrl} target="_blank" rel="noopener" className={buttonClasses('primary', 'sm')}>
-                  {t.join} <ArrowUpRight aria-hidden />
-                </a>
-              )}
-              <DiscordRecheck />
-            </>
-          ) : (
-            <DiscordUnlink />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type Props = { params: Promise<{ lang: string }>; searchParams: Promise<Record<string, string | undefined>> };
 
@@ -109,6 +53,8 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
   const st = discordWait ? { tone: 'amber' as const, label: d.discord.pendingStatus } : statusInfo(s, t.status);
   const f = s.fairUse;
   const daysLeft = s.cycle.secondsRemaining < 2 * 86400 ? fmt.duration(s.cycle.secondsRemaining) : t.days(s.cycle.daysRemaining);
+  // Verwalten auf der Website (Konsole, Start/Stopp, Ports), sobald der Server im Panel angelegt ist
+  const manageable = (s.status === 'active' || s.status === 'expiring') && !!s.panelUrl;
   return (
     <article className={cn('surface overflow-hidden', s.abuse && 'border-red-400/60 ring-1 ring-red-400/30')}>
       {s.abuse && (
@@ -141,7 +87,15 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
       <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="truncate text-lg font-semibold text-white">{s.name}</h2>
+            <h2 className="truncate text-lg font-semibold text-white">
+              {manageable ? (
+                <Link href={serverPagePath(lang, s.id)} className="hover:text-blue-300">
+                  {s.name}
+                </Link>
+              ) : (
+                s.name
+              )}
+            </h2>
             <span className="inline-flex items-center gap-1.5 text-[13px] text-muted">
               <StatusDot tone={st.tone} /> {st.label}
             </span>
@@ -156,11 +110,18 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
             </div>
           )}
         </div>
-        {s.panelUrl && s.status !== 'suspended' && (
-          <ButtonLink href={s.panelUrl} external className="shrink-0">
-            {d.common.openPanel} <ArrowUpRight aria-hidden />
-          </ButtonLink>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {manageable && (
+            <ButtonLink href={serverPagePath(lang, s.id)}>
+              <SquareTerminal aria-hidden /> {d.manage.manage}
+            </ButtonLink>
+          )}
+          {s.panelUrl && s.status !== 'suspended' && (
+            <ButtonLink href={s.panelUrl} external variant={manageable ? 'secondary' : 'primary'}>
+              {d.common.openPanel} <ArrowUpRight aria-hidden />
+            </ButtonLink>
+          )}
+        </div>
       </div>
 
       <div className="border-t border-line bg-background/40 px-6 py-5">
@@ -285,8 +246,6 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   const discordRes = settings.discord.available ? await apiServer<{ discord: DiscordMeDTO }>('/discord/me', lang) : null;
   const discordMe = discordRes?.ok ? discordRes.data.discord : null;
   const discordResult = query.discord ? d.discord.results[query.discord] : undefined;
-  const securityRes = await apiServer<{ security: SecurityDTO }>('/account/security', lang);
-  const security = securityRes.ok ? securityRes.data.security : null;
   const servers = res.ok ? res.data.servers : [];
   // Verwarnungs-System: aktive Verwarnungen und eine laufende Auszeit
   const warnings = res.ok ? (res.data.warnings ?? null) : null;
@@ -327,13 +286,9 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white">{t.title}</h1>
             <p className="mt-2 text-sm text-muted">
-              {user.email}
-              {user.panelUsername && (
-                <span className="text-subtle">
-                  {' '}
-                  · {t.panelUser} {user.panelUsername}
-                </span>
-              )}
+              <Link href={localePath(lang, 'account')} className="hover:text-white">
+                {user.panelUsername ?? user.email}
+              </Link>
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -388,7 +343,8 @@ export default async function MyServersPage({ params, searchParams }: Props) {
               {discordResult.text}
             </Alert>
           )}
-          {discordMe?.available && !maintenance && (
+          {/* Discord hier nur, wenn etwas zu tun ist (sonst unter „Konto“) */}
+          {discordMe?.available && !maintenance && ((!discordMe.linked && discordMe.required) || discordMe.blocked !== null) && (
             <DiscordCard
               me={discordMe}
               lang={lang}
@@ -398,7 +354,14 @@ export default async function MyServersPage({ params, searchParams }: Props) {
               waiting={hasPending && user.panelLinked}
             />
           )}
-          <EmailCard user={user} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
+          {user.emailUndeliverable && (
+            <Alert tone="warning">
+              {d.my.email.unreachableText}{' '}
+              <Link href={localePath(lang, 'account')} className="underline underline-offset-4">
+                {d.account.title}
+              </Link>
+            </Alert>
+          )}
           {query.neu === '1' && (
             <Alert tone="success" title={t.createdTitle}>
               {t.createdText}
@@ -437,10 +400,6 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           </a>
         </div>
 
-        <div className="mt-10 space-y-4">
-          {security && <SecurityCard security={security} />}
-          <AccountActions email={user.email} user={user} />
-        </div>
       </div>
     </div>
   );

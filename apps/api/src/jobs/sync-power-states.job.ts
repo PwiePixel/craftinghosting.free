@@ -81,13 +81,28 @@ export const syncPowerStatesJob: JobDefinition = {
       // Erkennbar daran, dass der Server vorher schon fertig war (nicht „installing“/„unknown“ wie direkt nach dem Anlegen –
       // dort besteht der Auftrag ohnehin schon)
       const wasReady = server.powerState !== 'installing' && server.powerState !== 'unknown';
-      if (res.state === 'installing' && wasReady && !server.softwareJob && !server.partnerId && server.kind === 'minecraft' && server.pteroServerId) {
+      // Hängt die Installation schon länger (z. B. Installationsskript fehlgeschlagen), ebenfalls nachsehen – gedrosselt
+      const installingForMs = server.powerState === 'installing' && server.powerStateAt ? now.getTime() - server.powerStateAt.getTime() : 0;
+      if (res.state === 'installing' && (wasReady || installingForMs > 3 * 60_000) && !server.softwareJob && !server.partnerId && server.kind === 'minecraft' && server.pteroServerId) {
         // Nur bei einer echten Neuinstallation: Auch eine Backup-Wiederherstellung, ein Umzug oder Wartung der Node
         // melden sich hier als „installing“ – die Application-API sagt, was wirklich läuft.
-        // Mit dem mitgelieferten Egg spielt das Panel die gewählte Software bei der Neuinstallation selbst auf.
-        const panel = await ptero.getServer(server.pteroServerId).catch(() => null);
-        if (panel?.status === 'installing' && !panel.environment?.SOFTWARE_STEPS && (await requestSiteSoftware(server, { onlyIfNone: true }))) {
-          await audit({ serverId: server.id, userId: server.userId, actor: 'system', action: 'server.software_rearmed', message: `Neuinstallation im Panel erkannt – ${server.serverType} ${server.version} wird danach wieder eingerichtet` });
+        let panel: Awaited<ReturnType<typeof ptero.getServer>>;
+        try {
+          panel = await ptero.getServer(server.pteroServerId);
+        } catch {
+          return; // Panel gerade nicht erreichbar: Zustand nicht ändern, der nächste Durchlauf entscheidet
+        }
+        // Mit dem mitgelieferten Egg spielt das Panel die gewählte Software bei einer Neuinstallation selbst auf. Ist eine
+        // Installation fehlgeschlagen, übernimmt der Software-Job: einmal neu installieren, Wiederholungen, Nachricht.
+        const rearm = panel?.status === 'install_failed' || (wasReady && panel?.status === 'installing' && !panel.environment?.SOFTWARE_STEPS);
+        if (rearm && (await requestSiteSoftware(server, { onlyIfNone: true }))) {
+          await audit({
+            serverId: server.id,
+            userId: server.userId,
+            actor: 'system',
+            action: 'server.software_rearmed',
+            message: panel?.status === 'install_failed' ? `Installation im Panel fehlgeschlagen – ${server.serverType} ${server.version} wird erneut eingerichtet` : `Neuinstallation im Panel erkannt – ${server.serverType} ${server.version} wird danach wieder eingerichtet`,
+          });
         }
       }
 

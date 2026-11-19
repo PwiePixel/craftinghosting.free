@@ -8,6 +8,7 @@ import {
   type BackupScheduleSpec,
   type CreateServerSpec,
   type PteroAllocation,
+  type PteroServerPort,
   type PteroBackup,
   type PteroEgg,
   type PteroFile,
@@ -391,6 +392,25 @@ export class PterodactylHttpClient implements PterodactylGateway {
 
   async sendPowerSignal(identifier: string, signal: PowerAction) {
     await this.request('client', 'POST', `/servers/${identifier}/power`, { signal });
+  }
+
+  private mapServerPort(a: Json): PteroServerPort {
+    return { id: a.id, ip: a.ip, alias: a.ip_alias ?? null, port: a.port, notes: a.notes ?? null, primary: !!a.is_default };
+  }
+
+  async listServerPorts(identifier: string): Promise<PteroServerPort[]> {
+    const res = await this.request('client', 'GET', `/servers/${identifier}/network/allocations`);
+    const ports = ((res.data ?? []) as Json[]).map((x) => this.mapServerPort(x.attributes));
+    return ports.sort((a, b) => Number(b.primary) - Number(a.primary) || a.port - b.port);
+  }
+
+  async addServerPort(identifier: string): Promise<PteroServerPort> {
+    const res = await this.request('client', 'POST', `/servers/${identifier}/network/allocations`);
+    return this.mapServerPort(res.attributes);
+  }
+
+  async removeServerPort(identifier: string, allocationId: number): Promise<void> {
+    await this.request('client', 'DELETE', `/servers/${identifier}/network/allocations/${allocationId}`);
   }
 
   async sendCommand(identifier: string, command: string) {

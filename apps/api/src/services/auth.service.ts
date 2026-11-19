@@ -263,7 +263,7 @@ export async function finishDiscordSignup(user: User, input: StartInput, meta: {
   // Grenze erreicht oder schon eine offene Anfrage (z. B. doppelt abgeschickt): Es bleibt bei der Anmeldung
   if (settings.registration.mode !== 'closed' && limitBlock === null && !open && !(waitlistMode && (owned > 0 || (await hasWaitlistEntry(user.id))))) {
     await assertConfigAvailable(input);
-    await savePendingServer(user.id, input, waitlistMode ? 'waitlist' : 'pending');
+    await savePendingServer(user.id, input, waitlistMode ? 'waitlist' : 'pending', { eulaConsent: true });
     if (waitlistMode) await confirmWaitlist(user.id);
   }
   if (!user.emailVerifiedAt && !user.emailUndeliverableAt) {
@@ -501,7 +501,7 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
   }
 
   if (waitlistMode) {
-    await savePendingServer(user.id, input, 'waitlist');
+    await savePendingServer(user.id, input, 'waitlist', { eulaConsent: true });
     // Bereits bestätigte Nutzer bekommen ihren Platz sofort, alle anderen nach der Eingabe des Codes
     if (user.emailVerifiedAt) await confirmWaitlist(user.id);
     const type = user.emailVerifiedAt ? 'login' : 'verify_email';
@@ -511,7 +511,7 @@ export async function requestServer(input: StartInput, meta: { ip?: string; loca
     return;
   }
 
-  await savePendingServer(user.id, input);
+  await savePendingServer(user.id, input, 'pending', { eulaConsent: true });
   await sendCodeMail(user, 'verify_email', (code) => verifyServerMail(input.name, code, meta.locale)).catch(() => {
     throw mailFailed();
   });

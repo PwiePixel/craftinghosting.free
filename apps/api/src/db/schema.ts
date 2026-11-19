@@ -185,6 +185,8 @@ export const servers = sqliteTable(
      * Fortschritt und ggf. der Fehler. null = nichts offen. (Server der Partner-API führen das in partner_servers.)
      */
     softwareJob: text('software_job', { mode: 'json' }).$type<SoftwareJob | null>(),
+    /** Zustimmung zur Minecraft-EULA beim Bestellen (nur dann setzt die Installation eula=true) */
+    eulaAcceptedAt: ts('eula_accepted_at'),
     /** Node im Panel, auf der der Server liegt (null = noch nicht bekannt) */
     nodeId: integer('node_id'),
     /** Vom Team als Upgrade markiert: Zeitpunkt und optionaler Hinweis für den Kunden */
@@ -448,7 +450,9 @@ export const bannedIdentities = sqliteTable(
     userId: text('user_id'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
   },
-  (t) => [uniqueIndex('banned_identities_uq').on(t.kind, t.hash), index('banned_identities_user_idx').on(t.userId)],
+  // Je Konto ein eigener Eintrag – auch wenn sich zwei gebannte Konten einen Fingerabdruck teilen (z. B. dieselbe
+  // Gmail-Adresse mit Punkten/+Zusatz). So nimmt das Aufheben eines Bans nie die Sperre eines anderen Kontos mit.
+  (t) => [uniqueIndex('banned_identities_uq').on(t.kind, t.hash, t.userId), index('banned_identities_hash_idx').on(t.kind, t.hash), index('banned_identities_user_idx').on(t.userId)],
 );
 
 /**

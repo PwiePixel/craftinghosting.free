@@ -194,7 +194,11 @@ export async function assertConfigAvailable(input: ServerConfigInput, opts: { ig
  * Speichert eine Server-Anfrage (Status "pending"). Frühere offene Anfragen
  * desselben Nutzers werden ersetzt – es zählt immer die letzte.
  */
-export async function savePendingServer(userId: string, input: ServerConfigInput, status: 'pending' | 'waitlist' = 'pending'): Promise<string> {
+/**
+ * `eulaConsent`: Die Anfrage kam über das Bestellformular, das die Zustimmung zur Minecraft-EULA enthält (nicht z. B. vom Team
+ * auf die Warteliste gesetzt) – nur dann akzeptiert die Installation die EULA.
+ */
+export async function savePendingServer(userId: string, input: ServerConfigInput, status: 'pending' | 'waitlist' = 'pending', opts: { eulaConsent?: boolean } = {}): Promise<string> {
   const plan = findPlan(await getSettings(), input.planId);
   if (!plan) throw Errors.badRequest('plan_unknown', L('Dieses Paket gibt es nicht (mehr).', 'This plan does not exist (any more).'));
   const now = new Date();
@@ -218,6 +222,7 @@ export async function savePendingServer(userId: string, input: ServerConfigInput
       cycleNumber: 1,
       cycleStartedAt: now,
       cycleEndsAt: cycleEndFor(plan.kind, now, cycleRules),
+      eulaAcceptedAt: opts.eulaConsent && plan.kind === 'minecraft' ? now : null,
     });
   });
   return id;
@@ -377,12 +382,12 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
     // Early Access: angemeldete Nutzer kommen direkt (bestätigt) auf die Warteliste – ein Platz pro Person
     if (await hasWaitlistEntry(user.id)) throw alreadyOnWaitlist();
     if ((await countOwnedServers(user.id)) > 0) throw Errors.conflict('server_limit_reached', L('In der Early-Access-Phase ist ein Platz pro Person möglich – du hast bereits einen Server.', 'During early access one slot per person is possible – you already have a server.'));
-    const id = await savePendingServer(user.id, input, 'waitlist');
+    const id = await savePendingServer(user.id, input, 'waitlist', { eulaConsent: true });
     await confirmWaitlist(user.id);
     const [entry] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);
     return toServerDTO(entry!, user);
   }
-  const id = await savePendingServer(user.id, input);
+  const id = await savePendingServer(user.id, input, 'pending', { eulaConsent: true });
   await audit({ userId: user.id, serverId: id, actor: 'user', action: 'server.requested', message: `Server „${input.name}“ angefragt`, ip });
   if (user.pteroUserId) await activatePendingServers(user, ip);
   const [server] = await db.select().from(servers).where(eq(servers.id, id)).limit(1);

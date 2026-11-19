@@ -53,6 +53,8 @@ export const routes = {
   /** Konto anlegen (E-Mail-Adresse und Passwort) – danach geht es zu „Server erstellen“ */
   register: { en: '/register', de: '/de/registrieren', internal: 'registrieren' },
   myServers: { en: '/my-servers', de: '/de/meine-server', internal: 'meine-server' },
+  /** Konto: E-Mail-Adresse, Discord, Sicherheit, Konto löschen (getrennt von den Servern) */
+  account: { en: '/account', de: '/de/konto', internal: 'konto' },
   faq: { en: '/faq', de: '/de/faq', internal: 'faq' },
   /** Dokumentation; Unterseiten liegen unter /docs/<Seite> (die Partner-API nur für Partner-Konten) */
   docs: { en: '/docs', de: '/de/docs', internal: 'docs' },
@@ -127,9 +129,29 @@ export function resolvePath(pathname: string): ResolvedPath {
   return { locale, key: null, rest, prefix };
 }
 
+/** Seiten mit Unterseiten (z. B. /my-servers/<id>) – nur angemeldet erreichbar */
+export const pagesWithSubpages = ['myServers', 'account'] as const satisfies readonly RouteKey[];
+
+/** Unterseite einer Seite aus `pagesWithSubpages` erkennen: /my-servers/abc → { key: 'myServers', tail: '/abc' } */
+export function resolveSubpage(rest: string): { key: (typeof pagesWithSubpages)[number]; tail: string } | null {
+  for (const key of pagesWithSubpages) {
+    for (const base of [routes[key].en, routes[key].de.replace(/^\/de/, '')]) {
+      if (rest.startsWith(`${base}/`) && /^\/[\w-]{1,64}$/.test(rest.slice(base.length))) return { key, tail: rest.slice(base.length) };
+    }
+  }
+  return null;
+}
+
+/** Seite eines Servers unter „Meine Server“ */
+export function serverPagePath(locale: Locale, id: string): string {
+  return `${routes.myServers[locale]}/${id}`;
+}
+
 /** Gleiche Seite in der anderen Sprache (für den Sprachumschalter) */
 export function switchLocalePath(pathname: string, target: Locale): string {
-  const { key } = resolvePath(pathname);
+  const { key, rest } = resolvePath(pathname);
+  const sub = key ? null : resolveSubpage(rest);
+  if (sub) return `${routes[sub.key][target]}${sub.tail}`;
   return localePath(target, key ?? 'home');
 }
 

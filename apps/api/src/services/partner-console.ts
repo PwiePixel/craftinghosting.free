@@ -15,6 +15,7 @@ import { pterodactyl } from '../pterodactyl';
 const MAX_PER_PARTNER = 50;
 const MAX_PER_SERVER = 3;
 const MAX_DURATION_MS = 15 * 60_000;
+/** owner: Partner bzw. Nutzer der Website (je eigener Schlüssel), server: je Server über alle Zugänge hinweg */
 const open = { partner: new Map<string, number>(), server: new Map<string, number>() };
 const bump = (map: Map<string, number>, key: string, by: number) => {
   const next = (map.get(key) ?? 0) + by;
@@ -26,13 +27,45 @@ const bump = (map: Map<string, number>, key: string, by: number) => {
 const stripAnsi = (line: string) => line.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/[\u0000-\u0008\u000b-\u001f]/g, '');
 
 /** Wie viele Streams sind für diesen Partner offen? (für Tests und Auskunft) */
-export const openConsoleStreams = (partnerId: string) => open.partner.get(partnerId) ?? 0;
+export const openConsoleStreams = (partnerId: string) => open.partner.get(`partner:${partnerId}`) ?? 0;
 
 export async function streamPartnerConsole(partner: Partner, server: { id: string; pteroIdentifier: string }, request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  if ((open.partner.get(partner.id) ?? 0) >= MAX_PER_PARTNER || (open.server.get(server.id) ?? 0) >= MAX_PER_SERVER) {
+  return streamServerConsole(
+    {
+      owner: `partner:${partner.id}`,
+      maxPerOwner: MAX_PER_PARTNER,
+      server,
+      // Wird der Key getauscht, der Partner deaktiviert oder der Server gelöscht/gesperrt, endet der Stream
+      stillAllowed: async () => {
+        const [row] = await db
+          .select({ enabled: partners.enabled, keyHash: partners.keyHash, status: servers.status })
+          .from(servers)
+          .innerJoin(partners, eq(partners.id, servers.partnerId))
+          .where(and(eq(servers.id, server.id), eq(partners.id, partner.id)))
+          .limit(1);
+        return !!row && row.enabled && row.keyHash === partner.keyHash && row.status === 'active';
+      },
+    },
+    request,
+    reply,
+  );
+}
+
+/**
+ * Live-Ausgabe eines Servers als Server-Sent Events – für die Partner-API und für „Meine Server“ auf der Website.
+ * Nur lesend: Befehle gehen über einen eigenen Aufruf (Website) bzw. gar nicht (Partner-API).
+ */
+export async function streamServerConsole(
+  opts: { owner: string; maxPerOwner: number; server: { id: string; pteroIdentifier: string }; stillAllowed: () => Promise<boolean> },
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const { server } = opts;
+  const owner = opts.owner;
+  if ((open.partner.get(owner) ?? 0) >= opts.maxPerOwner || (open.server.get(server.id) ?? 0) >= MAX_PER_SERVER) {
     throw new ApiError(429, 'too_many_streams', L('Zu viele offene Konsolen-Streams. Bitte einen schließen und erneut versuchen.', 'Too many open console streams. Please close one and try again.'));
   }
-  bump(open.partner, partner.id, 1);
+  bump(open.partner, owner, 1);
   bump(open.server, server.id, 1);
 
   const raw = reply.raw;
@@ -59,7 +92,7 @@ export async function streamPartnerConsole(partner: Partner, server: { id: strin
     } catch {
       /* schon zu */
     }
-    bump(open.partner, partner.id, -1);
+    bump(open.partner, owner, -1);
     bump(open.server, server.id, -1);
     if (!raw.writableEnded && !raw.destroyed) {
       if (reason !== 'slow_client') raw.write(`event: end\ndata: ${JSON.stringify({ reason })}\n\n`);
@@ -74,17 +107,12 @@ export async function streamPartnerConsole(partner: Partner, server: { id: strin
     if (raw.writableLength > 1024 * 1024) return close('slow_client');
     raw.write(': ping\n\n');
   }, 20_000);
-  // Regelmäßig neu prüfen: Wird der Key getauscht, der Partner deaktiviert oder der Server gelöscht/gesperrt, endet der Stream
+  // Regelmäßig neu prüfen, ob der Zugang noch besteht (sonst endet der Stream)
   const recheck = setInterval(() => {
-    void (async () => {
-      const [row] = await db
-        .select({ enabled: partners.enabled, keyHash: partners.keyHash, status: servers.status })
-        .from(servers)
-        .innerJoin(partners, eq(partners.id, servers.partnerId))
-        .where(and(eq(servers.id, server.id), eq(partners.id, partner.id)))
-        .limit(1);
-      if (!row || !row.enabled || row.keyHash !== partner.keyHash || row.status !== 'active') close('revoked');
-    })().catch(() => {});
+    void opts
+      .stillAllowed()
+      .then((ok) => ok || close('revoked'))
+      .catch(() => {});
   }, 30_000);
   const limit = setTimeout(() => close('max_duration'), MAX_DURATION_MS);
   request.raw.on('close', () => close('client_closed'));

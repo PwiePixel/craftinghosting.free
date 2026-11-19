@@ -18,6 +18,7 @@ import {
   type PteroResources,
   type PteroServer,
   type PteroAllocation,
+  type PteroServerPort,
   type PteroBackup,
   type PteroFile,
   type PteroUser,
@@ -479,6 +480,39 @@ export class PterodactylMockClient implements PterodactylGateway {
         s.since = now;
         break;
     }
+    this.save(state);
+  }
+
+  async listServerPorts(identifier: string): Promise<PteroServerPort[]> {
+    const s = this.load().servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    const alias = 'free-de-1.craftinghosting.free';
+    return [s.port, ...(s.extraPorts ?? [])].map((port, i) => ({ id: (s.nodeId ?? 0) * 100_000 + port, ip: '203.0.113.10', alias, port, notes: null, primary: i === 0 }));
+  }
+
+  async addServerPort(identifier: string): Promise<PteroServerPort> {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    const extra = s.extraPorts ?? [];
+    // Wie das Panel: Obergrenze laut Paket (der Hauptport zählt mit)
+    if (1 + extra.length >= (s.featureLimits?.allocations ?? 1)) throw new PterodactylError('Cannot assign additional allocations to this server: limit has been reached.', 400);
+    const used = new Set(state.servers.flatMap((x) => [x.port, ...(x.extraPorts ?? [])]));
+    let port = 25600;
+    while (used.has(port)) port++;
+    s.extraPorts = [...extra, port];
+    this.save(state);
+    return { id: (s.nodeId ?? 0) * 100_000 + port, ip: '203.0.113.10', alias: 'free-de-1.craftinghosting.free', port, notes: null, primary: false };
+  }
+
+  async removeServerPort(identifier: string, allocationId: number): Promise<void> {
+    const state = this.load();
+    const s = state.servers.find((x) => x.identifier === identifier);
+    if (!s) throw new PterodactylError('server not found', 404);
+    const port = allocationId % 100_000;
+    if (port === s.port) throw new PterodactylError('You cannot delete the primary allocation for this server.', 400);
+    if (!(s.extraPorts ?? []).includes(port)) throw new PterodactylError('not found', 404);
+    s.extraPorts = (s.extraPorts ?? []).filter((p) => p !== port);
     this.save(state);
   }
 

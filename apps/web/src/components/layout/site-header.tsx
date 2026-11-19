@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type MouseEvent } from 'react';
-import { Globe, Heart, Menu, X } from 'lucide-react';
+import { Globe, Heart, Menu, UserRound, X } from 'lucide-react';
 import { localePath, sectionPath, switchLocalePath, type RegistrationMode } from '@chfree/shared';
 import { Logo, type CustomLogo } from '@/components/brand/logo';
 import { buttonClasses } from '@/components/ui/button';
@@ -44,7 +44,23 @@ export function SiteHeader({
   const other = lang === 'de' ? 'en' : 'de';
   // Early Access: „Platz sichern“ statt „Server erstellen“; Registrierung geschlossen: kein Button
   // Wartung: Anmelden statt Registrieren · Early Access: „Platz sichern“ · Registrierung geschlossen: kein Button
-  const cta = maintenance ? null : mode === 'preregistration' ? t.early.cta : mode === 'closed' ? null : t.common.createServer;
+  // Angemeldet: statt „Server erstellen“ der eigene Kontoname (führt zum Konto; neue Server gibt es unter „Meine Server“)
+  const cta = maintenance || signedIn ? null : mode === 'preregistration' ? t.early.cta : mode === 'closed' ? null : t.common.createServer;
+  const [accountName, setAccountName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!signedIn) return;
+    let off = false;
+    fetch('/api/v1/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { user?: { email: string; panelUsername: string | null } } | null) => {
+        if (!off && d?.user) setAccountName(d.user.panelUsername || d.user.email.split('@')[0] || null);
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [signedIn]);
+  const accountHref = localePath(lang, 'account');
   const ctaHref = localePath(lang, 'start');
   // Wartung: angemeldet → „Meine Server“, sonst „Anmelden“
   const maintenanceLink = signedIn ? { href: localePath(lang, 'myServers'), label: t.common.myServers } : { href: localePath(lang, 'login'), label: t.common.signIn };
@@ -127,6 +143,11 @@ export function SiteHeader({
               {cta}
             </Link>
           )}
+          {signedIn && !maintenance && (
+            <Link href={accountHref} className={buttonClasses('secondary', 'sm', 'hidden max-w-[14rem] sm:inline-flex')} title={t.common.account}>
+              <UserRound aria-hidden /> <span className="truncate">{accountName ?? t.common.account}</span>
+            </Link>
+          )}
           {maintenance && (
             <Link href={maintenanceLink.href} className={buttonClasses('primary', 'sm', 'hidden sm:inline-flex')}>
               {maintenanceLink.label}
@@ -148,7 +169,7 @@ export function SiteHeader({
       {open && (
         <nav className="border-t border-line lg:hidden" aria-label={t.nav.mobile}>
           <div className="container-page flex flex-col py-3">
-            {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }].map((item) => (
+            {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }, ...(signedIn ? [{ href: accountHref, label: accountName ? `${t.common.account} (${accountName})` : t.common.account }] : [])].map((item) => (
               <Link key={item.label} href={item.href} onClick={(e) => goToSection(e, item.href)} className="py-2.5 text-[15px] text-gray-200">
                 {item.label}
               </Link>

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { internalPath, localePath, resolvePath, routes, type Locale, type RouteKey } from '@chfree/shared';
+import { internalPath, localePath, resolvePath, resolveSubpage, routes, type Locale, type RouteKey } from '@chfree/shared';
 import { adminPath } from '@/lib/admin-path';
 
 const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'chf_session';
@@ -181,12 +181,16 @@ export async function proxy(request: NextRequest) {
     return rewrite(request, `/${locale}/maintenance`, { ...NOINDEX, 'Retry-After': '1800', 'Cache-Control': 'no-store' });
   }
 
-  if (key === 'myServers' && !request.cookies.has(SESSION_COOKIE)) {
+  // Unterseiten, z. B. /my-servers/<id> bzw. /de/meine-server/<id> → /<lang>/meine-server/<id>
+  const sub = key ? null : resolveSubpage(rest);
+  const protectedKey = key === 'myServers' || key === 'account' ? key : sub?.key;
+  if (protectedKey && !request.cookies.has(SESSION_COOKIE)) {
     const url = request.nextUrl.clone();
     url.pathname = localePath(locale, 'login');
-    url.search = `?next=${encodeURIComponent(localePath(locale, 'myServers'))}`;
+    url.search = `?next=${encodeURIComponent(sub ? `${localePath(locale, sub.key)}${sub.tail}` : localePath(locale, protectedKey))}`;
     return NextResponse.redirect(url);
   }
+  if (sub) return rewrite(request, `${internalPath(locale as Locale, sub.key)}${sub.tail}`);
 
   // Öffentlicher Pfad → interner Pfad /<lang>/<Ordner>
   return rewrite(request, key ? internalPath(locale as Locale, key) : `/${locale}${rest === '/' ? '' : rest}`);
