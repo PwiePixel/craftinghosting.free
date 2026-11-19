@@ -27,7 +27,7 @@ export async function metaRoutes(app: FastifyInstance) {
     return {
       // Pakete kommen aus dem Admin-Bereich (nur aktive)
       plans: allPlans(await getSettings())
-        .filter((p) => p.enabled)
+        .filter((p) => p.enabled && p.audience === 'all')
         .map(({ enabled: _enabled, reserved: _reserved, ...p }) => p),
       serverTypes: freeHostingConfig.serverTypes,
       fairUse: freeHostingConfig.fairUse,

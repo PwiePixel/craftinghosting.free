@@ -31,7 +31,7 @@ import {
   serverAction,
   updateIncident,
   userAction,
-  applyPlanSlots, setUserLimits } from '../services/admin.service';
+  applyPlanSlots, pruneLimitOverrides, setUserLimits } from '../services/admin.service';
 import { audit } from '../services/audit.service';
 import { deleteLogo, saveLogo } from '../services/logo.service';
 import { adjustExternalSpots, getSettings, invalidatePublicSite, saveSettings } from '../services/settings.service';
@@ -309,6 +309,8 @@ export async function adminRoutes(app: FastifyInstance) {
     const before = await getSettings();
     const settings = await saveSettings(request.body);
     invalidatePublicSite();
+    // Freischaltungen gelöschter Pakete entfernen (eine neue gleich benannte Paket-ID erbt sie sonst)
+    await pruneLimitOverrides(settings).catch(() => {});
     // Wartungsmodus oder manueller Status geändert → gleich im Discord melden
     syncStatusFeedSoon();
     const changes: string[] = [];

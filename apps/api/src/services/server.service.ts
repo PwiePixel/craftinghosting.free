@@ -451,10 +451,10 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
   // Server aus einer Boost-Belohnung lassen sich nur verlängern, solange sie in die geltenden Grenzen passen
   // (also solange der Boost läuft). Accounts ohne Boost-Belohnungen sind davon nicht betroffen.
   // Vom Team aufgewertete Server sind ausgenommen – das Upgrade soll nicht an einer Boost-Grenze scheitern.
-  if (!server.upgradedAt && (await hadBoostRewards(user.discordId))) {
+  const reCtx = await limitContextFor(user);
+  if (!server.upgradedAt && !Object.hasOwn(reCtx.extra, server.planId) && (await hadBoostRewards(user.discordId))) {
     const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
-    const ctx = await limitContextFor(user);
-    if (serverLimitBlock(ctx.limits, others, server.kind, server.planId, ctx.bonus, ctx.extra) !== null) {
+    if (serverLimitBlock(reCtx.limits, others, server.kind, server.planId, reCtx.bonus, reCtx.extra) !== null) {
       throw Errors.conflict(
         'boost_reward_ended',
         L(

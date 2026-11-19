@@ -74,7 +74,8 @@ export interface SoftwareOption {
 }
 
 /** Wer bestellen darf, mit welcher Software, wie oft (Zusatzpaket) */
-function PlanRules({ plan: p, software, onChange }: { plan: PlanSetting; software: SoftwareOption[]; onChange: (v: Partial<PlanSetting>) => void }) {
+function PlanRules({ plan: p, saved, count, software, onChange }: { plan: PlanSetting; saved?: PlanSetting; count: number; software: SoftwareOption[]; onChange: (v: Partial<PlanSetting>) => void }) {
+  const wasExtra = !!saved && (saved.perUser !== null || saved.audience === 'granted');
   const fixed = p.serverTypes.length > 0;
   const extra = p.perUser !== null || p.audience === 'granted';
   const toggle = (id: string) => onChange({ serverTypes: p.serverTypes.includes(id) ? p.serverTypes.filter((x) => x !== id) : [...p.serverTypes, id] });
@@ -86,6 +87,10 @@ function PlanRules({ plan: p, software, onChange }: { plan: PlanSetting; softwar
           Ohne Auswahl gilt die Software, die im Bestellformular für alle freigegeben ist. Mit Auswahl ist dieses Paket fest an diese Software gebunden – z. B. ein
           Proxy-Paket nur mit Velocity oder ein Bedrock-Paket. Software, die nur über ein festes Paket kommen soll, schaltest du unter „Server-Software“ für die Website
           aus; über dieses Paket bleibt sie trotzdem bestellbar (ein Egg muss zugeordnet sein).
+        </p>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-amber-200/90">
+          Die feste Software gilt beim Bestellen. Im Panel kann der Kunde Dateien austauschen – halte Zusatzpakete deshalb so knapp wie nötig (z. B. Proxy mit 512 MB–1 GB),
+          dann taugen sie nicht als vollwertiger zusätzlicher Spielserver.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {software.map((s) => {
@@ -107,9 +112,22 @@ function PlanRules({ plan: p, software, onChange }: { plan: PlanSetting; softwar
         </div>
         <p className="mt-2 text-[12px] text-subtle">{fixed ? `Fest: ${p.serverTypes.map((id) => software.find((s) => s.id === id)?.name ?? id).join(', ')}` : 'Keine feste Software – Auswahl wie im Bestellformular'}</p>
       </div>
+      {count > 0 && extra && !wasExtra && (
+        <p className="rounded-lg border border-amber-400/30 bg-amber-400/[0.07] p-3 text-[13px] leading-relaxed text-amber-200">
+          {count} bestehende {count === 1 ? 'Server nutzt' : 'Server nutzen'} dieses Paket. Als Zusatzpaket zählen sie künftig nicht mehr gegen „Server pro Person“ – aber
+          nur bis zur erlaubten Anzahl je Person; darüber hinaus zählen sie weiter normal.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         <Labeled label="Wer darf bestellen?" hint={p.audience === 'granted' ? 'Steht nicht im Bestellformular. Freischalten unter Admin → Nutzer → Grenzen (dort auch die Anzahl).' : 'Steht für alle im Bestellformular.'}>
-          <select className="input" value={p.audience} onChange={(e) => onChange({ audience: e.target.value === 'granted' ? 'granted' : 'all', ...(e.target.value === 'granted' && p.perUser === null ? { perUser: 0 } : {}) })}>
+          <select
+            className="input"
+            value={p.audience}
+            onChange={(e) => {
+              const granted = e.target.value === 'granted';
+              onChange({ audience: granted ? 'granted' : 'all', ...(granted && p.perUser === null ? { perUser: 0 } : !granted && p.perUser === 0 ? { perUser: null } : {}) });
+            }}
+          >
             <option value="all">Alle</option>
             <option value="granted">Nur freigeschaltete Nutzer</option>
           </select>
@@ -309,7 +327,7 @@ function PlanRow({
               </p>
             </div>
           </div>
-          <PlanRules plan={p} software={software} onChange={onChange} />
+          <PlanRules plan={p} saved={saved} count={count} software={software} onChange={onChange} />
           <div className="rounded-lg border border-line bg-black/20 p-4">
             <p className="text-sm font-medium text-gray-200">Slots im Panel</p>
             <p className="mt-1 text-[13px] leading-relaxed text-subtle">

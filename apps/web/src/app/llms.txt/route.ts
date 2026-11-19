@@ -4,7 +4,7 @@
  * Alle Angaben (Pakete, Plätze, Regeln, Standorte, Links) werden bei jedem Abruf aus den Einstellungen im
  * Admin-Bereich erzeugt – dieselbe Quelle wie die Website. So gibt es keine widersprüchlichen Zahlen.
  */
-import { describeServerLimits, formatMb, localePath, productKinds, serverTypesOf, type PublicPlanDTO } from '@chfree/shared';
+import { describeServerLimits, formatMb, localePath, productKinds, serverTypesOf, type PublicPlanDTO, websiteTypesOf } from '@chfree/shared';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 import { getSite } from '@/lib/site-settings';
@@ -54,7 +54,7 @@ export async function GET() {
     lines.push(
       '## Free Minecraft servers',
       '',
-      `Server software: ${serverTypesOf('minecraft')
+      `Server software: ${websiteTypesOf('minecraft')
         .map((st) => st.name)
         .join(', ')}. Capacity: ${slots(mc)}.`,
       '',

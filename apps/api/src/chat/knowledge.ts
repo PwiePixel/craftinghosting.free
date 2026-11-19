@@ -43,11 +43,11 @@ export async function currentFacts(s: SiteSettings): Promise<string> {
   for (const kind of productKinds) {
     const p = s.products[kind];
     const label = kind === 'minecraft' ? 'Minecraft-Server' : 'Discord-Bots';
-    if (!p.enabled || p.plans.filter((x) => x.enabled).length === 0) {
+    if (!p.enabled || p.plans.filter((x) => x.enabled && x.audience === 'all').length === 0) {
       lines.push(`- ${label}: werden derzeit nicht angeboten.`);
       continue;
     }
-    lines.push(`- ${label} – Pakete: ${p.plans.filter((x) => x.enabled).map((x) => `${x.name} (${formatMb(x.memoryMb, 'de')} RAM, ${x.cpuLabel.de}, ${formatMb(x.diskMb, 'de')} Speicher, ${x.backups} Backup-Slots, ${x.databases} Datenbank-Slots, ${x.allocations} ${x.allocations === 1 ? 'Port' : 'Ports'})`).join('; ')}.`);
+    lines.push(`- ${label} – Pakete: ${p.plans.filter((x) => x.enabled && x.audience === 'all').map((x) => `${x.name} (${formatMb(x.memoryMb, 'de')} RAM, ${x.cpuLabel.de}, ${formatMb(x.diskMb, 'de')} Speicher, ${x.backups} Backup-Slots, ${x.databases} Datenbank-Slots, ${x.allocations} ${x.allocations === 1 ? 'Port' : 'Ports'})`).join('; ')}.`);
     lines.push(`  Auswahl: ${websiteTypesOf(kind).map((t) => t.name).join(', ')}.`);
   }
   lines.push(`- ${describeServerLimits(s.registration.limits, 'de', productKinds.filter((k) => s.products[k].enabled))}`);

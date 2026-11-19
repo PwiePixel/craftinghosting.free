@@ -368,7 +368,8 @@ function normalizePlan(raw: unknown, kind: ProductKind, usedIds: Set<string>): P
     // Feste Software: nur gültige Kennungen (geprüft wird gegen den Katalog, sobald er bekannt ist)
     serverTypes: Array.isArray(v.serverTypes) ? [...new Set(v.serverTypes.filter((x): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{1,23}$/.test(x)))].slice(0, 20) : [],
     audience: v.audience === 'granted' ? 'granted' : 'all',
-    perUser: v.perUser === null || v.perUser === undefined || v.perUser === '' ? null : int(v.perUser, 1, 0, 10),
+    // Bei „Alle“ hieße 0 „niemand“ – das ist kein Zusatzpaket, sondern ein normales Paket
+    perUser: v.perUser === null || v.perUser === undefined || v.perUser === '' || (v.audience !== 'granted' && int(v.perUser, 1, 0, 10) === 0) ? null : int(v.perUser, 1, 0, 10),
   };
 }
 

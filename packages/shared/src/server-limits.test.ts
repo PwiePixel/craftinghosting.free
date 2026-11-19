@@ -123,3 +123,14 @@ describe('Zusatzpakete und Grenzen je Nutzer', () => {
     expect(serverLimitBlock(limits, [], 'minecraft', 'constructor', [], {})).toBeNull();
   });
 });
+
+describe('Zusatzpakete: mehr Server als erlaubt', () => {
+  it('überzählige Server eines Zusatzpakets zählen wieder gegen die normale Grenze', () => {
+    const limits = defaultServerLimits(2);
+    const extra = { small: 1 };
+    // Zwei Server im Zusatzpaket „small“, erlaubt ist einer → der zweite belegt einen normalen Platz
+    expect(serverLimitBlock(limits, [{ kind: 'minecraft', planId: 'small' }, { kind: 'minecraft', planId: 'small' }, { kind: 'minecraft', planId: 'a' }], 'minecraft', 'a', [], extra)).toBe('kind');
+    // Freischaltung zurückgenommen (0): der Server zählt normal
+    expect(serverLimitBlock(defaultServerLimits(1), [{ kind: 'minecraft', planId: 'bedrock' }], 'minecraft', 'a', [], { bedrock: 0 })).toBe('kind');
+  });
+});

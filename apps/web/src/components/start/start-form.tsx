@@ -99,15 +99,16 @@ export function StartForm({
   const typesFor = (pid: string, k: ProductKind = kind) => {
     const pl = products[k].plans.find((x) => x.id === pid);
     const all = serverTypesOf(k);
-    if (pl && pl.serverTypes?.length) return all.filter((x) => pl.serverTypes.includes(x.id));
+    if (pl && pl.serverTypes?.length) return all.filter((x) => pl.serverTypes.includes(x.id) && products[k].serverTypes.some((a) => a.id === x.id));
     return all.filter((x) => products[k].serverTypes.find((a) => a.id === x.id)?.general !== false);
   };
-  const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && !lockedPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false);
+  const planOk = (id: string, k: ProductKind = kind) => !takenPlans.includes(id) && !lockedPlans.includes(id) && (products[k].plans.find((a) => a.id === id)?.available ?? false) && typesFor(id, k).length > 0;
   const typeOk = (id: string, k: ProductKind = kind) => products[k].serverTypes.find((a) => a.id === id)?.available ?? true;
 
   const defaultPlan = (k: ProductKind) => {
     const list = products[k].plans;
-    return (list.find((p) => p.highlighted && p.available) ?? list.find((p) => p.available) ?? list[0])?.id ?? '';
+    // Zuerst ein Paket, das der Nutzer wirklich bestellen kann (z. B. nur noch das Zusatzpaket)
+    return (list.find((p) => p.highlighted && planOk(p.id, k)) ?? list.find((p) => planOk(p.id, k)) ?? list.find((p) => p.highlighted && p.available) ?? list.find((p) => p.available) ?? list[0])?.id ?? '';
   };
   const defaultType = (k: ProductKind, pid: string) => {
     const list = typesFor(pid, k);
@@ -117,7 +118,8 @@ export function StartForm({
   const firstPlan = initialPlan && planOk(initialPlan, startKind) ? initialPlan : defaultPlan(startKind);
   const firstType = defaultType(startKind, firstPlan);
   const [planId, setPlanId] = useState(firstPlan);
-  const serverTypes = typesFor(planId);
+  // Paket ohne bestellbare Software (z. B. feste Software entfernt): die allgemeine Auswahl, damit das Formular nie leer ist
+  const serverTypes = typesFor(planId).length > 0 ? typesFor(planId) : typesFor('', kind);
   const [typeId, setTypeId] = useState(firstType.id);
   const [version, setVersion] = useState(() => {
     // Versionsliste aus dem Admin-Bereich – die Standardversion nur, wenn sie darin vorkommt

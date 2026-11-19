@@ -852,7 +852,7 @@ export interface PublicProductDTO {
 }
 
 /** Software im Bestellformular: Name und Beschreibung kommen aus dem Katalog des Admin-Bereichs */
-export type PublicSoftwareDTO = Pick<ServerTypeConfig, 'id' | 'kind' | 'name' | 'description' | 'versions' | 'defaultVersion' | 'recommended' | 'edition'>;
+export type PublicSoftwareDTO = Pick<ServerTypeConfig, 'id' | 'kind' | 'name' | 'description' | 'versions' | 'defaultVersion' | 'recommended' | 'edition' | 'website'>;
 
 export interface WaitlistInfo {
   /** Platz in der Warteliste (1 = erster) */

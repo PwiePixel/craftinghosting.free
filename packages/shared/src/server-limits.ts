@@ -114,7 +114,15 @@ function uncovered(owned: OwnedServerRef[], bonus: BonusSlot[]): OwnedServerRef[
 export function serverLimitBlock(limits: ServerLimits, ownedAll: OwnedServerRef[], kind: ProductKind, planId?: string, bonus: BonusSlot[] = [], extra: ExtraAllowances = {}): ServerLimitBlock | null {
   // Zusatzpaket: nur die eigene Grenze zählt
   if (planId && isExtra(extra, planId)) return ownedAll.filter((o) => o.planId === planId).length >= extra[planId]! ? 'plan' : null;
-  const owned = ownedAll.filter((o) => !isExtra(extra, o.planId));
+  // Von jedem Zusatzpaket sind nur so viele Server ausgenommen, wie erlaubt sind. Mehr (z. B. weil die Zahl später
+  // gesenkt oder ein bestehendes Paket zum Zusatzpaket wurde) zählen wieder gegen die normalen Grenzen.
+  const exempt = new Map(Object.entries(extra));
+  const owned = ownedAll.filter((o) => {
+    const left = exempt.get(o.planId);
+    if (left === undefined || left <= 0) return true;
+    exempt.set(o.planId, left - 1);
+    return false;
+  });
   const counted = uncovered(owned, bonus);
   // Deckt ein paketgebundener Bonus-Slot den neuen Server, ist er immer möglich
   if (planId && uncovered([...owned, { kind, planId }], bonus).length === counted.length) return null;

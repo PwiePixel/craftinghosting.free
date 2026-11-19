@@ -9,6 +9,7 @@ import {
   blockSpotsBefore,
   defaultBrand,
   defaultSiteSettings,
+  findPlan,
   freeHostingConfig,
   normalizeSiteSettings,
   productKinds,
@@ -320,7 +321,10 @@ function offeredTypes(kind: ProductKind, s: SiteSettings): (ServerTypeConfig & {
 export function publicPlan(plan: PlanSetting, kind: ProductKind, capacity: Awaited<ReturnType<typeof capacityState>>): PublicPlanDTO {
   const { enabled: _enabled, reserved: _reserved, ...rest } = plan;
   const { kind: _k, ...availability } = capacity.plans.find((a) => a.id === plan.id)!;
-  return { ...rest, ...availability, kind };
+  // Feste Software, die es (nicht mehr) gibt, fällt weg – bleibt keine übrig, ist das Paket nicht bestellbar
+  const serverTypes = plan.serverTypes.filter((id) => getServerType(id)?.kind === kind);
+  const broken = plan.serverTypes.length > 0 && serverTypes.length === 0;
+  return { ...rest, ...availability, ...(broken ? { available: false } : {}), serverTypes: broken ? plan.serverTypes : serverTypes, kind };
 }
 
 let publicCache: { value: PublicSiteDTO; at: number } | null = null;
@@ -355,9 +359,10 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
       epycUsed: wl.epycUsed,
       epycRemaining: wl.epycRemaining,
     },
-    plans: capacity.plans.map(({ kind: _kind, ...p }) => p),
+    plans: capacity.plans.filter((p) => findPlan(s, p.id)?.audience !== 'granted').map(({ kind: _kind, ...p }) => p),
     // Minecraft-Software im Bestellformular: Name und Beschreibung aus dem Katalog, Versionen wie angeboten
-    software: offeredTypes('minecraft', s).map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: offeredVersionsCached(s, t.id), defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
+    // website: false = nur über ein Paket mit fester Software bestellbar (nicht frei wählbar, nicht in Übersichten)
+    software: offeredTypes('minecraft', s).map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: offeredVersionsCached(s, t.id), defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java', website: t.general })),
     products: Object.fromEntries(
       productKinds.map((kind): [ProductKind, PublicProductDTO] => {
         const p = s.products[kind];

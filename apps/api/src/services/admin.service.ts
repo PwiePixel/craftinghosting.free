@@ -10,6 +10,7 @@ import {
   findPlan,
   normalizeLimitOverrides,
   type UserLimitOverrides,
+  type SiteSettings,
   cycleEndFor,
   productHasCycle,
   freeHostingConfig,
@@ -325,6 +326,26 @@ export async function listUsersAdmin(
     limitOverrides: u.limitOverrides ? normalizeLimitOverrides(u.limitOverrides) : null,
   }));
   return { users: list, deletable: Number(deletableRow?.n ?? 0), ...info };
+}
+
+/**
+ * Gelöschte Pakete aus allen Freischaltungen entfernen – sonst bekäme ein später gleich benanntes neues Paket (gleiche
+ * ID) die alte Freischaltung. Läuft nach jedem Speichern der Einstellungen.
+ */
+export async function pruneLimitOverrides(settings: SiteSettings): Promise<number> {
+  const known = new Set(productKinds.flatMap((k) => settings.products[k].plans.map((p) => p.id)));
+  const rows = await db.select({ id: users.id, overrides: users.limitOverrides }).from(users).where(isNotNull(users.limitOverrides));
+  let changed = 0;
+  for (const row of rows) {
+    const o = normalizeLimitOverrides(row.overrides);
+    const plans = Object.fromEntries(Object.entries(o.plans).filter(([id]) => known.has(id)));
+    if (Object.keys(plans).length === Object.keys(o.plans).length) continue;
+    const next = { ...o, plans };
+    const empty = next.minecraft === null && next.discord === null && next.total === null && Object.keys(plans).length === 0;
+    await db.update(users).set({ limitOverrides: empty ? null : next }).where(eq(users.id, row.id));
+    changed++;
+  }
+  return changed;
 }
 
 /**
