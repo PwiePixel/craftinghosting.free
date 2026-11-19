@@ -329,6 +329,21 @@ export async function endTimeout(userId: string, by: string | null, now = new Da
   return n;
 }
 
+/**
+ * Jedes gebannte Konto hat eigene Einträge auf der Sperrliste – auch für Fingerabdrücke, die es mit einem anderen
+ * teilt. Früher war ein Fingerabdruck nur einmal erlaubt; fehlende Einträge werden hier (beim Start, idempotent)
+ * nachgetragen, damit das Aufheben eines Bans nie die Sperre eines anderen Kontos mitnimmt.
+ */
+export async function ensureBanFingerprints(): Promise<number> {
+  const banned = await db.select().from(users).where(isNotNull(users.bannedAt));
+  let added = 0;
+  for (const user of banned) {
+    const identities = [...emailHashes(user.email).map((hash) => ({ kind: 'email' as const, hash })), ...(user.discordId ? [{ kind: 'discord' as const, hash: discordHash(user.discordId) }] : [])];
+    for (const identity of identities) added += affectedRows(await db.insert(bannedIdentities).values({ id: uuid(), ...identity, userId: user.id }).onConflictDoNothing());
+  }
+  return added;
+}
+
 /** Ban aufheben: Konto und Server wieder freigeben, E-Mail-Adresse und Discord-Konto von der Sperrliste nehmen */
 export async function liftBan(admin: User, userId: string, ip?: string): Promise<void> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);

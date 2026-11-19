@@ -1,7 +1,8 @@
 import { DiscordCard } from '@/components/my/discord-card';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowUpRight, FlaskConical, Plus, ShieldAlert, SquareTerminal } from 'lucide-react';
+import { ArrowUpRight, Bot, FlaskConical, Pickaxe, Plus, ShieldAlert, SquareTerminal } from 'lucide-react';
+import { TileUsage } from '@/components/my/server-tile';
 import { kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
@@ -44,6 +45,39 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
   }
 }
 
+/**
+ * Kopfbereich einer Server-Kachel: eigener Farbverlauf je Angebot mit feinem Raster (Minecraft: Blockraster in
+ * Grün/Türkis, Discord-Bot: Violett), Symbol und Status als Pille (Punkt + Text – nie nur Farbe).
+ */
+function ServerBanner({ kind, tone, label }: { kind: ServerDTO['kind']; tone: 'green' | 'amber' | 'red' | 'blue' | 'gray'; label: string }) {
+  const bot = kind === 'discord';
+  const pill = {
+    green: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100',
+    amber: 'border-amber-400/40 bg-amber-500/15 text-amber-100',
+    red: 'border-red-400/40 bg-red-500/15 text-red-100',
+    blue: 'border-blue-400/40 bg-blue-500/15 text-blue-100',
+    gray: 'border-white/15 bg-white/5 text-gray-200',
+  }[tone];
+  return (
+    <div
+      className="relative h-20"
+      style={{
+        backgroundImage: bot
+          ? 'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(120deg, #2b2f7a 0%, #4b3fb0 55%, #1a1f4d 100%)'
+          : 'linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(120deg, #0f4d3a 0%, #1f7a4f 50%, #0e3b4a 100%)',
+        backgroundSize: '16px 16px, 16px 16px, 100% 100%',
+      }}
+    >
+      <span className={cn('absolute top-3.5 right-4 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium backdrop-blur-sm', pill)}>
+        <StatusDot tone={tone} /> {label}
+      </span>
+      <span className="absolute -bottom-6 left-6 flex size-12 items-center justify-center rounded-xl border border-line-strong bg-surface text-white shadow-lg">
+        {bot ? <Bot className="size-6 text-[#9da6ff]" aria-hidden /> : <Pickaxe className="size-6 text-emerald-300" aria-hidden />}
+      </span>
+    </div>
+  );
+}
+
 function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null }) {
   const d = getDict(lang);
   const t = d.my;
@@ -84,40 +118,39 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
           {s.moving && <p className={cn('max-w-2xl text-sm leading-relaxed text-amber-200', s.upgrade && 'mt-1.5')}>{t.movingText}</p>}
         </div>
       )}
-      <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="truncate text-lg font-semibold text-white">
-              {manageable ? (
-                <Link href={serverPagePath(lang, s.id)} className="hover:text-blue-300">
-                  {s.name}
-                </Link>
-              ) : (
-                s.name
-              )}
-            </h2>
-            <span className="inline-flex items-center gap-1.5 text-[13px] text-muted">
-              <StatusDot tone={st.tone} /> {st.label}
-            </span>
-          </div>
-          <p className="mt-1 text-[13px] text-subtle">
-            {d.start.products[s.kind].name} · {s.planName} · {s.serverTypeName}
-            {s.kind === 'minecraft' && <> {s.version === 'latest' ? d.common.latestShort : s.version}</>} · {fmt.mb(s.limits.memoryMb)} RAM
-          </p>
-          {s.address && (
-            <div className="mt-2">
-              <CopyText value={s.address} />
-            </div>
+      <ServerBanner kind={s.kind} tone={st.tone} label={st.label} />
+      <div className="px-6 pt-9 pb-5">
+        <h2 className="truncate text-lg font-semibold text-white">
+          {manageable ? (
+            <Link href={serverPagePath(lang, s.id)} className="hover:text-blue-300">
+              {s.name}
+            </Link>
+          ) : (
+            s.name
           )}
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        </h2>
+        <p className="mt-1 text-[13px] text-subtle">
+          {s.serverTypeName}
+          {s.kind === 'minecraft' && <> {s.version === 'latest' ? d.common.latestShort : s.version}</>} · {s.planName}
+        </p>
+        {s.address && (
+          <div className="mt-2">
+            <CopyText value={s.address} />
+          </div>
+        )}
+        {s.status === 'active' && s.panelUrl && (
+          <div className="mt-4">
+            <TileUsage id={s.id} limits={s.limits} />
+          </div>
+        )}
+        <div className="mt-5 flex flex-wrap gap-2">
           {manageable && (
-            <ButtonLink href={serverPagePath(lang, s.id)}>
+            <ButtonLink href={serverPagePath(lang, s.id)} className="flex-1">
               <SquareTerminal aria-hidden /> {d.manage.manage}
             </ButtonLink>
           )}
           {s.panelUrl && s.status !== 'suspended' && (
-            <ButtonLink href={s.panelUrl} external variant={manageable ? 'secondary' : 'primary'}>
+            <ButtonLink href={s.panelUrl} external variant={manageable ? 'secondary' : 'primary'} className={manageable ? undefined : 'flex-1'}>
               {d.common.openPanel} <ArrowUpRight aria-hidden />
             </ButtonLink>
           )}
@@ -281,7 +314,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
   return (
     <div className="container-page py-12 sm:py-16">
       <AutoRefresh active={transitional} />
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.02em] text-white">{t.title}</h1>
@@ -375,9 +408,13 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {!res.ok && <Alert tone="error">{t.loadError}</Alert>}
           {!user.panelLinked && hasPending && <PanelSetupCard email={user.email} />}
 
-          {servers.map((s) => (
-            <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
-          ))}
+          {servers.length > 0 && (
+            <div className="grid items-start gap-5 lg:grid-cols-2">
+              {servers.map((s) => (
+                <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
+              ))}
+            </div>
+          )}
 
           {res.ok && servers.length === 0 && (
             <div className="surface p-10 text-center">

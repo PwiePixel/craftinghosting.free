@@ -68,7 +68,7 @@ export const discordRedirectUri = () => `${env.APP_URL}/api/v1/discord/callback`
  * oder – ohne Anmeldung – eine Unterhaltung im Support-Chat.
  */
 export type OAuthSubject =
-  | { kind: 'user'; id: string; chat: boolean }
+  | { kind: 'user'; id: string; chat: boolean; back?: 'myServers' | 'account' }
   | { kind: 'chat'; id: string }
   /** Registrierung bzw. Anmeldung über Discord – `id` ist eine Zufallszahl, die an ein Cookie dieses Browsers gebunden ist */
   | { kind: 'signup'; id: string }
@@ -79,7 +79,8 @@ export async function discordAuthorizeUrl(subject: OAuthSubject, lang: Locale): 
   const cfg = await discordConfig();
   if (!cfg.linkReady) return null;
   const kind = subject.kind === 'user' ? 'u' : subject.kind === 'chat' ? 'c' : subject.kind === 'signup' ? 's' : 'l';
-  const value = [kind, subject.id, Date.now() + STATE_TTL_MS, lang, subject.kind === 'user' && subject.chat ? 1 : 0].join(':');
+  // Letztes Feld: 1 = aus dem Chat, 2 = zurück zur Konto-Seite, 0 = zurück zu „Meine Server“
+  const value = [kind, subject.id, Date.now() + STATE_TTL_MS, lang, subject.kind === 'user' && subject.chat ? 1 : subject.kind === 'user' && subject.back === 'account' ? 2 : 0].join(':');
   // Registrierung: immer mit Beitritt zum Discord-Server. Anmeldung: nur das Konto feststellen.
   const join = subject.kind === 'signup' || (subject.kind !== 'login' && (cfg.settings.autoJoin || subject.kind === 'chat' || subject.chat));
   const params = new URLSearchParams({
@@ -108,7 +109,7 @@ export function parseDiscordState(state: string): (OAuthSubject & { lang: Locale
   const [kind, id, expires, lang, chat] = verifySignedToken(state, STATE_PURPOSE)?.split(':') ?? [];
   if (!id || Number(expires) < Date.now()) return null;
   const locale: Locale = lang === 'en' ? 'en' : 'de';
-  if (kind === 'u') return { kind: 'user', id, chat: chat === '1', lang: locale };
+  if (kind === 'u') return { kind: 'user', id, chat: chat === '1', back: chat === '2' ? 'account' : 'myServers', lang: locale };
   if (kind === 'c') return { kind: 'chat', id, lang: locale };
   if (kind === 's') return { kind: 'signup', id, lang: locale };
   if (kind === 'l') return { kind: 'login', id, lang: locale };
@@ -485,4 +486,4 @@ export async function discordAdminStatus(): Promise<AdminDiscordDTO> {
 }
 
 /** Adresse, auf die nach dem Verknüpfen zurückgeleitet wird */
-export const afterLinkUrl = (lang: Locale, result: string) => `${env.APP_URL}${localePath(lang, 'myServers')}?discord=${result}`;
+export const afterLinkUrl = (lang: Locale, result: string, back: 'myServers' | 'account' = 'myServers') => `${env.APP_URL}${localePath(lang, back)}?discord=${result}`;

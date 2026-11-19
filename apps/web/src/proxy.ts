@@ -12,7 +12,7 @@ const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\
  * Status und Rechtstexte. Gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (/start) –
  * Startseite und FAQ zeigen die Wartungsseite.
  */
-const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate', 'newsletter']);
+const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'account', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate', 'newsletter']);
 
 /* ------------------------------------------------------------ Wartungsmodus */
 
@@ -176,13 +176,16 @@ export async function proxy(request: NextRequest) {
     return redirect(request, '/de', 307);
   }
 
+  // Unterseiten (z. B. /my-servers/<id>) gelten wie ihre Seite
+  const sub = key ? null : resolveSubpage(rest);
+  const pageKey = key ?? sub?.key ?? null;
+
   // Wartungsmodus: eigene Seite für alles außer Status, Rechtstexten und Anmeldung (Admins sehen die normale Website)
-  if ((!key || !OPEN_DURING_MAINTENANCE.has(key)) && (await maintenanceEnabled()) && !(await isAdminSession(request))) {
+  if ((!pageKey || !OPEN_DURING_MAINTENANCE.has(pageKey)) && (await maintenanceEnabled()) && !(await isAdminSession(request))) {
     return rewrite(request, `/${locale}/maintenance`, { ...NOINDEX, 'Retry-After': '1800', 'Cache-Control': 'no-store' });
   }
 
   // Unterseiten, z. B. /my-servers/<id> bzw. /de/meine-server/<id> → /<lang>/meine-server/<id>
-  const sub = key ? null : resolveSubpage(rest);
   const protectedKey = key === 'myServers' || key === 'account' ? key : sub?.key;
   if (protectedKey && !request.cookies.has(SESSION_COOKIE)) {
     const url = request.nextUrl.clone();

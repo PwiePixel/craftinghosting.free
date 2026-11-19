@@ -15,7 +15,7 @@ import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, getServerType, type Ser
 import { affectedRows, db } from '../db/client';
 import { partnerServers, partners, servers, type PartnerServer, type Server, type SoftwareJob, type SoftwareStep } from '../db/schema';
 import { env } from '../env';
-import { baseEggMapping, installMethodOf, type EggMapping } from '../config/pterodactyl.config';
+import { baseEggMapping, getEggMapping, installMethodOf, type EggMapping } from '../config/pterodactyl.config';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { pterodactyl } from '../pterodactyl';
@@ -302,8 +302,20 @@ async function advance(server: Server, store: JobStore, now: Date): Promise<'don
     if (method === null) return await wait();
     if (method === 'egg') {
       const ptero = pterodactyl();
-      await ptero.updateServerStartup(server.pteroServerId, await startupForType(job.serverType, job.version, settingsNow));
-      await ptero.reinstallServer(server.pteroServerId);
+      try {
+        // Ist das eigene Egg das mitgelieferte (Installationsskript), braucht es die Schritte – sonst installiert es nichts
+        const own = getEggMapping(job.serverType, settingsNow);
+        const ownIsInstaller = !!own && (await getEggCached(own.nestId, own.eggId)).variables.some((v) => v.envVariable === INSTALLER_VARIABLE);
+        const startup = ownIsInstaller
+          ? await installerStartup(await resolveSoftware(job.serverType, job.version), settingsNow, { eula: !server.partnerId && !!server.eulaAcceptedAt, egg: own })
+          : await startupForType(job.serverType, job.version, settingsNow);
+        await ptero.updateServerStartup(server.pteroServerId, startup);
+        await ptero.reinstallServer(server.pteroServerId);
+      } catch (err) {
+        job.attempts++;
+        if (job.attempts >= MAX_ATTEMPTS) return await fail('Die Umstellung auf das eigene Egg ist fehlgeschlagen.', String((err as Error).message ?? err));
+        return await wait();
+      }
       if (!(await store.finish())) return 'waiting';
       await db.update(servers).set({ powerState: 'installing', powerStateAt: now }).where(eq(servers.id, server.id));
       await audit({ userId: server.userId, serverId: server.id, actor: 'system', action: 'partner.software_installed', message: `„${server.name}“ wird über das eigene Egg von ${job.serverType} installiert (Einstellung geändert)` });

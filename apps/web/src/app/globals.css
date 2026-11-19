@@ -103,3 +103,12 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Scrollbar ausblenden (z. B. Konsole) – scrollen geht weiterhin mit Mausrad, Touch und Tastatur */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

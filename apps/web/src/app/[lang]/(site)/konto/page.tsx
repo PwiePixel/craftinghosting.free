@@ -72,6 +72,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
               autoJoin={settings.discord.autoJoin}
               note={settings.discord.note[lang] || settings.discord.note[lang === 'de' ? 'en' : 'de']}
               waiting={false}
+              back="account"
             />
           )}
           <EmailCard user={user} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />

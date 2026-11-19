@@ -50,10 +50,10 @@ export async function getCurrentUser(): Promise<{ user: UserDTO; panelUrl: strin
 }
 
 /** Erzwingt eine gültige Session – sonst Weiterleitung zum Login (in der Sprache der Seite). */
-export async function requireUser(lang: Locale, next: RouteKey): Promise<{ user: UserDTO; panelUrl: string }> {
+export async function requireUser(lang: Locale, next: RouteKey, nextPath?: string): Promise<{ user: UserDTO; panelUrl: string }> {
   const res = await apiServer<{ user: UserDTO; panelUrl: string }>('/auth/me', lang);
   if (res.ok) return res.data;
-  if (res.status === 401 || res.status === 403) redirect(localePath(lang, 'login', { next: localePath(lang, next) }));
+  if (res.status === 401 || res.status === 403) redirect(localePath(lang, 'login', { next: nextPath ?? localePath(lang, next) }));
   throw new Error(
     lang === 'en'
       ? 'The API is currently unavailable. Please try again in a moment.'

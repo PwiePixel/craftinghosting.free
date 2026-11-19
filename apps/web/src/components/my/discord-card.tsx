@@ -9,9 +9,10 @@ import { DiscordRecheck, DiscordUnlink } from '@/components/my/client-bits';
 import { buttonClasses } from '@/components/ui/button';
 import { getDict } from '@/i18n';
 
-export function DiscordCard({ me, lang, inviteUrl, autoJoin, note, waiting }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; autoJoin: boolean; note: string; waiting: boolean }) {
+export function DiscordCard({ me, lang, inviteUrl, autoJoin, note, waiting, back = 'myServers' }: { me: DiscordMeDTO; lang: Locale; inviteUrl: string | null; autoJoin: boolean; note: string; waiting: boolean; back?: 'myServers' | 'account' }) {
   const t = getDict(lang).discord;
-  const connectHref = `/api/v1/discord/connect?lang=${lang}`;
+  // Nach Discord zurück auf die Seite, von der aus verbunden wurde
+  const connectHref = `/api/v1/discord/connect?lang=${lang}${back === 'account' ? '&back=account' : ''}`;
   const attention = me.blocked !== null;
   const title = !me.linked ? (me.required ? t.requiredTitle : t.cardTitle) : me.blocked === 'not_member' ? t.notMemberTitle : t.connectedAs(me.linked.username);
   const text = !me.linked

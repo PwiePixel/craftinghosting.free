@@ -44,14 +44,23 @@ export function SiteHeader({
   const other = lang === 'de' ? 'en' : 'de';
   // Early Access: „Platz sichern“ statt „Server erstellen“; Registrierung geschlossen: kein Button
   // Wartung: Anmelden statt Registrieren · Early Access: „Platz sichern“ · Registrierung geschlossen: kein Button
-  // Angemeldet: statt „Server erstellen“ der eigene Kontoname (führt zum Konto; neue Server gibt es unter „Meine Server“)
-  const cta = maintenance || signedIn ? null : mode === 'preregistration' ? t.early.cta : mode === 'closed' ? null : t.common.createServer;
+  // Angemeldet: statt „Server erstellen“ der eigene Kontoname (führt zum Konto; neue Server gibt es unter „Meine Server“).
+  // Ist das Cookie abgelaufen (API antwortet 401/403), gilt man als abgemeldet.
+  const [sessionOk, setSessionOk] = useState(signedIn);
   const [accountName, setAccountName] = useState<string | null>(null);
+  const cta = maintenance || sessionOk ? null : mode === 'preregistration' ? t.early.cta : mode === 'closed' ? null : t.common.createServer;
   useEffect(() => {
+    setSessionOk(signedIn);
     if (!signedIn) return;
     let off = false;
     fetch('/api/v1/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.status === 401 || r.status === 403) {
+          if (!off) setSessionOk(false);
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
       .then((d: { user?: { email: string; panelUsername: string | null } } | null) => {
         if (!off && d?.user) setAccountName(d.user.panelUsername || d.user.email.split('@')[0] || null);
       })
@@ -143,7 +152,7 @@ export function SiteHeader({
               {cta}
             </Link>
           )}
-          {signedIn && !maintenance && (
+          {sessionOk && !maintenance && (
             <Link href={accountHref} className={buttonClasses('secondary', 'sm', 'hidden max-w-[14rem] sm:inline-flex')} title={t.common.account}>
               <UserRound aria-hidden /> <span className="truncate">{accountName ?? t.common.account}</span>
             </Link>
@@ -169,7 +178,7 @@ export function SiteHeader({
       {open && (
         <nav className="border-t border-line lg:hidden" aria-label={t.nav.mobile}>
           <div className="container-page flex flex-col py-3">
-            {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }, ...(signedIn ? [{ href: accountHref, label: accountName ? `${t.common.account} (${accountName})` : t.common.account }] : [])].map((item) => (
+            {[...nav, { href: localePath(lang, 'myServers'), label: t.common.myServers }, ...(sessionOk ? [{ href: accountHref, label: accountName ? `${t.common.account} (${accountName})` : t.common.account }] : [])].map((item) => (
               <Link key={item.label} href={item.href} onClick={(e) => goToSection(e, item.href)} className="py-2.5 text-[15px] text-gray-200">
                 {item.label}
               </Link>

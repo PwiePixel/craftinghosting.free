@@ -57,13 +57,14 @@ export async function discordRoutes(app: FastifyInstance) {
    * `chat=1`: aus dem Support-Chat heraus – das geht auch ohne Anmeldung, dann ist die Verbindung an die Unterhaltung gebunden.
    */
   app.get('/discord/connect', strict(20, '10 minutes'), async (request, reply) => {
-    const query = request.query as { lang?: string; chat?: string };
+    const query = request.query as { lang?: string; chat?: string; back?: string };
     const lang: Locale = isLocale(query.lang) ? query.lang : request.lang;
     const fromChat = query.chat === '1';
+    const back = query.back === 'account' ? 'account' : 'myServers';
     const user = request.user && request.user.status === 'active' ? request.user : null;
     if (user) {
-      const url = await discordAuthorizeUrl({ kind: 'user', id: user.id, chat: fromChat }, lang);
-      return reply.redirect(url ?? (fromChat ? backToChat(lang) : afterLinkUrl(lang, 'unavailable')));
+      const url = await discordAuthorizeUrl({ kind: 'user', id: user.id, chat: fromChat, back }, lang);
+      return reply.redirect(url ?? (fromChat ? backToChat(lang) : afterLinkUrl(lang, 'unavailable', back)));
     }
     if (!fromChat) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
     const conversation = await findConversation(request.cookies[CHAT_COOKIE]);
@@ -147,7 +148,8 @@ export async function discordRoutes(app: FastifyInstance) {
 
     if (!user) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}`);
     const fromChat = state?.kind === 'user' && state.chat;
-    const done = (result: string) => reply.redirect(fromChat ? backToChat(lang) : afterLinkUrl(lang, result));
+    const back = state?.kind === 'user' ? (state.back ?? 'myServers') : 'myServers';
+    const done = (result: string) => reply.redirect(fromChat ? backToChat(lang) : afterLinkUrl(lang, result, back));
     // Der Zustand gilt nur für den Account, der die Verknüpfung gestartet hat (Schutz vor untergeschobenen Links)
     if (!state || state.kind !== 'user' || state.id !== user.id) return done('state');
     if (query.error || !query.code) return done(query.error === 'access_denied' ? 'denied' : 'failed');

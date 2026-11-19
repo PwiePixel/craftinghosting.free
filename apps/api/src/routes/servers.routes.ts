@@ -6,7 +6,7 @@ import { createServerSchema, deleteServerSchema } from '@chfree/shared';
 import { currentUser, requireAuth } from '../plugins/auth';
 import { createServerForUser, deleteServer, listServers, reactivateServer } from '../services/server.service';
 import { warningStatus } from '../services/warnings.service';
-import { addServerPort, getServerDetail, removeServerPort, serverCommand, serverPower, streamWebConsole } from '../services/server-manage.service';
+import { addServerPort, getServerDetail, getServerLive, listServersLive, removeServerPort, serverCommand, serverPower, streamWebConsole } from '../services/server-manage.service';
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -40,9 +40,18 @@ export async function serverRoutes(app: FastifyInstance) {
     return { server: await reactivateServer(currentUser(request), id, request.ip) };
   });
 
-  app.get('/servers/:id', async (request) => {
+  // Live-Werte aller eigenen Server (vor /servers/:id registriert – sonst hielte Fastify „live“ für eine ID)
+  app.get('/servers/live', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request) => ({ live: await listServersLive(currentUser(request)) }));
+
+  app.get('/servers/:id/live', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (request) => {
     const { id } = idParams.parse(request.params);
-    return getServerDetail(currentUser(request), id);
+    return { live: await getServerLive(currentUser(request), id) };
+  });
+
+  app.get('/servers/:id', { config: { rateLimit: { max: 40, timeWindow: '1 minute' } } }, async (request) => {
+    const { id } = idParams.parse(request.params);
+    const { ports } = z.object({ ports: z.literal('1').optional() }).parse(request.query);
+    return getServerDetail(currentUser(request), id, { withPorts: ports === '1' });
   });
 
   app.post('/servers/:id/power', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (request) => {
@@ -62,7 +71,7 @@ export async function serverRoutes(app: FastifyInstance) {
 
   app.get('/servers/:id/console', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (request, reply) => {
     const { id } = idParams.parse(request.params);
-    await streamWebConsole(currentUser(request), id, request, reply);
+    await streamWebConsole(currentUser(request), request.sessionId, id, request, reply);
   });
 
   app.post('/servers/:id/ports', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {

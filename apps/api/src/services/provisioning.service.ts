@@ -363,7 +363,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
     return 'active';
   } catch (err) {
     // Nur eine Weile: Bleibt das Verzeichnis länger weg (oder kennt den Typ nicht), zählt es als normaler Fehlversuch
-    if (err instanceof DirectoryUnavailable && Date.now() - server.createdAt.getTime() < 2 * 60 * 60_000) {
+    if (err instanceof DirectoryUnavailable && Date.now() - (server.cycleStartedAt ?? server.createdAt).getTime() < 2 * 60 * 60_000) {
       await db.update(servers).set({ provisioningAttempts: server.provisioningAttempts }).where(eq(servers.id, server.id));
       return 'skipped';
     }
@@ -429,17 +429,25 @@ export async function runPostProvision(server: Server): Promise<boolean> {
   if (server.powerState === 'installing' || server.powerState === 'unknown') return false;
   // „Bereit“ ist der Server erst, wenn auch die gewählte Software eingerichtet ist
   if (server.softwareJob) return false;
-  let scheduleId: number | null = server.backupScheduleId;
   const plan = findPlan(await getSettings(), server.planId);
   const bot = server.kind === 'discord';
-  if (pterodactylConfig.backupSchedule.enabled && !scheduleId && plan && plan.backups > 0) {
-    scheduleId = await pterodactyl().createBackupSchedule(server.pteroIdentifier, pterodactylConfig.backupSchedule);
-  }
+  // Erst beanspruchen (zwei Jobs können gleichzeitig hier sein), dann den Backup-Zeitplan anlegen – sonst entstünden zwei
   const res = await db
     .update(servers)
-    .set({ postProvisionDone: true, backupScheduleId: scheduleId })
+    .set({ postProvisionDone: true })
     .where(and(eq(servers.id, server.id), eq(servers.postProvisionDone, false)));
   if (affectedRows(res) === 1) {
+    const [fresh] = await db.select({ scheduleId: servers.backupScheduleId }).from(servers).where(eq(servers.id, server.id)).limit(1);
+    if (pterodactylConfig.backupSchedule.enabled && !fresh?.scheduleId && plan && plan.backups > 0) {
+      try {
+        const scheduleId = await pterodactyl().createBackupSchedule(server.pteroIdentifier, pterodactylConfig.backupSchedule);
+        await db.update(servers).set({ backupScheduleId: scheduleId }).where(eq(servers.id, server.id));
+      } catch (err) {
+        // Beim nächsten Durchlauf erneut versuchen
+        await db.update(servers).set({ postProvisionDone: false }).where(eq(servers.id, server.id));
+        throw err;
+      }
+    }
     // Minecraft-Server der Website gleich starten – dann ist er sofort spielbereit und der Kunde sieht, dass er läuft
     const started = !bot && (await autoStart(server));
     await audit({

@@ -4,11 +4,16 @@ import { closeDb } from './db/client';
 import { env } from './env';
 import { startScheduler } from './jobs/scheduler';
 import { verifySmtpOnStartup } from './services/mail/mailer';
+import { ensureBanFingerprints } from './services/warnings.service';
 
 async function main() {
   const app = await buildApp();
   await app.listen({ host: env.API_HOST, port: env.API_PORT });
   app.log.info(`Pterodactyl-Modus: ${env.PTERODACTYL_MODE}`);
+  // Sperrliste: fehlende Einträge gebannter Konten nachtragen (einmalig nach dem Update, danach ohne Wirkung)
+  void ensureBanFingerprints()
+    .then((n) => n > 0 && app.log.info(`Sperrliste: ${n} Einträge für gebannte Konten nachgetragen`))
+    .catch((err) => app.log.warn({ err }, 'Sperrliste konnte nicht ergänzt werden'));
   void verifySmtpOnStartup({ info: (m) => app.log.info(m), warn: (m) => app.log.warn(m), error: (m) => app.log.error(m) });
 
   const scheduler = env.RUN_JOBS_IN_API ? startScheduler(app.log) : null;

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { localePath, type ServerDetailDTO } from '@chfree/shared';
+import { localePath, serverPagePath, type ServerDetailDTO } from '@chfree/shared';
 import { CopyText } from '@/components/my/client-bits';
 import { ServerManager } from '@/components/my/server-manage';
 import { Alert } from '@/components/ui/primitives';
@@ -25,13 +25,13 @@ export default async function ServerPage({ params }: Props) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const d = getDict(lang);
-  await requireUser(lang, 'myServers');
+  await requireUser(lang, 'myServers', serverPagePath(lang, id));
   const res = await apiServer<ServerDetailDTO>(`/servers/${id}`, lang);
   if (!res.ok && res.status === 404) notFound();
 
   return (
     <div className="container-page py-10 sm:py-14">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
         <Link href={localePath(lang, 'myServers')} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-white">
           <ArrowLeft className="size-4" aria-hidden /> {d.manage.back}
         </Link>

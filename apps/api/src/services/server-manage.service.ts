@@ -7,11 +7,12 @@
  *  – Ports nur bis zur Obergrenze des Pakets (prüft zusätzlich das Panel)
  * Server der Partner-API sind hier nicht erreichbar.
  */
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
+import { mapLimit } from '../jobs/types';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { findPlan, formatDateTime, freeHostingConfig, startBlockMessages, type ServerDetailDTO, type ServerLiveDTO, type ServerPortDTO, type ServerPowerAction } from '@chfree/shared';
 import { db } from '../db/client';
-import { servers, type Server, type User } from '../db/schema';
+import { authSessions, servers, users, type Server, type User } from '../db/schema';
 import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl, PterodactylError } from '../pterodactyl';
 import { audit } from './audit.service';
@@ -45,10 +46,47 @@ function assertActionable(server: Server): asserts server is Server & { pteroIde
   }
 }
 
+/*
+ * Panel-Kontingent schonen: Website-Abfragen (Live-Werte, Ports, EULA-Datei) gehen über dieselben Panel-Keys wie
+ * unsere Jobs (Stopps, Sperren). Deshalb kurz zwischenspeichern und insgesamt begrenzen – ist das Kontingent der
+ * Website erschöpft, gibt es den letzten bekannten Stand statt einer neuen Abfrage. Aktionen (Start/Stopp, Ports)
+ * sind davon ausgenommen; sie sind je Route begrenzt.
+ */
+const WEB_PANEL_CALLS_PER_MINUTE = 180;
+const panelWindow = { start: 0, used: 0 };
+function takeWebPanelCall(): boolean {
+  const now = Date.now();
+  if (now - panelWindow.start > 60_000) {
+    panelWindow.start = now;
+    panelWindow.used = 0;
+  }
+  if (panelWindow.used >= WEB_PANEL_CALLS_PER_MINUTE) return false;
+  panelWindow.used++;
+  return true;
+}
+const liveCache = new Map<string, { at: number; value: ServerLiveDTO | null }>();
+const portsCache = new Map<string, { at: number; value: ServerDetailDTO['ports'] }>();
+const LIVE_TTL_MS = 2500;
+const PORTS_TTL_MS = 15_000;
+const trim = (map: Map<string, unknown>) => {
+  if (map.size > 2000) map.clear();
+};
+
 const panelDown = () => Errors.unavailable(L('Das Panel ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen.', 'The panel cannot be reached right now. Please try again shortly.'));
 
-async function live(server: Server): Promise<ServerLiveDTO | null> {
+async function live(server: Server, fresh = false): Promise<ServerLiveDTO | null> {
   if (!server.pteroIdentifier || server.status !== 'active') return null;
+  const hit = liveCache.get(server.id);
+  if (!fresh && hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.value;
+  if (!fresh && !takeWebPanelCall()) return hit?.value ?? null;
+  const value = await liveFromPanel(server);
+  trim(liveCache);
+  liveCache.set(server.id, { at: Date.now(), value });
+  return value;
+}
+
+async function liveFromPanel(server: Server & {}): Promise<ServerLiveDTO | null> {
+  if (!server.pteroIdentifier) return null;
   try {
     const r = await pterodactyl().getResources(server.pteroIdentifier);
     return {
@@ -64,8 +102,19 @@ async function live(server: Server): Promise<ServerLiveDTO | null> {
   }
 }
 
-async function ports(server: Server): Promise<ServerDetailDTO['ports']> {
+async function ports(server: Server, fresh = false): Promise<ServerDetailDTO['ports']> {
   if (!server.pteroIdentifier || server.status !== 'active') return null;
+  const hit = portsCache.get(server.id);
+  if (!fresh && hit && Date.now() - hit.at < PORTS_TTL_MS) return hit.value;
+  if (!fresh && !takeWebPanelCall()) return hit?.value ?? null;
+  const value = await portsFromPanel(server);
+  trim(portsCache);
+  portsCache.set(server.id, { at: Date.now(), value });
+  return value;
+}
+
+async function portsFromPanel(server: Server): Promise<ServerDetailDTO['ports']> {
+  if (!server.pteroIdentifier) return null;
   try {
     const list = await pterodactyl().listServerPorts(server.pteroIdentifier);
     const plan = findPlan(await getSettings(), server.planId);
@@ -79,16 +128,44 @@ async function ports(server: Server): Promise<ServerDetailDTO['ports']> {
 async function eulaAccepted(server: Server): Promise<boolean> {
   if (server.kind !== 'minecraft') return true;
   if (server.eulaAcceptedAt) return true;
-  if (!server.pteroIdentifier) return false;
+  if (!server.pteroIdentifier || !takeWebPanelCall()) return false;
   const text = await pterodactyl()
     .readFile(server.pteroIdentifier, '/eula.txt')
     .catch(() => null);
-  return !!text && EULA_RE.test(text);
+  const accepted = !!text && EULA_RE.test(text);
+  // Steht die Zustimmung schon in der Datei (z. B. im Panel bestätigt), merken – dann muss sie nicht wieder gelesen werden
+  if (accepted) await db.update(servers).set({ eulaAcceptedAt: new Date() }).where(and(eq(servers.id, server.id), isNull(servers.eulaAcceptedAt)));
+  return accepted;
 }
 
-export async function getServerDetail(user: User, id: string): Promise<ServerDetailDTO> {
+/** Nur die Live-Werte eines Servers (für Diagramme, die alle paar Sekunden nachladen) */
+export async function getServerLive(user: User, id: string): Promise<ServerLiveDTO | null> {
+  return live(await manageable(user, id));
+}
+
+/** Live-Werte aller eigenen, aktiven Server (Übersicht „Meine Server“) – höchstens 4 Panel-Abfragen gleichzeitig */
+export async function listServersLive(user: User): Promise<Record<string, ServerLiveDTO | null>> {
+  const rows = await db
+    .select()
+    .from(servers)
+    .where(and(eq(servers.userId, user.id), eq(servers.status, 'active'), isNull(servers.partnerId)))
+    .limit(50);
+  const out: Record<string, ServerLiveDTO | null> = {};
+  await mapLimit(rows, 4, async (server) => {
+    out[server.id] = await live(server);
+  });
+  return out;
+}
+
+/** `withPorts`: Ports mitliefern (nur für den Reiter „Ports“ – spart Panel-Abfragen) */
+export async function getServerDetail(user: User, id: string, opts: { withPorts?: boolean; fresh?: boolean } = {}): Promise<ServerDetailDTO> {
   const server = await manageable(user, id);
-  const [dto, liveState, portList, eula] = await Promise.all([toServerDTO(server, user), live(server), ports(server), eulaAccepted(server)]);
+  const [dto, liveState, portList, eula] = await Promise.all([
+    toServerDTO(server, user),
+    live(server, opts.fresh),
+    opts.withPorts ? ports(server, opts.fresh) : Promise.resolve(null),
+    eulaAccepted(server),
+  ]);
   return { server: dto, live: liveState, ports: portList, eulaAccepted: eula };
 }
 
@@ -122,7 +199,7 @@ export async function serverPower(user: User, id: string, action: ServerPowerAct
       );
     }
     // Minecraft-EULA: Zustimmung beim Bestellen oder hier – sonst würde der Start sofort wieder enden
-    if (server.kind === 'minecraft' && !(await eulaAccepted(server))) {
+    if (server.kind === 'minecraft' && !server.eulaAcceptedAt && !(await eulaAccepted(server))) {
       if (!opts.acceptEula) {
         throw new ApiError(409, 'eula_required', L('Bitte stimme vor dem ersten Start der Minecraft-EULA zu.', 'Please agree to the Minecraft EULA before the first start.'));
       }
@@ -149,7 +226,8 @@ export async function serverPower(user: User, id: string, action: ServerPowerAct
   await db.update(servers).set({ powerState: next, powerStateAt: new Date() }).where(and(eq(servers.id, server.id), ne(servers.status, 'deleted')));
   const label = { start: 'gestartet', stop: 'gestoppt', restart: 'neu gestartet', kill: 'hart beendet' }[signal];
   await audit({ userId: user.id, serverId: server.id, actor: 'user', action: `web.server_${signal}`, message: `Server „${server.name}“ auf der Website ${label}`, ip });
-  return getServerDetail(user, id);
+  liveCache.delete(server.id);
+  return getServerDetail(user, id, { fresh: true });
 }
 
 /** Befehl in die Konsole (wie im Panel) – nur, solange der Server läuft */
@@ -174,7 +252,7 @@ export async function addServerPort(user: User, id: string, ip?: string): Promis
   assertNoTimeout(user);
   const server = await manageable(user, id);
   assertActionable(server);
-  const current = await ports(server);
+  const current = await ports(server, true);
   if (!current) throw panelDown();
   if (current.items.length >= current.limit) {
     throw Errors.conflict('port_limit', L(`Dein Paket erlaubt ${current.limit} Port${current.limit === 1 ? '' : 's'} – mehr geht nicht.`, `Your plan allows ${current.limit} port${current.limit === 1 ? '' : 's'} – no more are possible.`));
@@ -189,14 +267,14 @@ export async function addServerPort(user: User, id: string, ip?: string): Promis
     throw panelDown();
   }
   await audit({ userId: user.id, serverId: server.id, actor: 'user', action: 'web.port_added', message: `Port ${port.port} für „${server.name}“ hinzugefügt`, ip });
-  return getServerDetail(user, id);
+  return getServerDetail(user, id, { withPorts: true, fresh: true });
 }
 
 export async function removeServerPort(user: User, id: string, allocationId: number, ip?: string): Promise<ServerDetailDTO> {
   assertNoTimeout(user);
   const server = await manageable(user, id);
   assertActionable(server);
-  const current = await ports(server);
+  const current = await ports(server, true);
   const target = current?.items.find((p) => p.id === allocationId);
   if (!target) throw Errors.notFound(L('Diesen Port gibt es bei diesem Server nicht.', 'This port does not exist on this server.'));
   if (target.primary) throw Errors.conflict('port_primary', L('Der Hauptport lässt sich nicht entfernen.', 'The main port cannot be removed.'));
@@ -207,11 +285,11 @@ export async function removeServerPort(user: User, id: string, allocationId: num
     throw panelDown();
   }
   await audit({ userId: user.id, serverId: server.id, actor: 'user', action: 'web.port_removed', message: `Port ${target.port} von „${server.name}“ entfernt`, ip });
-  return getServerDetail(user, id);
+  return getServerDetail(user, id, { withPorts: true, fresh: true });
 }
 
 /** Live-Konsole (Server-Sent Events) – endet, sobald der Server nicht mehr diesem Nutzer gehört oder nicht mehr aktiv ist */
-export async function streamWebConsole(user: User, id: string, request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function streamWebConsole(user: User, sessionId: string | null, id: string, request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const server = await manageable(user, id);
   assertActionable(server);
   await streamServerConsole(
@@ -219,9 +297,16 @@ export async function streamWebConsole(user: User, id: string, request: FastifyR
       owner: `user:${user.id}`,
       maxPerOwner: 6,
       server: { id: server.id, pteroIdentifier: server.pteroIdentifier },
+      // Endet, wenn der Server nicht mehr aktiv ist oder dem Nutzer gehört, das Konto gesperrt ist oder die Sitzung
+      // beendet wurde (Abmelden, „überall abmelden“, Passwortwechsel)
       stillAllowed: async () => {
         const [row] = await db.select({ status: servers.status, userId: servers.userId }).from(servers).where(eq(servers.id, server.id)).limit(1);
-        return !!row && row.status === 'active' && row.userId === user.id;
+        if (!row || row.status !== 'active' || row.userId !== user.id) return false;
+        const [account] = await db.select({ status: users.status }).from(users).where(eq(users.id, user.id)).limit(1);
+        if (account?.status !== 'active') return false;
+        if (!sessionId) return false;
+        const [session] = await db.select({ expiresAt: authSessions.expiresAt }).from(authSessions).where(eq(authSessions.id, sessionId)).limit(1);
+        return !!session && session.expiresAt > new Date();
       },
     },
     request,
