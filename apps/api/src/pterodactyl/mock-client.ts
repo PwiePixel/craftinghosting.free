@@ -358,6 +358,7 @@ export class PterodactylMockClient implements PterodactylGateway {
         startup: 'java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar {{SERVER_JARFILE}}',
         variables: [
           { envVariable: 'SERVER_JARFILE', defaultValue: 'server.jar' },
+          { envVariable: 'CUSTOM_STARTUP', defaultValue: '' },
           { envVariable: 'SOFTWARE_STEPS', defaultValue: '' },
           { envVariable: 'EULA', defaultValue: 'FALSE' },
         ],
