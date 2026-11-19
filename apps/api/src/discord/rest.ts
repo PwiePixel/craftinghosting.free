@@ -27,6 +27,8 @@ export interface DiscordRequest {
   bearer?: string;
   json?: unknown;
   form?: Record<string, string>;
+  /** Nachricht mit Dateianhängen (multipart/form-data): `json` wird zu payload_json, Dateien zu files[n] */
+  files?: { name: string; content: string | Uint8Array; contentType?: string }[];
   /** Erscheint im Audit-Log des Discord-Servers */
   reason?: string;
 }
@@ -37,8 +39,14 @@ export async function discordRequest<T = unknown>(method: string, path: string, 
   if (opts.botToken) headers.Authorization = `Bot ${opts.botToken}`;
   else if (opts.bearer) headers.Authorization = `Bearer ${opts.bearer}`;
   if (opts.reason) headers['X-Audit-Log-Reason'] = encodeURIComponent(opts.reason.slice(0, 400));
-  let body: string | undefined;
-  if (opts.form) {
+  let body: string | FormData | undefined;
+  if (opts.files?.length) {
+    // Content-Type mit Boundary setzt fetch selbst
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify({ ...((opts.json as object) ?? {}), attachments: opts.files.map((f, i) => ({ id: i, filename: f.name })) }));
+    opts.files.forEach((f, i) => form.append(`files[${i}]`, new Blob([typeof f.content === 'string' ? f.content : Buffer.from(f.content)], { type: f.contentType ?? 'application/octet-stream' }), f.name));
+    body = form;
+  } else if (opts.form) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
     body = new URLSearchParams(opts.form).toString();
   } else if (opts.json !== undefined) {

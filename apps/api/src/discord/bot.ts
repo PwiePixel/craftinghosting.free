@@ -16,6 +16,7 @@ import { isPowerButton, onDirectMessage, onPowerButton } from './dm-power';
 import { onGuildMessage } from './honeypot';
 import { isRewardButton, onRewardButton, recordInvite, recordLeave, recordReturn } from './invite-rewards';
 import { isRewardsCommand, onRewardsMessage } from './rewards';
+import { sendTicketTranscript } from './transcripts';
 import { TICKET, closeButton, deleteButton, rolePanelMessage, ticketPanelMessage, welcomeMessage } from './messages';
 import {
   CHANNEL,
@@ -411,7 +412,9 @@ async function ticketClose(i: Interaction, settings: DiscordSettings): Promise<v
     await botRequest('POST', `/channels/${i.channel_id}/messages`, {
       json: { content: `🔒 Ticket geschlossen von <@${userId}> · closed by <@${userId}>`, allowed_mentions: { parse: [] }, components: [deleteButton('Ticket löschen / Delete ticket')] },
     });
-    await edit(i, tr(i, '✅ Ticket geschlossen.', '✅ Ticket closed.'));
+    // Transkript für die interne Aufbewahrung (Kanal aus dem Admin-Bereich) – mit dem gerade geschlossenen Stand
+    const sent = await sendTicketTranscript({ ...ticket, status: 'closed', closedAt: new Date() }, settings, userId ?? null);
+    await edit(i, sent === 'failed' ? tr(i, '✅ Ticket geschlossen. ⚠️ Das Transkript konnte nicht gesendet werden – es wird beim Löschen erneut versucht.', '✅ Ticket closed. ⚠️ The transcript could not be sent – it will be retried on deletion.') : tr(i, '✅ Ticket geschlossen.', '✅ Ticket closed.'));
   } catch (err) {
     await edit(i, `❌ ${discordErrorText(err)}`);
   }
@@ -423,6 +426,13 @@ async function ticketDelete(i: Interaction, settings: DiscordSettings): Promise<
   if (!ticket || !i.channel_id) return void (await say(i, tr(i, '❌ Das ist kein Ticket-Kanal.', '❌ This is not a ticket channel.')));
   await say(i, tr(i, '🗑️ Der Kanal wird gelöscht …', '🗑️ Deleting the channel …'));
   await db.update(discordTickets).set({ status: 'closed', closedAt: ticket.closedAt ?? new Date() }).where(eq(discordTickets.id, ticket.id));
+  // Noch kein Transkript (z. B. direkt gelöscht oder beim Schließen fehlgeschlagen): jetzt, bevor der Verlauf weg ist.
+  // Scheitert es, bleibt der Kanal stehen – sonst ginge der Verlauf verloren.
+  const sent = await sendTicketTranscript({ ...ticket, status: 'closed', closedAt: ticket.closedAt ?? new Date() }, settings, ticket.closedAt ? null : (i.member?.user?.id ?? null));
+  if (sent === 'failed') {
+    await botRequest('POST', `/channels/${i.channel_id}/messages`, { json: { content: '⚠️ Das Transkript konnte nicht gesendet werden – der Kanal bleibt deshalb erhalten. Bitte prüfe den Transkript-Kanal (Rechte des Bots) und lösche das Ticket danach erneut.' } }).catch(() => {});
+    return;
+  }
   await botRequest('DELETE', `/channels/${i.channel_id}`, { reason: 'Ticket gelöscht' }).catch(() => {});
 }
 

@@ -590,6 +590,12 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           <Labeled label="Offene Tickets je Mitglied">
             <NumberInput value={d.maxOpenTickets} min={1} max={discordLimits.maxOpenTickets} onChange={(maxOpenTickets) => set({ maxOpenTickets })} />
           </Labeled>
+          <Labeled
+            label="Kanal für Transkripte"
+            hint="Beim Schließen (spätestens beim Löschen) schickt der Bot den kompletten Verlauf als .txt-Datei hierher – mit Ersteller, Konto, Server und Zeiten. Nur für das Team sichtbar machen. Leer = keine Transkripte."
+          >
+            <IdInput value={d.ticketTranscriptChannelId} onChange={(ticketTranscriptChannelId) => set({ ticketTranscriptChannelId })} placeholder="Kanal-ID (optional)" />
+          </Labeled>
         </div>
         <SendToChannel kind="tickets" disabled={!status.botReady} hint="Oder im Kanal selbst: /ticketpanel" />
       </Section>

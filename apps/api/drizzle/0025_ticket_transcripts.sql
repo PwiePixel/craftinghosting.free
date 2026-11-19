@@ -1,0 +1,1 @@
+ALTER TABLE `discord_tickets` ADD `transcript_at` integer;

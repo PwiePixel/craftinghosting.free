@@ -81,7 +81,7 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
             USA). Nach deiner Zustimmung erhalten wir von Discord deine Discord-Nutzer-ID und deinen Benutzernamen; beides speichern wir zusammen mit dem Zeitpunkt der
             Verknüpfung in deinem Account. Mit der Berechtigung „Servern beitreten“ fügt unser Bot dein Konto unserem Discord-Server hinzu. Über die Schnittstelle von Discord
             prüfen wir, ob du Mitglied unseres Servers bist, und vergeben dort Rollen (z. B. „Customer“). Öffnest du auf Discord ein Support-Ticket, schreibt der Bot deine
-            Account-ID und die ID des gewählten Servers in den Ticket-Kanal, den nur du und das Support-Team sehen. Zugriffstoken von Discord speichern wir nicht.
+            Account-ID und die ID des gewählten Servers in den Ticket-Kanal, den nur du und das Support-Team sehen. Beim Schließen des Tickets speichern wir den Verlauf (Nachrichten, Namen, Zeitpunkte, Links zu Anhängen) als Textdatei in einem nur für das Team sichtbaren Kanal – zur Nachvollziehbarkeit von Support-Anfragen und Regelverstößen (Art. 6 Abs. 1 lit. f DSGVO). Zugriffstoken von Discord speichern wir nicht.
             Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Bereitstellung des kostenlosen Angebots) und lit. f DSGVO (Schutz vor Missbrauch und Mehrfach-Anmeldungen). Die
             Verknüpfung kannst du unter „Meine Server“ lösen, solange du keinen Server bei uns hast; mit dem Löschen deines Accounts wird sie entfernt. Für die Nutzung von
             Discord selbst gelten die Datenschutzbestimmungen von Discord.
@@ -268,7 +268,7 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
             your consent we receive your Discord user ID and username from Discord; we store both in your account together with the time of linking. With the permission “Join
             servers” our bot adds your account to our Discord server. Via Discord’s interface we check whether you are a member of our server and assign roles there (for
             example “Customer”). If you open a support ticket on Discord, the bot posts your account ID and the ID of the selected server in the ticket channel, which only
-            you and the support team can see. We do not store access tokens from Discord. The legal basis is Art. 6(1)(b) GDPR (providing the free offer) and Art. 6(1)(f)
+            you and the support team can see. When the ticket is closed, we store its history (messages, names, timestamps, links to attachments) as a text file in a channel visible only to the team – so support requests and rule violations remain traceable (Art. 6(1)(f) GDPR). We do not store access tokens from Discord. The legal basis is Art. 6(1)(b) GDPR (providing the free offer) and Art. 6(1)(f)
             GDPR (protection against abuse and multiple sign-ups). You can remove the link under “My servers” as long as you have no server with us; it is removed when you
             delete your account. Discord’s own privacy policy applies to your use of Discord.
           </p>

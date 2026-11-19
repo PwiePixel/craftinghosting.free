@@ -66,6 +66,8 @@ export interface DiscordSettings {
   /** Tickets: Rolle des Support-Teams und Kategorie für Ticket-Kanäle (leer = Bot legt „Tickets“ an) */
   supportRoleId: string;
   ticketCategoryId: string;
+  /** Kanal für Ticket-Transkripte (.txt beim Schließen/Löschen, nur intern) – leer = keine Transkripte */
+  ticketTranscriptChannelId: string;
   /** Höchstzahl offener Tickets je Mitglied */
   maxOpenTickets: number;
   /** Mitglieder können dem Bot per Direktnachricht „!start“ schreiben und ihren Server starten */
@@ -375,6 +377,7 @@ export function defaultDiscordSettings(): DiscordSettings {
     inviteChannelId: '',
     supportRoleId: '',
     ticketCategoryId: '',
+    ticketTranscriptChannelId: '',
     maxOpenTickets: 2,
     dmStart: true,
     statusFeed: { channelId: '', pingRoleId: '', announceAuto: true },
@@ -453,6 +456,7 @@ export function normalizeDiscordSettings(input: unknown): DiscordSettings {
     inviteChannelId: snowflake(i.inviteChannelId),
     supportRoleId: snowflake(i.supportRoleId),
     ticketCategoryId: snowflake(i.ticketCategoryId),
+    ticketTranscriptChannelId: snowflake(i.ticketTranscriptChannelId),
     maxOpenTickets: int(i.maxOpenTickets, d.maxOpenTickets, 1, discordLimits.maxOpenTickets),
     dmStart: bool(i.dmStart, d.dmStart),
     statusFeed: { channelId: snowflake(feed.channelId), pingRoleId: snowflake(feed.pingRoleId), announceAuto: bool(feed.announceAuto, d.statusFeed.announceAuto) },

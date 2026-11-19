@@ -526,6 +526,8 @@ export const discordTickets = sqliteTable(
     status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
     createdAt: ts('created_at').notNull().$defaultFn(now),
     closedAt: ts('closed_at'),
+    /** Wann das Transkript in den Transkript-Kanal geschickt wurde (null = noch nicht) */
+    transcriptAt: ts('transcript_at'),
   },
   (t) => [index('discord_tickets_user_idx').on(t.discordUserId, t.status), index('discord_tickets_channel_idx').on(t.channelId)],
 );

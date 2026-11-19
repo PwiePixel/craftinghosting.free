@@ -176,6 +176,13 @@
       "when": 1795085580135,
       "tag": "0024_user_limit_overrides",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795087901831,
+      "tag": "0025_ticket_transcripts",
+      "breakpoints": true
     }
   ]
 }
