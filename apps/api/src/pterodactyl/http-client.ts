@@ -440,8 +440,30 @@ export class PterodactylHttpClient implements PterodactylGateway {
   async readFile(identifier: string, path: string): Promise<string | null> {
     const res = await this.fileRequest('GET', identifier, 'contents', path);
     if (res.status === 404) return null;
-    if (!res.ok) throw new PterodactylError(`Pterodactyl GET files/contents → ${res.status}`, res.status);
+    if (!res.ok) {
+      // Manche Panels/Wings melden eine fehlende Datei (oder einen fehlenden Ordner, z. B. „logs“ vor dem ersten Start)
+      // nicht mit 404, sondern mit einem Serverfehler. Dann im Verzeichnis nachsehen: Gibt es die Datei nicht, ist das
+      // „nicht vorhanden“ – und kein Ausfall des Panels.
+      if (res.status !== 429 && (await this.fileExists(identifier, path).catch(() => null)) === false) return null;
+      throw new PterodactylError(`Pterodactyl GET files/contents → ${res.status}`, res.status);
+    }
     return res.text();
+  }
+
+  /**
+   * Gibt es diese Datei? false = sicher nicht (sie oder ein Ordner auf dem Weg dorthin fehlt), true = vorhanden.
+   * Geht den Pfad vom Wurzelverzeichnis aus durch – so klappt es auch, wenn schon der Ordner fehlt.
+   */
+  private async fileExists(identifier: string, path: string): Promise<boolean> {
+    const parts = path.split('/').filter(Boolean);
+    let dir = '/';
+    for (let i = 0; i < parts.length; i++) {
+      const entry = (await this.listFiles(identifier, dir)).find((f) => f.name === parts[i]);
+      const last = i === parts.length - 1;
+      if (!entry || (last ? entry.directory : !entry.directory)) return false;
+      dir = `${dir === '/' ? '' : dir}/${parts[i]}`;
+    }
+    return true;
   }
 
   async writeFile(identifier: string, path: string, content: string): Promise<void> {
