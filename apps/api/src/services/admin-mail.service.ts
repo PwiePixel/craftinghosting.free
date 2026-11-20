@@ -8,7 +8,7 @@
  */
 import { identityConfirmedSql } from './identity';
 import { and, desc, eq, inArray, isNotNull, isNull, like, lt, ne, notExists, or, sql } from 'drizzle-orm';
-import { formatDateTime, freeHostingConfig, type WarningSanction, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type AdminPanelWaitingDTO, type Locale, type Localized } from '@chfree/shared';
+import { formatDateTime, freeHostingConfig, type WarningSanction, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type AdminPanelWaitingDTO, type AdminDiscordJoinWaitingDTO, type Locale, type Localized } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
 import { notifications, partners, servers, users, type User } from '../db/schema';
 import { isAdmin } from '../plugins/auth';
@@ -17,6 +17,7 @@ import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
 import { getDiscordState } from '../discord/store';
+import { discordJoinLink } from '../discord/service';
 import { ABUSE_REASONS, abuseReasonLabel } from './abuse-reasons';
 import { serverAction } from './admin.service';
 import { audit } from './audit.service';
@@ -107,12 +108,12 @@ export async function sendDiscordReminders(admin: User, days: number, ip?: strin
         l === 'en'
           ? `Your server ${namesEn} has been requested but is still waiting for the Discord connection.\n${
               w.reason === 'discord_not_member'
-                ? 'Your Discord account is linked, but you are not a member of our Discord server. Join it and click “Check again” under “My servers”.'
+                ? `Your Discord account is linked, but you are not a member of our Discord server yet. One click is enough – Discord asks for your permission and our bot adds you right away:\n${discordJoinLink(w.user.id, 'en')}`
                 : 'Connect your Discord account under “My servers” – this also adds you to our Discord server, and your server is created immediately.'
             }\nIf this does not happen by ${date(deadline, 'en')}, your request is deleted automatically and you have to request the server again.`
           : `Dein Server ${names} ist beantragt, wartet aber noch auf die Discord-Verbindung.\n${
               w.reason === 'discord_not_member'
-                ? 'Dein Discord-Konto ist verknüpft, du bist aber kein Mitglied unseres Discord-Servers. Tritt bei und klicke unter „Meine Server“ auf „Erneut prüfen“.'
+                ? `Dein Discord-Konto ist verknüpft, du bist aber noch nicht auf unserem Discord-Server. Ein Klick genügt – Discord fragt nach deiner Erlaubnis und unser Bot fügt dich sofort hinzu:\n${discordJoinLink(w.user.id, 'de')}`
                 : 'Verbinde dein Discord-Konto unter „Meine Server“ – dabei trittst du auch unserem Discord-Server bei, und dein Server wird sofort erstellt.'
             }\nPassiert das nicht bis zum ${date(deadline, 'de')}, wird deine Anfrage automatisch gelöscht und du musst den Server neu beantragen.`,
       dedupeKey: `discord-reminder:${w.user.id}:${now.toISOString().slice(0, 10)}`,
@@ -153,6 +154,60 @@ export async function expireDiscordWaiting(now = new Date()): Promise<number> {
     });
   }
   return deleted;
+}
+
+/* ------------------------------------------------------------ Erinnerung: Discord-Server beitreten */
+
+/**
+ * Verknüpfte Konten, die nicht auf unserem Discord-Server sind und die der Bot nicht selbst hinzufügen kann (verknüpft,
+ * bevor der automatische Beitritt die Erlaubnis gespeichert hat, oder Erlaubnis zurückgezogen). Den Stand pflegt der
+ * Job discord-join (Mitglied geprüft, kein gültiges Token).
+ */
+async function discordJoinWaiting(): Promise<User[]> {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(and(isNotNull(users.discordId), eq(users.status, 'active'), isNull(users.discordJoinedAt), isNull(users.discordJoinToken), isNotNull(users.discordJoinCheckedAt)))
+    .orderBy(users.discordLinkedAt)
+    .limit(2000);
+  return rows.filter((u) => !isAdmin(u));
+}
+
+export async function listDiscordJoinWaiting(): Promise<AdminDiscordJoinWaitingDTO> {
+  const waiting = await discordJoinWaiting();
+  const last = await lastReminders('admin.discord_join', waiting.map((u) => u.id));
+  return {
+    users: waiting.map((u) => ({
+      userId: u.id,
+      email: u.email,
+      discordUsername: u.discordUsername ?? '',
+      linkedAt: u.discordLinkedAt?.toISOString() ?? null,
+      lastRemindedAt: last.get(u.id)?.toISOString() ?? null,
+    })),
+  };
+}
+
+/** E-Mail mit dem Ein-Klick-Beitrittslink an die ausgewählten Konten (je Konto höchstens eine pro Tag) */
+export async function sendDiscordJoinReminders(admin: User, userIds: string[] | undefined, ip?: string): Promise<{ sent: number; skipped: number }> {
+  const waiting = (await discordJoinWaiting()).filter((u) => !userIds || userIds.includes(u.id));
+  const day = new Date().toISOString().slice(0, 10);
+  let sent = 0;
+  for (const user of waiting) {
+    const created = await notify({
+      userId: user.id,
+      type: 'admin.discord_join',
+      title: L('Ein Klick: Tritt unserem Discord-Server bei', 'One click: join our Discord server'),
+      body: (l) =>
+        l === 'en'
+          ? `Your Discord account${user.discordUsername ? ` (${user.discordUsername})` : ''} is linked to your CraftingHosting.free account, but you are not on our Discord server yet. That is where you get support, news and your customer role.\nOne click is enough – Discord asks for your permission “Join servers” and our bot adds you right away:\n${discordJoinLink(user.id, 'en')}\nThe link works for 30 days and only for the Discord account that is already linked.`
+          : `Dein Discord-Konto${user.discordUsername ? ` (${user.discordUsername})` : ''} ist mit deinem Konto bei CraftingHosting.free verknüpft, du bist aber noch nicht auf unserem Discord-Server. Dort gibt es Support, Neuigkeiten und deine Customer-Rolle.\nEin Klick genügt – Discord fragt nach der Erlaubnis „Servern beitreten“ und unser Bot fügt dich sofort hinzu:\n${discordJoinLink(user.id, 'de')}\nDer Link gilt 30 Tage und nur für das Discord-Konto, das schon verknüpft ist.`,
+      dedupeKey: `discord-join:${user.id}:${day}`,
+      email: true,
+    });
+    if (created) sent++;
+  }
+  await audit({ actor: 'admin', action: 'admin.discord_join', message: `Einladung „Discord-Server beitreten“ an ${sent} Nutzer geschickt (${waiting.length - sent} heute schon angeschrieben) (durch ${admin.email})`, ip });
+  return { sent, skipped: waiting.length - sent };
 }
 
 /* ------------------------------------------------------------ Erinnerung: Panel-Zugang einrichten */

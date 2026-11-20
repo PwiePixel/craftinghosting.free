@@ -28,6 +28,9 @@ import {
   syncCustomerRole,
   syncCustomerRoles,
   unlinkDiscordAccount,
+  joinWithExistingLink,
+  runDiscordAutoJoin,
+  parseDiscordJoinLink,
 } from '../discord/service';
 import { CHAT_COOKIE } from './chat.routes';
 import { attachDiscordToConversation, chatNote, findConversation, startHandoff } from '../chat/service';
@@ -40,6 +43,7 @@ import { accountForDiscordLogin, accountForDiscordSignup, completeDiscordLogin, 
 import { createSession } from '../services/session.service';
 import { audit } from '../services/audit.service';
 import { activatePendingServers } from '../services/server.service';
+import { afterDiscordJoin } from '../jobs/discord-join.job';
 import { getSettings, invalidatePublicSite } from '../services/settings.service';
 import { assertIdentityFree } from '../services/sanction-gate';
 
@@ -83,6 +87,16 @@ export async function discordRoutes(app: FastifyInstance) {
     return reply.redirect(url);
   });
 
+  /** Ein-Klick-Beitritt aus der E-Mail (ohne Anmeldung): leitet zu Discord weiter */
+  app.get('/discord/join', strict(20, '10 minutes'), async (request, reply) => {
+    const query = request.query as { t?: string; lang?: string };
+    const lang: Locale = isLocale(query.lang) ? query.lang : request.lang;
+    const userId = query.t ? parseDiscordJoinLink(query.t) : null;
+    if (!userId) return reply.redirect(`${env.APP_URL}${localePath(lang, 'login')}?discord=state`);
+    const url = await discordAuthorizeUrl({ kind: 'join', id: userId }, lang);
+    return reply.redirect(url ?? `${env.APP_URL}${localePath(lang, 'login')}?discord=unavailable`);
+  });
+
   /** Rückweg von Discord */
   app.get('/discord/callback', strict(20, '10 minutes'), async (request, reply) => {
     const query = request.query as { code?: string; state?: string; error?: string };
@@ -106,6 +120,19 @@ export async function discordRoutes(app: FastifyInstance) {
         await chatNote(conversation, 'denied').catch(() => {});
       }
       return reply.redirect(backToChat(lang));
+    }
+
+    // Ein-Klick-Beitritt aus der E-Mail: nur das schon verknüpfte Discord-Konto, keine neue Verknüpfung, keine Anmeldung
+    if (state?.kind === 'join') {
+      const target = (result: string) => reply.redirect(`${env.APP_URL}${localePath(lang, user?.id === state.id ? 'myServers' : 'login')}?discord=${result}`);
+      if (query.error || !query.code) return target(query.error === 'access_denied' ? 'denied' : 'failed');
+      const { result, user: owner } = await joinWithExistingLink(state.id, query.code);
+      if (owner && result === 'joined') {
+        // Wartende Server freischalten und die Customer-Rolle setzen – Fehler hier kippen den Beitritt nicht
+        await activatePendingServers(owner, request.ip).catch((err) => request.log.warn({ err }, 'Discord: Server konnten nach dem Beitritt nicht aktiviert werden'));
+        await syncCustomerRole(owner.id).catch(() => {});
+      }
+      return target(result);
     }
 
     // Registrierung bzw. Anmeldung über Discord: Das Discord-Konto ist die Identität
@@ -263,6 +290,8 @@ export async function discordAdminRoutes(app: FastifyInstance) {
   });
 
   app.post('/admin/discord/sync-roles', strict(6, '10 minutes'), async () => syncCustomerRoles({ all: true, limit: 2000 }));
+  /** Automatischer Beitritt sofort statt beim nächsten Lauf des Jobs (bis zu 500 Konten) */
+  app.post('/admin/discord/join-now', strict(6, '10 minutes'), async () => runDiscordAutoJoin(new Date(), 500, afterDiscordJoin));
 
   /** Testnachricht in den Status-Kanal (mit den gerade eingegebenen, evtl. noch nicht gespeicherten IDs) */
   app.post('/admin/discord/status-test', strict(20, '10 minutes'), async (request) => {

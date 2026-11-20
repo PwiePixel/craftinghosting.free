@@ -1,7 +1,7 @@
 import { clearPanelWebLogin, getPanelWebLogin, notePanelWebCheck, panelWebLoginStatus, savePanelWebLogin } from '../services/panel-web.store';
 import { testPanelWebLogin } from '../pterodactyl/web-transfer';
 import { adminUpgradeServer, cancelServerTransfer, checkServerTransfers, upgradeOptions } from '../services/admin-upgrade.service';
-import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders, listPanelWaiting, sendPanelReminders, setAbuseSource, setServerAbuseSource } from '../services/admin-mail.service';
+import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders, listPanelWaiting, sendPanelReminders, listDiscordJoinWaiting, sendDiscordJoinReminders, setAbuseSource, setServerAbuseSource } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -70,6 +70,13 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/admin/mails/discord-reminder', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
     const { days, userIds } = reminderBody(7).parse(request.body ?? {});
     return { ...(await sendDiscordReminders(currentUser(request), days, request.ip, userIds)), waiting: await listDiscordWaiting() };
+  });
+  /** Verknüpft, aber nicht auf dem Discord-Server (der Bot kann sie nicht selbst hinzufügen) */
+  app.get('/admin/mails/discord-join-waiting', async () => listDiscordJoinWaiting());
+  /** E-Mail mit dem Ein-Klick-Beitrittslink an die ausgewählten Konten */
+  app.post('/admin/mails/discord-join-reminder', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
+    const { userIds } = z.object({ userIds: z.array(z.string().uuid()).min(1).max(2000).optional() }).parse(request.body ?? {});
+    return { ...(await sendDiscordJoinReminders(currentUser(request), userIds, request.ip)), waiting: await listDiscordJoinWaiting() };
   });
   /** Konten ohne Panel-Zugang */
   app.get('/admin/mails/panel-waiting', async () => listPanelWaiting());

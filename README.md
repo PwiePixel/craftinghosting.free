@@ -107,6 +107,7 @@ Schutz vor Mehrfach-Anmeldungen und Bindung an den eigenen Discord-Server. Alles
 | **Konto verknüpfen** | Nutzer verbinden unter „Meine Server“ ihr Discord-Konto (OAuth). Mit der Berechtigung `guilds.join` treten sie dabei automatisch dem Server bei. Jedes Discord-Konto gehört zu höchstens einem Account; optional gilt ein Mindestalter des Discord-Kontos. |
 | **Pflicht-Mitgliedschaft** | Eingeschaltet werden Server erst erstellt bzw. reaktiviert, wenn das Konto verknüpft und der Nutzer Mitglied ist. Offene Anfragen warten so lange. Startseite, „Server erstellen“, FAQ, Regeln und `/llms.txt` weisen darauf hin. |
 | **Einladungslink** | Der Bot erstellt eine dauerhafte Einladung und ersetzt sie, falls sie gelöscht wird. Die Website verwendet sie überall als Discord-Link. |
+| **Automatischer Beitritt** | Jede Verbindung über Discord – Registrieren, Anmelden, Verknüpfen, Support-Chat – fragt die Erlaubnis „Servern beitreten“ an und fügt das Konto sofort dem Discord-Server hinzu (der Bot braucht dafür die Berechtigung „Einladung erstellen“). Klappt das nicht, holt der Job `discord-join` es nach; Fehler stehen unter Admin → Discord → „Automatischer Beitritt“ (mit Knopf „Jetzt prüfen und hinzufügen“). Konten, die verknüpft wurden, bevor die Erlaubnis gespeichert wurde, kann Discord-seitig kein Bot ohne ihr Zutun hinzufügen: Admin → E-Mails → „Einladung: Discord-Server beitreten“ schickt ihnen (per Checkbox ausgewählt) einen Ein-Klick-Link – ohne Anmeldung, 30 Tage gültig, nur für das schon verknüpfte Discord-Konto. |
 | **Customer-Rolle** | Wer einen Server oder Bot hat, bekommt die Rolle (Rollen-ID im Admin); wer keinen mehr hat, verliert sie. Abgleich alle 2 Minuten (Job `discord-sync`) und auf Knopfdruck. |
 | **Auto-Rollen** | Bis zu 20 Rollen, die jedes neue Mitglied beim Betreten bekommt. |
 | **Willkommensnachricht** | Embed mit Profilbild und Profil-Banner, Einlader, Beitrittsdatum und Mitgliederzahl. Texte, Farbe, Kanal und Ersatzbild sind einstellbar. |
@@ -317,6 +318,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | `cycle-lifecycle` | 60 s | 30-Tage-Zyklus der Minecraft-Server: Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag. Discord-Bots haben keinen Zyklus; der Job suspendiert sie nur nach einer Freigabe wegen Inaktivität |
 | `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |
 | `discord-sync` | 2 min | Customer-Rolle auf dem Discord-Server abgleichen, Einladungslink stündlich prüfen |
+| `discord-join` | 5 min | Verknüpfte Discord-Konten automatisch dem Discord-Server hinzufügen: holt fehlgeschlagene Beitritte nach (Refresh-Token, verschlüsselt, nur bis zum Beitritt gespeichert; neuer Versuch alle 30 min) und markiert Konten ohne Erlaubnis als „muss einmal klicken“ |
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |
 | `notification-emails` | 30 s | E-Mail-Outbox mit Wiederholungen |

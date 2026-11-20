@@ -1024,7 +1024,9 @@ return {
     noteConnectNow: 'Du bist angemeldet – verbinde jetzt dein Discord-Konto. Dabei trittst du unserem Discord-Server automatisch bei, und dein Server wird eingerichtet.',
     results: {
       linked: { ok: true, title: 'Discord verbunden', text: 'Dein Discord-Konto ist verknüpft und du bist Mitglied auf unserem Server.' },
-      linked_not_member: { ok: false, title: 'Verknüpft – aber noch kein Mitglied', text: 'Dein Discord-Konto ist verknüpft. Tritt jetzt unserem Discord-Server bei und klicke auf „Erneut prüfen“.' },
+      linked_not_member: { ok: false, title: 'Verknüpft – aber noch kein Mitglied', text: 'Dein Discord-Konto ist verknüpft, der Bot konnte dich aber gerade nicht auf unseren Discord-Server holen. Er versucht es automatisch erneut – oder klicke später auf „Erneut prüfen“.' },
+      joined: { ok: true, title: 'Willkommen auf unserem Discord-Server', text: 'Unser Bot hat dich hinzugefügt. Wartende Server werden jetzt eingerichtet.' },
+      wrong_account: { ok: false, title: 'Anderes Discord-Konto', text: 'Bei Discord bist du mit einem anderen Konto angemeldet als dem, das mit deinem Account verknüpft ist. Melde dich bei Discord mit dem verknüpften Konto an und öffne den Link erneut.' },
       taken: { ok: false, title: 'Dieses Discord-Konto ist schon vergeben', text: 'Das Discord-Konto ist bereits mit einem anderen Account verknüpft. Jedes Discord-Konto kann nur einmal verwendet werden.' },
       too_new: { ok: false, title: 'Discord-Konto ist zu neu', text: 'Zum Schutz vor Missbrauch muss dein Discord-Konto schon etwas länger bestehen. Bitte versuche es später erneut oder wende dich an den Support.' },
       bot_account: { ok: false, title: 'Bot-Konten können nicht verknüpft werden', text: 'Bitte verbinde dein persönliches Discord-Konto.' },

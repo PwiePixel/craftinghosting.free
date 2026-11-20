@@ -183,7 +183,7 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
   const [steps, setSteps] = useState<DiscordSetupStep[] | null>(null);
   const [autoRolesText, setAutoRolesText] = useState(() => settings.discord.autoRoleIds.join(', '));
   const autoRoles = parseRoleIds(autoRolesText);
-  const [pending, setPending] = useState<'save' | 'setup' | 'roles' | null>(null);
+  const [pending, setPending] = useState<'save' | 'setup' | 'roles' | 'join' | null>(null);
   const [message, setMessage] = useState<Message>(null);
 
   const set = (patch: Partial<DiscordSettings>) => setD((v) => ({ ...v, ...patch }));
@@ -386,12 +386,6 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
           label="Wichtige Benachrichtigungen zusätzlich per Direktnachricht"
           hint="Alles, was per E-Mail rausgeht (Server bereit, läuft ab, Upgrade …), schickt der Bot zusätzlich als Direktnachricht. So kommen Hinweise auch an, wenn E-Mails verloren gehen."
         />
-        <Toggle
-          checked={d.autoJoin}
-          onChange={(autoJoin) => set({ autoJoin })}
-          label="Beim Verknüpfen automatisch dem Server beitreten"
-          hint="Discord fragt dabei nach der Erlaubnis „Servern beitreten“. Ausgeschaltet müssen Nutzer selbst über den Einladungslink beitreten."
-        />
         <Labeled label="Mindestalter des Discord-Kontos (Tage)" hint="0 = egal. Frisch angelegte Konten sind das typische Werkzeug für Mehrfach-Anmeldungen." className="max-w-xs">
           <NumberInput value={d.minAccountAgeDays} min={0} max={3650} onChange={(minAccountAgeDays) => set({ minAccountAgeDays })} />
         </Labeled>
@@ -468,6 +462,63 @@ export function DiscordAdmin({ settings, status: initialStatus }: { settings: Si
             Customer-Rolle jetzt für alle abgleichen
           </Button>
           <span className="text-[13px] text-subtle">Läuft sonst automatisch alle zwei Minuten.</span>
+        </div>
+      </Section>
+
+      <Section
+        title="Automatischer Beitritt"
+        description="Jede Verbindung über Discord (Registrieren, Anmelden, Verknüpfen, Support-Chat) fügt das Konto mit der Erlaubnis „Servern beitreten“ eurem Server hinzu. Klappt das nicht sofort, versucht es der Job discord-join alle 30 Minuten erneut."
+      >
+        <dl className="grid gap-3 text-sm sm:grid-cols-4">
+          {[
+            ['Beigetreten', status.join.members, 'bestätigt (wer selbst geht, zählt weiter)'],
+            ['Wird hinzugefügt', status.join.pending, 'automatisch, mit Erlaubnis'],
+            ['Muss einmal klicken', status.join.needsRelink, 'Erlaubnis fehlt – Einladung unter E-Mails'],
+            ['Noch nicht geprüft', status.join.unchecked, 'prüft der Job'],
+          ].map(([label, value, hint]) => (
+            <div key={label as string} className="rounded-lg border border-line px-3 py-2.5">
+              <dt className="text-[12px] text-subtle">{label}</dt>
+              <dd className="text-xl font-semibold text-white tabular-nums">{value}</dd>
+              <dd className="text-[12px] text-subtle">{hint}</dd>
+            </div>
+          ))}
+        </dl>
+        {status.join.error && (
+          <p className="rounded-lg border border-red-400/40 bg-red-400/[0.08] px-3 py-2.5 text-sm text-red-200">
+            Zuletzt fehlgeschlagen ({new Date(status.join.error.at).toLocaleString('de-DE')}): {status.join.error.message}
+          </p>
+        )}
+        <p className="text-[13px] leading-relaxed text-subtle">
+          Konten, die vor dieser Funktion verknüpft wurden, kann der Bot nicht ohne ihr Zutun hinzufügen – Discord verlangt dafür ihre Erlaubnis. Sie bekommen unter Admin → E-Mails →
+          „Einladung: Discord-Server beitreten“ einen Link: ein Klick bei Discord auf „Autorisieren“, und der Bot holt sie auf den Server.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<RefreshCw />}
+            loading={pending === 'join'}
+            disabled={!status.botReady || !status.linkReady}
+            onClick={async () => {
+              setPending('join');
+              setMessage(null);
+              try {
+                const res = await api<{ checked: number; members: number; joined: number; failed: number; needsRelink: number }>('/admin/discord/join-now', { body: {} });
+                setStatus((await api<{ discord: AdminDiscordDTO }>('/admin/discord')).discord);
+                setMessage({
+                  ok: res.failed === 0,
+                  text: `${res.checked} Konten geprüft: ${res.joined} hinzugefügt, ${res.members} schon auf dem Server, ${res.needsRelink} müssen einmal klicken${res.failed ? `, ${res.failed} fehlgeschlagen` : ''}.`,
+                });
+              } catch (err) {
+                setMessage({ ok: false, text: errorText(err) });
+              } finally {
+                setPending(null);
+              }
+            }}
+          >
+            Jetzt prüfen und hinzufügen
+          </Button>
+          <span className="text-[13px] text-subtle">Läuft sonst automatisch alle fünf Minuten.</span>
         </div>
       </Section>
 

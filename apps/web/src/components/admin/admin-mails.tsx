@@ -4,13 +4,14 @@
  * Admin → E-Mails und Abuse:
  *  – Erinnerung an ausgewählte Nutzer, deren Server noch auf die Discord-Verbindung wartet (mit Frist bis zum Löschen)
  *  – Erinnerung an ausgewählte Nutzer ohne Panel-Zugang (mit Frist bis zum Löschen des Kontos)
+ *  – Einladung mit Ein-Klick-Link an verknüpfte Nutzer, die nicht auf dem Discord-Server sind
  *  – Nachricht an ausgewählte Nutzer
  *  – Abuse-Mails von Hand senden und alle Abuse-Mails ansehen
  */
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Send } from 'lucide-react';
-import type { AdminAbuseDTO, AdminDiscordWaitingDTO, AdminPanelWaitingDTO } from '@chfree/shared';
+import type { AdminAbuseDTO, AdminDiscordJoinWaitingDTO, AdminDiscordWaitingDTO, AdminPanelWaitingDTO } from '@chfree/shared';
 import { Labeled, NumberInput, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -45,7 +46,8 @@ function ReminderPanel({
   onSent,
 }: {
   rows: WaitingRow[];
-  defaultDays: number;
+  /** null = ohne Frist (reine Einladung) */
+  defaultDays: number | null;
   endpoint: string;
   empty: string;
   /** Folge nach Ablauf der Frist, für die Rückfrage: „… verliert seine Anfrage“ */
@@ -53,7 +55,7 @@ function ReminderPanel({
   onSent: (res: unknown) => void;
 }) {
   const router = useRouter();
-  const [days, setDays] = useState(defaultDays);
+  const [days, setDays] = useState(defaultDays ?? 0);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<Message>(null);
   const notReminded = (list: WaitingRow[]) => new Set(list.filter((r) => !r.lastRemindedAt).map((r) => r.userId));
@@ -73,14 +75,14 @@ function ReminderPanel({
 
   async function send() {
     if (chosen.length === 0) return;
-    if (!window.confirm(`Erinnerung an ${chosen.length} ${chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden? ${consequence(days)}`)) return;
+    if (!window.confirm(`E-Mail an ${chosen.length} ${chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden? ${consequence(days)}`)) return;
     setPending(true);
     setMessage(null);
     try {
-      const res = await api<{ sent: number; skipped: number }>(endpoint, { body: { days, userIds: chosen } });
+      const res = await api<{ sent: number; skipped: number }>(endpoint, { body: defaultDays === null ? { userIds: chosen } : { days, userIds: chosen } });
       onSent(res);
       setSelected(new Set());
-      setMessage({ ok: true, text: `${res.sent} ${res.sent === 1 ? 'Erinnerung wird' : 'Erinnerungen werden'} versendet${res.skipped ? ` – ${res.skipped} wurden heute schon erinnert` : ''}.` });
+      setMessage({ ok: true, text: `${res.sent} ${res.sent === 1 ? 'E-Mail wird' : 'E-Mails werden'} versendet${res.skipped ? ` – ${res.skipped} wurden heute schon erinnert` : ''}.` });
       router.refresh();
     } catch (err) {
       setMessage({ ok: false, text: errorText(err) });
@@ -93,11 +95,13 @@ function ReminderPanel({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
-        <Labeled label="Frist in Tagen" className="w-32">
-          <NumberInput value={days} min={1} max={30} onChange={setDays} className="max-w-none" />
-        </Labeled>
+        {defaultDays !== null && (
+          <Labeled label="Frist in Tagen" className="w-32">
+            <NumberInput value={days} min={1} max={30} onChange={setDays} className="max-w-none" />
+          </Labeled>
+        )}
         <Button icon={<Send />} loading={pending} disabled={chosen.length === 0} onClick={() => void send()}>
-          Erinnerung an {chosen.length} {chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden
+          E-Mail an {chosen.length} {chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden
         </Button>
         <Note message={message} />
       </div>
@@ -156,6 +160,32 @@ export function DiscordReminder({ initial }: { initial: AdminDiscordWaitingDTO }
         empty="Aktuell wartet niemand auf die Discord-Verbindung."
         consequence={(days) => `Wer sein Discord-Konto nicht innerhalb von ${days} Tagen verbindet, verliert seine Anfrage.`}
         onSent={(res) => setWaiting((res as { waiting: AdminDiscordWaitingDTO }).waiting.users)}
+      />
+    </div>
+  );
+}
+
+/** Einladung „Discord-Server beitreten“ mit Ein-Klick-Link an verknüpfte Konten, die der Bot nicht selbst hinzufügen kann */
+export function DiscordJoinReminder({ initial }: { initial: AdminDiscordJoinWaitingDTO }) {
+  const [waiting, setWaiting] = useState(initial.users);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-muted">
+        Diese Nutzer haben ihr Discord-Konto verknüpft, sind aber nicht auf eurem Discord-Server – und der Bot darf sie nicht selbst hinzufügen, weil Discord dafür ihre
+        Erlaubnis verlangt (sie haben vor dem automatischen Beitritt verknüpft oder die Erlaubnis zurückgezogen). Die E-Mail enthält einen Link: ein Klick bei Discord auf
+        „Autorisieren“, und der Bot holt sie sofort auf den Server – ohne Anmeldung auf der Website. Der Link gilt 30 Tage und nur für das schon verknüpfte Discord-Konto.
+      </p>
+      <ReminderPanel
+        rows={waiting.map((w) => ({
+          ...w,
+          deadline: null,
+          detail: `Discord: ${w.discordUsername || '–'}${w.linkedAt ? ` · verknüpft am ${dateTime(w.linkedAt)}` : ''}`,
+        }))}
+        defaultDays={null}
+        endpoint="/admin/mails/discord-join-reminder"
+        empty="Alle verknüpften Konten sind auf dem Discord-Server (oder werden vom Bot automatisch hinzugefügt)."
+        consequence={() => 'Sie bekommen einen Link, mit dem sie mit einem Klick dem Discord-Server beitreten.'}
+        onSent={(res) => setWaiting((res as { waiting: AdminDiscordJoinWaitingDTO }).waiting.users)}
       />
     </div>
   );

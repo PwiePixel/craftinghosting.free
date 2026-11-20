@@ -989,7 +989,9 @@ return {
     noteConnectNow: 'You are signed in – connect your Discord account now. This also adds you to our Discord server automatically, and your server is set up.',
     results: {
       linked: { ok: true, title: 'Discord connected', text: 'Your Discord account is linked and you are a member of our server.' },
-      linked_not_member: { ok: false, title: 'Linked – but not a member yet', text: 'Your Discord account is linked. Now join our Discord server and click “Check again”.' },
+      linked_not_member: { ok: false, title: 'Linked – but not a member yet', text: 'Your Discord account is linked, but our bot could not add you to our Discord server just now. It tries again automatically – or click “Check again” later.' },
+      joined: { ok: true, title: 'Welcome to our Discord server', text: 'Our bot has added you. Waiting servers are being set up now.' },
+      wrong_account: { ok: false, title: 'Different Discord account', text: 'You are signed in to Discord with a different account than the one linked to your account. Sign in to Discord with the linked account and open the link again.' },
       taken: { ok: false, title: 'This Discord account is already in use', text: 'The Discord account is already linked to another account. Each Discord account can only be used once.' },
       too_new: { ok: false, title: 'Discord account is too new', text: 'To prevent abuse, your Discord account has to exist for a while. Please try again later or contact support.' },
       bot_account: { ok: false, title: 'Bot accounts cannot be linked', text: 'Please connect your personal Discord account.' },

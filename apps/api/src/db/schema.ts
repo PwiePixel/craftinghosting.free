@@ -57,6 +57,15 @@ export const users = sqliteTable(
     discordCustomerRole: integer('discord_customer_role', { mode: 'boolean' }).notNull().default(false),
     discordSyncAt: ts('discord_sync_at'),
     /**
+     * Automatischer Beitritt zum Discord-Server: Refresh-Token von Discord (verschlüsselt) – nur gespeichert, solange
+     * der Beitritt noch aussteht, und gelöscht, sobald er geklappt hat oder die Verknüpfung gelöst wird.
+     */
+    discordJoinToken: text('discord_join_token'),
+    /** Mitgliedschaft auf unserem Discord-Server bestätigt (beigetreten oder schon Mitglied) */
+    discordJoinedAt: ts('discord_joined_at'),
+    /** Letzte Prüfung bzw. letzter Versuch des automatischen Beitritts */
+    discordJoinCheckedAt: ts('discord_join_checked_at'),
+    /**
      * Zweite Stufe bei der Anmeldung (nach dem Code per E-Mail): eigenes Passwort oder Authenticator-App.
      * Passwort nur als scrypt-Hash, TOTP-Schlüssel verschlüsselt (encryptField), Wiederherstellungscodes als Hash.
      */

@@ -68,6 +68,8 @@ export interface DiscordState {
   setupAt: string | null;
   /** Letzter Fehler beim Vergeben der Customer-Rolle (null = zuletzt hat es geklappt) */
   roleError: { at: string; message: string } | null;
+  /** Letzter Fehler beim automatischen Hinzufügen zum Server (null = zuletzt hat es geklappt) */
+  joinError: { at: string; message: string } | null;
   /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
   statusFeedError: { at: string; message: string } | null;
   /** Letzter Fehler beim automatischen Bann im Honeypot-Kanal (null = zuletzt hat es geklappt) */
@@ -86,6 +88,7 @@ const defaultState = (): DiscordState => ({
   commandsAt: null,
   setupAt: null,
   roleError: null,
+  joinError: null,
   statusFeedError: null,
   honeypotError: null,
   gateway: { status: 'off', at: new Date(0).toISOString(), error: null },

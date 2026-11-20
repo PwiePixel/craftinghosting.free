@@ -400,7 +400,8 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     discord: {
       available: discordAvailable,
       required: discordAvailable && s.discord.required,
-      autoJoin: s.discord.autoJoin,
+      // Jede Verbindung über Discord fügt das Konto unserem Server hinzu (der frühere Schalter ist entfallen)
+      autoJoin: true,
       // Registrierung und Anmeldung laufen über Discord, sobald die Anbindung eingerichtet ist
       signup: discordAvailable,
       inviteUrl: s.discord.enabled ? botInviteUrl : null,

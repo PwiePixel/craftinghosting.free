@@ -10,7 +10,7 @@ import { useDict, useLang } from '@/i18n/client';
 import { useForm } from '@/lib/use-form';
 import { VerifyFlow } from './verify-flow';
 
-export function LoginForm({ discord = false, twoFactor, error }: { /** Anmeldung über Discord anbieten */ discord?: boolean; twoFactor?: { method: TwoFactorMethod; ticket: string }; error?: { title: string; text: string } }) {
+export function LoginForm({ discord = false, twoFactor, error }: { /** Anmeldung über Discord anbieten */ discord?: boolean; twoFactor?: { method: TwoFactorMethod; ticket: string }; error?: { ok?: boolean; title: string; text: string } }) {
   const t = useDict().login;
   const lang = useLang();
   const [email, setEmail] = useState('');
@@ -67,7 +67,7 @@ export function LoginForm({ discord = false, twoFactor, error }: { /** Anmeldung
         <p className="mt-2 leading-relaxed text-muted">{discord ? t.discordIntro : t.passwordIntro}</p>
       </div>
       {error && (
-        <Alert tone="warning" title={error.title}>
+        <Alert tone={error.ok ? 'success' : 'warning'} title={error.title}>
           {error.text}
         </Alert>
       )}

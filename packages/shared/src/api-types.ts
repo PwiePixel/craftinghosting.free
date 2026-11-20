@@ -452,6 +452,10 @@ export interface AdminDiscordWaitingDTO {
   users: { userId: string; email: string; servers: string[]; reason: 'discord_not_linked' | 'discord_not_member'; deadline: string | null; lastRemindedAt: string | null }[];
 }
 
+/** Verknüpft, aber nicht auf dem Discord-Server und ohne Erlaubnis für den automatischen Beitritt (Admin → E-Mails) */
+export interface AdminDiscordJoinWaitingDTO {
+  users: { userId: string; email: string; discordUsername: string; linkedAt: string | null; lastRemindedAt: string | null }[];
+}
 /** Konten ohne Panel-Zugang (Admin → E-Mails → Erinnerung „Panel-Zugang einrichten“) */
 export interface AdminPanelWaitingDTO {
   users: { userId: string; email: string; createdAt: string; servers: string[]; deadline: string | null; lastRemindedAt: string | null }[];
@@ -1164,6 +1168,11 @@ export interface AdminDiscordDTO {
   gateway: { status: 'off' | 'connecting' | 'online' | 'error'; at: string; error: string | null };
   /** Letzter Fehler beim Vergeben der Customer-Rolle */
   roleError: { at: string; message: string } | null;
+  /**
+   * Automatischer Beitritt verknüpfter Konten zum Discord-Server: members = bestätigt auf dem Server,
+   * pending = wird automatisch hinzugefügt, needsRelink = muss einmal neu verbinden, unchecked = noch nicht geprüft
+   */
+  join: { members: number; pending: number; needsRelink: number; unchecked: number; error: { at: string; message: string } | null };
   /** Letzter Fehler beim Posten einer Status-Meldung (null = zuletzt hat es geklappt) */
   statusFeedError: { at: string; message: string } | null;
   /** Letzter Fehler beim automatischen Bann im Honeypot-Kanal */
