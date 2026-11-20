@@ -65,6 +65,8 @@ export const users = sqliteTable(
     discordJoinedAt: ts('discord_joined_at'),
     /** Letzte Prüfung bzw. letzter Versuch des automatischen Beitritts */
     discordJoinCheckedAt: ts('discord_join_checked_at'),
+    /** Auf unserem Discord-Server gebannt – kein automatischer Beitritt, keine Einladung */
+    discordJoinBlockedAt: ts('discord_join_blocked_at'),
     /**
      * Zweite Stufe bei der Anmeldung (nach dem Code per E-Mail): eigenes Passwort oder Authenticator-App.
      * Passwort nur als scrypt-Hash, TOTP-Schlüssel verschlüsselt (encryptField), Wiederherstellungscodes als Hash.

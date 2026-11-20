@@ -167,7 +167,7 @@ async function discordJoinWaiting(): Promise<User[]> {
   const rows = await db
     .select()
     .from(users)
-    .where(and(isNotNull(users.discordId), eq(users.status, 'active'), isNull(users.discordJoinedAt), isNull(users.discordJoinToken), isNotNull(users.discordJoinCheckedAt)))
+    .where(and(isNotNull(users.discordId), eq(users.status, 'active'), isNull(users.discordJoinedAt), isNull(users.discordJoinToken), isNotNull(users.discordJoinCheckedAt), isNull(users.discordJoinBlockedAt)))
     .orderBy(users.discordLinkedAt)
     .limit(2000);
   return rows.filter((u) => !isAdmin(u));

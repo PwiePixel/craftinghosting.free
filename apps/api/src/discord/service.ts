@@ -5,7 +5,7 @@
  */
 import { and, asc, eq, exists, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { localePath, snowflakeDate, type AdminDiscordDTO, type DiscordSettings, type DiscordSetupStep, type Locale } from '@chfree/shared';
-import { db, isUniqueViolation } from '../db/client';
+import { affectedRows, db, isUniqueViolation } from '../db/client';
 import { servers, users, type User } from '../db/schema';
 import { env } from '../env';
 import { decryptField, encryptField, signToken, verifySignedToken } from '../lib/crypto';
@@ -154,14 +154,16 @@ export async function exchangeDiscordCode(code: string, before?: (discordUser: D
   // Dem Server beitreten lassen (201 = hinzugefügt, 204 = war schon Mitglied)
   let member = false;
   let retry = false;
+  let banned = false;
   if (scope.split(' ').includes('guilds.join')) {
     const added = await addToGuild(discordUser.id, accessToken, cfg);
     member = added.ok;
     // Klappt es gerade nicht (z. B. fehlt dem Bot eine Berechtigung), versucht es der Job discord-join später erneut
     retry = !added.ok && !added.permanent;
+    banned = !added.ok && !!added.banned;
   }
   if (!member) member = (await fetchDiscordMember(discordUser.id).catch(() => null)) !== null;
-  await rememberJoinState(discordUser.id, member, retry ? refreshToken : null);
+  await rememberJoinState(discordUser.id, member, retry ? refreshToken : null, banned);
   return { ok: true, discordUser, member };
 }
 
@@ -239,7 +241,7 @@ export async function unlinkDiscordAccount(user: User, ip?: string): Promise<voi
   }
   await db
     .update(users)
-    .set({ discordId: null, discordUsername: null, discordLinkedAt: null, discordCustomerRole: false, discordSyncAt: null, discordJoinToken: null, discordJoinedAt: null, discordJoinCheckedAt: null })
+    .set({ discordId: null, discordUsername: null, discordLinkedAt: null, discordCustomerRole: false, discordSyncAt: null, discordJoinToken: null, discordJoinedAt: null, discordJoinCheckedAt: null, discordJoinBlockedAt: null })
     .where(eq(users.id, user.id));
   await audit({ userId: user.id, actor: 'user', action: 'discord.unlinked', message: 'Discord-Verknüpfung gelöst', ip });
 }
@@ -254,7 +256,7 @@ export async function releaseDiscordFor(userId: string): Promise<void> {
 
 /* ------------------------------------------------------------ Automatischer Beitritt */
 
-type JoinResult = { ok: true } | { ok: false; reason: string; /** Neuer Versuch zwecklos (gebannt, Token ungültig) */ permanent: boolean };
+type JoinResult = { ok: true } | { ok: false; reason: string; /** Neuer Versuch zwecklos (gebannt, Token ungültig) */ permanent: boolean; banned?: boolean };
 
 /** Text für den Admin-Bereich, wenn das Hinzufügen scheitert */
 function joinErrorText(err: unknown): string {
@@ -277,8 +279,9 @@ async function addToGuild(discordId: string, accessToken: string, cfg: DiscordCo
   } catch (err) {
     // Am Konto selbst: auf unserem Server gebannt (40007), Token ungültig/zurückgezogen (50025), schon auf 100 Servern (30001)
     const code = err instanceof DiscordApiError ? err.code : null;
-    if (code === 40007) return { ok: false, reason: 'Das Discord-Konto ist auf unserem Server gebannt.', permanent: true };
-    if (code === 50025 || (err instanceof DiscordApiError && err.status === 401)) return { ok: false, reason: 'Discord hat den Zugriff zurückgezogen.', permanent: true };
+    if (code === 40007) return { ok: false, reason: 'Das Discord-Konto ist auf unserem Server gebannt.', permanent: true, banned: true };
+    // Nur 50025 betrifft das Token des Nutzers – ein 401 heißt hier: Discord lehnt das Bot-Token ab (Fehler beim Bot, neuer Versuch)
+    if (code === 50025) return { ok: false, reason: 'Discord hat den Zugriff zurückgezogen.', permanent: true };
     if (code === 30001) return { ok: false, reason: 'Das Discord-Konto ist schon auf der Höchstzahl an Servern.', permanent: false };
     const reason = joinErrorText(err);
     console.warn(`[discord] Konto ${discordId} konnte nicht hinzugefügt werden: ${reason}`);
@@ -291,14 +294,14 @@ async function addToGuild(discordId: string, accessToken: string, cfg: DiscordCo
  * Stand des Beitritts nach einer Verbindung über Discord merken. Das Refresh-Token bleibt nur gespeichert, solange
  * der Beitritt noch aussteht (für neue Versuche des Jobs discord-join) – danach wird es gelöscht.
  */
-async function rememberJoinState(discordId: string, member: boolean, refreshToken: string | null): Promise<void> {
+async function rememberJoinState(discordId: string, member: boolean, refreshToken: string | null, banned = false): Promise<void> {
   const now = new Date();
   await db
     .update(users)
     .set(
       member
-        ? { discordJoinedAt: now, discordJoinToken: null, discordJoinCheckedAt: now }
-        : { discordJoinedAt: null, discordJoinToken: refreshToken ? encryptField(refreshToken) : null, discordJoinCheckedAt: now },
+        ? { discordJoinedAt: now, discordJoinToken: null, discordJoinCheckedAt: now, discordJoinBlockedAt: null }
+        : { discordJoinedAt: null, discordJoinToken: refreshToken ? encryptField(refreshToken) : null, discordJoinCheckedAt: now, ...(banned ? { discordJoinBlockedAt: now } : {}) },
     )
     .where(eq(users.discordId, discordId));
 }
@@ -311,8 +314,9 @@ async function refreshDiscordGrant(refreshToken: string, cfg: DiscordConfig): Pr
     });
     return { accessToken: t.access_token, refreshToken: t.refresh_token ?? null, scope: t.scope ?? '' };
   } catch (err) {
-    // invalid_grant: Erlaubnis zurückgezogen oder Token abgelaufen
-    return err instanceof DiscordApiError && (err.status === 400 || err.status === 401) ? 'revoked' : 'failed';
+    // 400 invalid_grant: Erlaubnis zurückgezogen oder Token abgelaufen. 401 invalid_client (falsches Client-Secret) liegt
+    // bei uns – das Token bleibt dann für einen neuen Versuch erhalten.
+    return err instanceof DiscordApiError && err.status === 400 ? 'revoked' : 'failed';
   }
 }
 
@@ -336,13 +340,14 @@ export async function runDiscordAutoJoin(
   const retryWithToken = new Date(now.getTime() - 30 * 60_000);
   const recheck = new Date(now.getTime() - 12 * 3_600_000);
   const rows = await db
-    .select({ id: users.id, discordId: users.discordId, token: users.discordJoinToken })
+    .select({ id: users.id, discordId: users.discordId, token: users.discordJoinToken, checkedAt: users.discordJoinCheckedAt })
     .from(users)
     .where(
       and(
         isNotNull(users.discordId),
         eq(users.status, 'active'),
         isNull(users.discordJoinedAt),
+        isNull(users.discordJoinBlockedAt),
         or(isNull(users.discordJoinCheckedAt), and(isNotNull(users.discordJoinToken), lt(users.discordJoinCheckedAt, retryWithToken)), lt(users.discordJoinCheckedAt, recheck)),
       ),
     )
@@ -352,51 +357,72 @@ export async function runDiscordAutoJoin(
     const discordId = row.discordId!;
     // Nur ändern, solange das Konto noch mit demselben Discord-Konto verknüpft ist
     const same = and(eq(users.id, row.id), eq(users.discordId, discordId));
+    // Zeile beanspruchen: Läuft gleichzeitig ein zweiter Durchgang (Job und „Jetzt prüfen“, API und Worker), bearbeitet
+    // nur einer das Konto – sonst verbrauchten beide dasselbe Refresh-Token (Discord tauscht es bei jeder Nutzung aus)
+    const claimedAt = new Date();
+    const claim = await db
+      .update(users)
+      .set({ discordJoinCheckedAt: claimedAt })
+      .where(
+        and(
+          same,
+          isNull(users.discordJoinedAt),
+          row.checkedAt ? eq(users.discordJoinCheckedAt, row.checkedAt) : isNull(users.discordJoinCheckedAt),
+          row.token ? eq(users.discordJoinToken, row.token) : isNull(users.discordJoinToken),
+        ),
+      );
+    if (affectedRows(claim) !== 1) continue;
     out.checked++;
+    // Alle weiteren Änderungen nur, solange niemand anderes das Konto inzwischen bearbeitet hat
+    const mine = and(same, eq(users.discordJoinCheckedAt, claimedAt));
     let member: boolean;
     try {
       member = (await fetchDiscordMember(discordId)) !== null;
     } catch {
+      // Mitgliedschaft unbekannt (Discord gestört): alten Stand wiederherstellen – das Konto gilt weiter als „noch nicht
+      // geprüft“ bzw. bleibt, wie es war, und landet nicht fälschlich bei „muss einmal klicken“
       out.failed++;
-      await db.update(users).set({ discordJoinCheckedAt: new Date() }).where(same);
+      await db.update(users).set({ discordJoinCheckedAt: row.checkedAt }).where(mine);
       continue;
     }
     if (member) {
       out.members++;
-      await db.update(users).set({ discordJoinedAt: new Date(), discordJoinToken: null, discordJoinCheckedAt: new Date() }).where(same);
+      await db.update(users).set({ discordJoinedAt: new Date(), discordJoinToken: null }).where(mine);
       await onMember?.(row.id).catch(() => {});
       continue;
     }
     const stored = row.token ? decryptField(row.token) : null;
     if (!stored) {
       out.needsRelink++;
-      await db.update(users).set({ discordJoinToken: null, discordJoinCheckedAt: new Date() }).where(same);
       continue;
     }
     const grant = await refreshDiscordGrant(stored, cfg);
-    if (grant === 'revoked' || (grant !== 'failed' && !grant.scope.split(' ').includes('guilds.join'))) {
-      out.needsRelink++;
-      await db.update(users).set({ discordJoinToken: null, discordJoinCheckedAt: new Date() }).where(same);
-      continue;
-    }
     if (grant === 'failed') {
       out.failed++;
-      await db.update(users).set({ discordJoinCheckedAt: new Date() }).where(same);
+      continue;
+    }
+    if (grant === 'revoked' || !grant.scope.split(' ').includes('guilds.join')) {
+      out.needsRelink++;
+      await db.update(users).set({ discordJoinToken: null }).where(and(mine, eq(users.discordJoinToken, row.token!)));
       continue;
     }
     // Das alte Refresh-Token ist jetzt verbraucht – das neue sofort sichern, bevor das Hinzufügen versucht wird
-    await db.update(users).set({ discordJoinToken: grant.refreshToken ? encryptField(grant.refreshToken) : null, discordJoinCheckedAt: new Date() }).where(same);
+    const fresh = grant.refreshToken ? encryptField(grant.refreshToken) : null;
+    await db.update(users).set({ discordJoinToken: fresh }).where(and(mine, eq(users.discordJoinToken, row.token!)));
     const added = await addToGuild(discordId, grant.accessToken, cfg);
     if (added.ok) {
       out.joined++;
-      await db.update(users).set({ discordJoinedAt: new Date(), discordJoinToken: null }).where(same);
+      await db.update(users).set({ discordJoinedAt: new Date(), discordJoinToken: null }).where(mine);
       await audit({ userId: row.id, actor: 'system', action: 'discord.auto_joined', message: 'Automatisch dem Discord-Server hinzugefügt' });
       await onMember?.(row.id).catch(() => {});
     } else {
       out.failed++;
       if (added.permanent) {
-        out.needsRelink++;
-        await db.update(users).set({ discordJoinToken: null }).where(same);
+        out.needsRelink += added.banned ? 0 : 1;
+        await db
+          .update(users)
+          .set({ discordJoinToken: null, ...(added.banned ? { discordJoinBlockedAt: new Date() } : {}) })
+          .where(mine);
       }
     }
   }
@@ -409,7 +435,7 @@ export async function discordJoinStats(): Promise<AdminDiscordDTO['join']> {
     .select({
       members: sql<number>`sum(case when ${users.discordJoinedAt} is not null then 1 else 0 end)`,
       pending: sql<number>`sum(case when ${users.discordJoinedAt} is null and ${users.discordJoinToken} is not null then 1 else 0 end)`,
-      needsRelink: sql<number>`sum(case when ${users.discordJoinedAt} is null and ${users.discordJoinToken} is null and ${users.discordJoinCheckedAt} is not null then 1 else 0 end)`,
+      needsRelink: sql<number>`sum(case when ${users.discordJoinedAt} is null and ${users.discordJoinToken} is null and ${users.discordJoinCheckedAt} is not null and ${users.discordJoinBlockedAt} is null then 1 else 0 end)`,
       unchecked: sql<number>`sum(case when ${users.discordJoinCheckedAt} is null and ${users.discordJoinedAt} is null then 1 else 0 end)`,
     })
     .from(users)

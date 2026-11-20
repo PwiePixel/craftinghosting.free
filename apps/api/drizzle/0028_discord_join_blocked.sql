@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `discord_join_blocked_at` integer;
