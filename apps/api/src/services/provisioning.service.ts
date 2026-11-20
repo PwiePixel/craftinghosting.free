@@ -156,7 +156,7 @@ export async function linkExistingPanelAccount(user: User, ip?: string): Promise
   if (user.pteroUserId) return true;
   const existing = await pterodactyl().findUserByEmail(user.email);
   if (!existing) return false;
-  await db.update(users).set({ pteroUserId: existing.id, pteroUsername: existing.username }).where(eq(users.id, user.id));
+  await db.update(users).set({ pteroUserId: existing.id, pteroUsername: existing.username, panelDeadlineAt: null }).where(eq(users.id, user.id));
   await audit({ userId: user.id, actor: 'system', action: 'panel.linked', message: `Bestehendes Panel-Konto verknüpft (${existing.username})`, ip });
   return true;
 }
@@ -201,7 +201,7 @@ export async function createPanelAccount(user: User, username: string, password:
       if (!panelUser) throw err;
     }
   }
-  await db.update(users).set({ pteroUserId: panelUser.id, pteroUsername: panelUser.username }).where(eq(users.id, user.id));
+  await db.update(users).set({ pteroUserId: panelUser.id, pteroUsername: panelUser.username, panelDeadlineAt: null }).where(eq(users.id, user.id));
   await audit({
     userId: user.id,
     actor: 'user',

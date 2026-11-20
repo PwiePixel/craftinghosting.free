@@ -2,14 +2,15 @@
 
 /**
  * Admin → E-Mails und Abuse:
- *  – Erinnerung an alle, deren Server noch auf die Discord-Verbindung wartet (mit Frist bis zum Löschen)
+ *  – Erinnerung an ausgewählte Nutzer, deren Server noch auf die Discord-Verbindung wartet (mit Frist bis zum Löschen)
+ *  – Erinnerung an ausgewählte Nutzer ohne Panel-Zugang (mit Frist bis zum Löschen des Kontos)
  *  – Nachricht an ausgewählte Nutzer
  *  – Abuse-Mails von Hand senden und alle Abuse-Mails ansehen
  */
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ChevronDown, Send } from 'lucide-react';
-import type { AdminAbuseDTO, AdminDiscordWaitingDTO } from '@chfree/shared';
+import { Send } from 'lucide-react';
+import type { AdminAbuseDTO, AdminDiscordWaitingDTO, AdminPanelWaitingDTO } from '@chfree/shared';
 import { Labeled, NumberInput, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -23,23 +24,63 @@ function Note({ message }: { message: Message }) {
   return message ? <span className={cn('text-sm', message.ok ? 'text-emerald-300' : 'text-red-300')}>{message.text}</span> : null;
 }
 
-/** Erinnerung „Discord verbinden“ an alle, deren Anfrage nur noch daran hängt */
-export function DiscordReminder({ initial }: { initial: AdminDiscordWaitingDTO }) {
+interface WaitingRow {
+  userId: string;
+  email: string;
+  detail: string;
+  deadline: string | null;
+  lastRemindedAt: string | null;
+}
+
+/**
+ * Erinnerung mit Frist an ausgewählte Nutzer. Vorausgewählt sind alle, die noch keine Erinnerung dieser Art bekommen
+ * haben – so geht eine zweite Runde nicht wieder an alle.
+ */
+function ReminderPanel({
+  rows,
+  defaultDays,
+  endpoint,
+  empty,
+  consequence,
+  onSent,
+}: {
+  rows: WaitingRow[];
+  defaultDays: number;
+  endpoint: string;
+  empty: string;
+  /** Folge nach Ablauf der Frist, für die Rückfrage: „… verliert seine Anfrage“ */
+  consequence: (days: number) => string;
+  onSent: (res: unknown) => void;
+}) {
   const router = useRouter();
-  const [waiting, setWaiting] = useState(initial.users);
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(defaultDays);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<Message>(null);
-  const [open, setOpen] = useState(false);
+  const notReminded = (list: WaitingRow[]) => new Set(list.filter((r) => !r.lastRemindedAt).map((r) => r.userId));
+  const [selected, setSelected] = useState<Set<string>>(() => notReminded(rows));
+  // Nach dem Senden bzw. Neuladen: Auswahl auf die noch vorhandenen Nutzer beschränken
+  const ids = new Set(rows.map((r) => r.userId));
+  const chosen = [...selected].filter((id) => ids.has(id));
+  const remindedCount = rows.length - notReminded(rows).size;
+
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   async function send() {
-    if (!window.confirm(`Erinnerung an ${waiting.length} Nutzer senden? Wer sein Discord-Konto nicht innerhalb von ${days} Tagen verbindet, verliert seine Anfrage.`)) return;
+    if (chosen.length === 0) return;
+    if (!window.confirm(`Erinnerung an ${chosen.length} ${chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden? ${consequence(days)}`)) return;
     setPending(true);
     setMessage(null);
     try {
-      const res = await api<{ sent: number; skipped: number; waiting: AdminDiscordWaitingDTO }>('/admin/mails/discord-reminder', { body: { days } });
-      setWaiting(res.waiting.users);
-      setMessage({ ok: true, text: `${res.sent} Erinnerungen werden versendet${res.skipped ? ` – ${res.skipped} Nutzer wurden heute schon erinnert` : ''}.` });
+      const res = await api<{ sent: number; skipped: number }>(endpoint, { body: { days, userIds: chosen } });
+      onSent(res);
+      setSelected(new Set());
+      setMessage({ ok: true, text: `${res.sent} ${res.sent === 1 ? 'Erinnerung wird' : 'Erinnerungen werden'} versendet${res.skipped ? ` – ${res.skipped} wurden heute schon erinnert` : ''}.` });
       router.refresh();
     } catch (err) {
       setMessage({ ok: false, text: errorText(err) });
@@ -48,47 +89,99 @@ export function DiscordReminder({ initial }: { initial: AdminDiscordWaitingDTO }
     }
   }
 
+  if (rows.length === 0) return <p className="text-sm text-subtle">{empty}</p>;
   return (
-    <div className="space-y-4">
-      <p className="text-sm leading-relaxed text-muted">
-        Schickt allen eine E-Mail, die schon ein Panel-Konto haben, deren Server aber noch auf die Discord-Verbindung wartet: „Verbinde dein Discord-Konto, damit dein Server
-        erstellt wird.“ Die Mail nennt das Datum, bis zu dem das passieren muss – danach löscht das System die Anfrage automatisch und der Nutzer muss den Server neu
-        beantragen. Eine bereits laufende Frist verlängert sich durch eine weitere Erinnerung nicht.
-      </p>
+    <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <Labeled label="Frist in Tagen" className="w-32">
           <NumberInput value={days} min={1} max={30} onChange={setDays} className="max-w-none" />
         </Labeled>
-        <Button icon={<Send />} loading={pending} disabled={waiting.length === 0} onClick={() => void send()}>
-          Erinnerung an {waiting.length} {waiting.length === 1 ? 'Nutzer' : 'Nutzer'} senden
+        <Button icon={<Send />} loading={pending} disabled={chosen.length === 0} onClick={() => void send()}>
+          Erinnerung an {chosen.length} {chosen.length === 1 ? 'Nutzer' : 'Nutzer'} senden
         </Button>
         <Note message={message} />
       </div>
-      {waiting.length === 0 ? (
-        <p className="text-sm text-subtle">Aktuell wartet niemand auf die Discord-Verbindung.</p>
-      ) : (
-        <div>
-          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="inline-flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300">
-            <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} aria-hidden />
-            {open ? 'Liste ausblenden' : 'Wartende anzeigen'}
-          </button>
-          {open && (
-            <ul className="mt-3 divide-y divide-line rounded-lg border border-line text-sm">
-              {waiting.map((w) => (
-                <li key={w.userId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2">
-                  <span className="min-w-0">
-                    <span className="text-gray-100">{w.email}</span>
-                    <span className="block text-[12px] text-subtle">
-                      {w.servers.join(', ')} · {w.reason === 'discord_not_member' ? 'verknüpft, aber kein Mitglied' : 'Discord nicht verbunden'}
-                    </span>
-                  </span>
-                  <span className={cn('shrink-0 text-[13px]', w.deadline ? 'text-amber-200' : 'text-subtle')}>{w.deadline ? `Frist bis ${dateTime(w.deadline)}` : 'noch nicht erinnert'}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+        <span className="text-subtle">
+          {chosen.length} von {rows.length} ausgewählt · {remindedCount} schon erinnert
+        </span>
+        <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => setSelected(new Set(rows.map((r) => r.userId)))}>
+          Alle
+        </button>
+        <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => setSelected(notReminded(rows))}>
+          Nur noch nicht erinnerte
+        </button>
+        <button type="button" className="text-blue-400 hover:text-blue-300" onClick={() => setSelected(new Set())}>
+          Keine
+        </button>
+      </div>
+      <ul className="max-h-[420px] divide-y divide-line overflow-y-auto rounded-lg border border-line text-sm">
+        {rows.map((r) => (
+          <li key={r.userId}>
+            <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-white/[0.03]">
+              <input type="checkbox" className="size-4 shrink-0 accent-blue-500" checked={selected.has(r.userId)} onChange={() => toggle(r.userId)} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-gray-100">{r.email}</span>
+                <span className="block text-[12px] text-subtle">{r.detail}</span>
+              </span>
+              <span className="shrink-0 text-right text-[12px] leading-snug">
+                <span className={cn('block', r.lastRemindedAt ? 'text-gray-300' : 'text-subtle')}>{r.lastRemindedAt ? `erinnert am ${dateTime(r.lastRemindedAt)}` : 'noch nicht erinnert'}</span>
+                {r.deadline && <span className="block text-amber-200">Frist bis {dateTime(r.deadline)}</span>}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Erinnerung „Discord verbinden“ an ausgewählte Nutzer, deren Anfrage nur noch daran hängt */
+export function DiscordReminder({ initial }: { initial: AdminDiscordWaitingDTO }) {
+  const [waiting, setWaiting] = useState(initial.users);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-muted">
+        E-Mail an die ausgewählten Nutzer, die schon ein Panel-Konto haben, deren Server aber noch auf die Discord-Verbindung wartet: „Verbinde dein Discord-Konto, damit dein
+        Server erstellt wird.“ Die Mail nennt das Datum, bis zu dem das passieren muss – danach löscht das System die Anfrage automatisch und der Nutzer muss den Server neu
+        beantragen. Eine bereits laufende Frist verlängert sich durch eine weitere Erinnerung nicht.
+      </p>
+      <ReminderPanel
+        rows={waiting.map((w) => ({
+          ...w,
+          detail: `${w.servers.join(', ')} · ${w.reason === 'discord_not_member' ? 'verknüpft, aber kein Mitglied' : 'Discord nicht verbunden'}`,
+        }))}
+        defaultDays={7}
+        endpoint="/admin/mails/discord-reminder"
+        empty="Aktuell wartet niemand auf die Discord-Verbindung."
+        consequence={(days) => `Wer sein Discord-Konto nicht innerhalb von ${days} Tagen verbindet, verliert seine Anfrage.`}
+        onSent={(res) => setWaiting((res as { waiting: AdminDiscordWaitingDTO }).waiting.users)}
+      />
+    </div>
+  );
+}
+
+/** Erinnerung „Panel-Zugang einrichten“ – nach Ablauf der Frist wird das Konto gelöscht */
+export function PanelReminder({ initial }: { initial: AdminPanelWaitingDTO }) {
+  const [waiting, setWaiting] = useState(initial.users);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-muted">
+        E-Mail an die ausgewählten Nutzer, die ihr Konto bestätigt, aber noch keinen Panel-Zugang eingerichtet haben: „Richte deinen Panel-Zugang ein – sonst wird dein Konto
+        gelöscht.“ Die Mail nennt das Datum. Ist bis dahin kein Panel-Zugang eingerichtet, löscht das System das Konto samt offener Anfragen automatisch (Admins und
+        Partner-Konten sind ausgenommen). Eine bereits laufende Frist verlängert sich durch eine weitere Erinnerung nicht.
+      </p>
+      <ReminderPanel
+        rows={waiting.map((w) => ({
+          ...w,
+          detail: `registriert am ${dateTime(w.createdAt)}${w.servers.length ? ` · wartet: ${w.servers.join(', ')}` : ' · noch keine Server-Anfrage'}`,
+        }))}
+        defaultDays={3}
+        endpoint="/admin/mails/panel-reminder"
+        empty="Alle bestätigten Konten haben ihren Panel-Zugang eingerichtet."
+        consequence={(days) => `Wer seinen Panel-Zugang nicht innerhalb von ${days} Tagen einrichtet, dessen Konto wird gelöscht.`}
+        onSent={(res) => setWaiting((res as { waiting: AdminPanelWaitingDTO }).waiting.users)}
+      />
     </div>
   );
 }

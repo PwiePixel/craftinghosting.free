@@ -1,7 +1,7 @@
 import { clearPanelWebLogin, getPanelWebLogin, notePanelWebCheck, panelWebLoginStatus, savePanelWebLogin } from '../services/panel-web.store';
 import { testPanelWebLogin } from '../pterodactyl/web-transfer';
 import { adminUpgradeServer, cancelServerTransfer, checkServerTransfers, upgradeOptions } from '../services/admin-upgrade.service';
-import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders, setAbuseSource, setServerAbuseSource } from '../services/admin-mail.service';
+import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previewAbuse, sendAbuseMail, sendAdminMessage, sendDiscordReminders, listPanelWaiting, sendPanelReminders, setAbuseSource, setServerAbuseSource } from '../services/admin-mail.service';
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -64,10 +64,19 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /** Accounts, deren Server noch auf die Discord-Verbindung wartet */
   app.get('/admin/mails/discord-waiting', async () => listDiscordWaiting());
-  /** Erinnerung an alle Wartenden – setzt die Frist, nach der die Anfrage gelöscht wird */
+  /** Erinnerung an die ausgewählten Wartenden (ohne Auswahl: alle) – setzt die Frist, nach der die Anfrage gelöscht wird */
+  const reminderBody = (defaultDays: number) =>
+    z.object({ days: z.number().int().min(1).max(30).default(defaultDays), userIds: z.array(z.string().uuid()).min(1).max(2000).optional() });
   app.post('/admin/mails/discord-reminder', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
-    const { days } = z.object({ days: z.number().int().min(1).max(30).default(7) }).parse(request.body ?? {});
-    return { ...(await sendDiscordReminders(currentUser(request), days, request.ip)), waiting: await listDiscordWaiting() };
+    const { days, userIds } = reminderBody(7).parse(request.body ?? {});
+    return { ...(await sendDiscordReminders(currentUser(request), days, request.ip, userIds)), waiting: await listDiscordWaiting() };
+  });
+  /** Konten ohne Panel-Zugang */
+  app.get('/admin/mails/panel-waiting', async () => listPanelWaiting());
+  /** Erinnerung „Panel-Zugang einrichten“ – nach Ablauf der Frist wird das Konto gelöscht */
+  app.post('/admin/mails/panel-reminder', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } } }, async (request) => {
+    const { days, userIds } = reminderBody(3).parse(request.body ?? {});
+    return { ...(await sendPanelReminders(currentUser(request), days, userIds, request.ip)), waiting: await listPanelWaiting() };
   });
   /** Nachricht an ausgewählte Nutzer */
   const localizedMail = (max: number) => z.object({ de: z.string().max(max).default(''), en: z.string().max(max).default('') });

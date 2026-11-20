@@ -23,6 +23,8 @@ export const users = sqliteTable(
     status: text('status', { enum: ['active', 'locked'] }).notNull().default('active'),
     /** Verwarnungs-System: Auszeit – bis dahin sind alle Dienste des Nutzers offline (null = keine) */
     suspendedUntil: ts('suspended_until'),
+    /** Frist aus der Erinnerung „Panel-Zugang einrichten“: Ist bis dahin kein Panel-Konto eingerichtet, wird das Konto gelöscht */
+    panelDeadlineAt: ts('panel_deadline_at'),
     /** Abweichende Grenzen und freigeschaltete Pakete (Admin → Nutzer → Grenzen) */
     limitOverrides: text('limit_overrides', { mode: 'json' }).$type<UserLimitOverrides | null>(),
     /** Verwarnungs-System: dauerhaft gesperrt seit (null = nicht gebannt) und wann die Server gelöscht werden */

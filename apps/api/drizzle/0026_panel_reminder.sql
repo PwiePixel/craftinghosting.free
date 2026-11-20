@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `panel_deadline_at` integer;

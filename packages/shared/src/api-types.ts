@@ -449,7 +449,12 @@ export interface AdminAuditDTO {
 
 /** Accounts, deren Server noch auf die Discord-Verbindung wartet (Admin → E-Mails) */
 export interface AdminDiscordWaitingDTO {
-  users: { userId: string; email: string; servers: string[]; reason: 'discord_not_linked' | 'discord_not_member'; deadline: string | null }[];
+  users: { userId: string; email: string; servers: string[]; reason: 'discord_not_linked' | 'discord_not_member'; deadline: string | null; lastRemindedAt: string | null }[];
+}
+
+/** Konten ohne Panel-Zugang (Admin → E-Mails → Erinnerung „Panel-Zugang einrichten“) */
+export interface AdminPanelWaitingDTO {
+  users: { userId: string; email: string; createdAt: string; servers: string[]; deadline: string | null; lastRemindedAt: string | null }[];
 }
 
 /** Abuse-Bereich: versendete Abuse-Mails (von Hand und automatisch) und die Gründe für neue */

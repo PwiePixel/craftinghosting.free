@@ -7,10 +7,12 @@
  * die E-Mail verschickt der Worker – Fehler stehen im Reiter „E-Mails“.
  */
 import { identityConfirmedSql } from './identity';
-import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from 'drizzle-orm';
-import { formatDateTime, freeHostingConfig, type WarningSanction, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type Locale, type Localized } from '@chfree/shared';
+import { and, desc, eq, inArray, isNotNull, isNull, like, lt, ne, notExists, or, sql } from 'drizzle-orm';
+import { formatDateTime, freeHostingConfig, type WarningSanction, type AdminAbuseDTO, type AdminDiscordWaitingDTO, type AdminPanelWaitingDTO, type Locale, type Localized } from '@chfree/shared';
 import { affectedRows, db } from '../db/client';
-import { notifications, servers, users, type User } from '../db/schema';
+import { notifications, partners, servers, users, type User } from '../db/schema';
+import { isAdmin } from '../plugins/auth';
+import { deleteAccount } from './account.service';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
 import { mapLimit } from '../jobs/types';
@@ -52,9 +54,25 @@ async function discordWaiting(): Promise<Waiting[]> {
   return out.sort((a, b) => a.user.email.localeCompare(b.user.email));
 }
 
+/** Wann jeder dieser Nutzer zuletzt eine Erinnerung dieser Art bekommen hat */
+async function lastReminders(type: string, userIds: string[]): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  if (userIds.length === 0) return out;
+  const rows = await db
+    .select({ userId: notifications.userId, at: sql<number>`max(${notifications.createdAt})` })
+    .from(notifications)
+    .where(and(eq(notifications.type, type), inArray(notifications.userId, userIds)))
+    .groupBy(notifications.userId);
+  for (const r of rows) if (r.at) out.set(r.userId, new Date(Number(r.at)));
+  return out;
+}
+
 export async function listDiscordWaiting(): Promise<AdminDiscordWaitingDTO> {
+  const waiting = await discordWaiting();
+  const last = await lastReminders('admin.discord_reminder', waiting.map((w) => w.user.id));
   return {
-    users: (await discordWaiting()).map((w) => ({
+    users: waiting.map((w) => ({
+      lastRemindedAt: last.get(w.user.id)?.toISOString() ?? null,
       userId: w.user.id,
       email: w.user.email,
       servers: w.servers.map((s) => s.name),
@@ -70,8 +88,9 @@ export async function listDiscordWaiting(): Promise<AdminDiscordWaitingDTO> {
  * Tagen verbunden, löscht das System die Anfrage. Eine schon laufende Frist bleibt bestehen (die Mail nennt das Datum).
  * Je Account höchstens eine Erinnerung pro Tag.
  */
-export async function sendDiscordReminders(admin: User, days: number, ip?: string): Promise<{ sent: number; skipped: number }> {
-  const waiting = await discordWaiting();
+export async function sendDiscordReminders(admin: User, days: number, ip?: string, userIds?: string[]): Promise<{ sent: number; skipped: number }> {
+  // Nur die ausgewählten Nutzer (ohne Auswahl: alle Wartenden)
+  const waiting = (await discordWaiting()).filter((w) => !userIds || userIds.includes(w.user.id));
   const now = new Date();
   let sent = 0;
   for (const w of waiting) {
@@ -132,6 +151,108 @@ export async function expireDiscordWaiting(now = new Date()): Promise<number> {
       dedupeKey: `request-expired:${s.id}`,
       email: true,
     });
+  }
+  return deleted;
+}
+
+/* ------------------------------------------------------------ Erinnerung: Panel-Zugang einrichten */
+
+/**
+ * Konten, die bestätigt sind (Discord verknüpft oder E-Mail bestätigt), aber noch keinen Panel-Zugang eingerichtet haben.
+ * Ausgenommen: Admins, Partner-Konten und gesperrte Konten.
+ */
+async function panelWaiting(): Promise<{ user: User; servers: string[] }[]> {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(and(isNull(users.pteroUserId), eq(users.status, 'active'), identityConfirmedSql(), notExists(db.select({ id: partners.id }).from(partners).where(eq(partners.userId, users.id)))))
+    .orderBy(users.createdAt)
+    .limit(2000);
+  const list = rows.filter((u) => !isAdmin(u));
+  const requested = list.length
+    ? await db
+        .select({ userId: servers.userId, name: servers.name })
+        .from(servers)
+        .where(and(inArray(servers.userId, list.map((u) => u.id)), inArray(servers.status, ['pending', 'waitlist'])))
+    : [];
+  return list.map((user) => ({ user, servers: requested.filter((r) => r.userId === user.id).map((r) => r.name) }));
+}
+
+export async function listPanelWaiting(): Promise<AdminPanelWaitingDTO> {
+  const waiting = await panelWaiting();
+  const last = await lastReminders('admin.panel_reminder', waiting.map((w) => w.user.id));
+  return {
+    users: waiting.map((w) => ({
+      userId: w.user.id,
+      email: w.user.email,
+      createdAt: w.user.createdAt.toISOString(),
+      servers: w.servers,
+      deadline: w.user.panelDeadlineAt?.toISOString() ?? null,
+      lastRemindedAt: last.get(w.user.id)?.toISOString() ?? null,
+    })),
+  };
+}
+
+/**
+ * Erinnerung „Richte deinen Panel-Zugang ein“ an die ausgewählten Konten. Setzt die Frist: Ist bis dahin kein
+ * Panel-Konto eingerichtet, löscht das System das Konto (Job cleanup). Eine schon laufende Frist bleibt bestehen.
+ * Je Konto höchstens eine Erinnerung pro Tag.
+ */
+export async function sendPanelReminders(admin: User, days: number, userIds: string[] | undefined, ip?: string): Promise<{ sent: number; skipped: number }> {
+  const waiting = (await panelWaiting()).filter((w) => !userIds || userIds.includes(w.user.id));
+  const now = new Date();
+  let sent = 0;
+  for (const { user, servers: requested } of waiting) {
+    const deadline = user.panelDeadlineAt && user.panelDeadlineAt > now ? user.panelDeadlineAt : new Date(now.getTime() + days * DAY_MS);
+    await db.update(users).set({ panelDeadlineAt: deadline }).where(and(eq(users.id, user.id), isNull(users.pteroUserId)));
+    const named = requested.length ? requested.map((n) => `„${n}“`).join(', ') : null;
+    const namedEn = requested.length ? requested.map((n) => `“${n}”`).join(', ') : null;
+    const created = await notify({
+      userId: user.id,
+      type: 'admin.panel_reminder',
+      title: L('Richte deinen Panel-Zugang ein – sonst wird dein Konto gelöscht', 'Set up your panel access – otherwise your account will be deleted'),
+      body: (l) =>
+        l === 'en'
+          ? `You created an account on CraftingHosting.free but have not set up your panel access yet.${namedEn ? ` Your server ${namedEn} is waiting for it.` : ''}
+Sign in and choose a panel password under “My servers” – it only takes a minute, and your server is created right after.
+If this does not happen by ${date(deadline, 'en')}, your account will be deleted automatically. You can register again at any time.`
+          : `Du hast ein Konto bei CraftingHosting.free angelegt, deinen Panel-Zugang aber noch nicht eingerichtet.${named ? ` Darauf wartet dein Server ${named}.` : ''}
+Melde dich an und lege unter „Meine Server“ dein Panel-Passwort fest – das dauert eine Minute, danach wird dein Server sofort erstellt.
+Passiert das nicht bis zum ${date(deadline, 'de')}, wird dein Konto automatisch gelöscht. Du kannst dich jederzeit neu registrieren.`,
+      dedupeKey: `panel-reminder:${user.id}:${now.toISOString().slice(0, 10)}`,
+      email: true,
+    });
+    if (created) sent++;
+  }
+  await audit({ actor: 'admin', action: 'admin.panel_reminder', message: `Erinnerung „Panel-Zugang einrichten“ an ${sent} Nutzer geschickt (Frist ${days} Tage; ${waiting.length - sent} heute schon erinnert) (durch ${admin.email})`, ip });
+  return { sent, skipped: waiting.length - sent };
+}
+
+/** Job: Konten löschen, deren Frist für den Panel-Zugang abgelaufen ist und die ihn weiterhin nicht haben */
+export async function expirePanelWaiting(now = new Date()): Promise<number> {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(and(isNotNull(users.panelDeadlineAt), lt(users.panelDeadlineAt, now), isNull(users.pteroUserId), eq(users.status, 'active')))
+    .limit(200);
+  let deleted = 0;
+  for (const user of rows) {
+    if (isAdmin(user)) continue;
+    const [partner] = await db.select({ id: partners.id }).from(partners).where(eq(partners.userId, user.id)).limit(1);
+    if (partner) continue;
+    // Sicherheitshalber: kein Konto löschen, dem ein im Panel angelegter Server gehört
+    const [panelServer] = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.userId, user.id), isNotNull(servers.pteroServerId), ne(servers.status, 'deleted'))).limit(1);
+    if (panelServer) continue;
+    // Erneut prüfen: Hat das Konto gerade eben doch noch den Panel-Zugang eingerichtet?
+    const [fresh] = await db.select({ ptero: users.pteroUserId, deadline: users.panelDeadlineAt }).from(users).where(eq(users.id, user.id)).limit(1);
+    if (!fresh || fresh.ptero !== null || !fresh.deadline || fresh.deadline >= now) continue;
+    try {
+      await deleteAccount(user, {});
+      deleted++;
+      await audit({ actor: 'system', action: 'account.panel_deadline_expired', message: `Konto ${user.email} gelöscht: Panel-Zugang trotz Erinnerung nicht eingerichtet` });
+    } catch {
+      // z. B. offener Abuse-Fall – das Konto bleibt dann bestehen
+    }
   }
   return deleted;
 }

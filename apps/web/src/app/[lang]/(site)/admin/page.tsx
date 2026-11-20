@@ -13,6 +13,7 @@ import {
   type AdminPartnerDTO,
   type AdminDiscordDTO,
   type AdminDiscordWaitingDTO,
+  type AdminPanelWaitingDTO,
   type PendingReason,
   type AdminMailDTO,
   type AdminOverviewDTO,
@@ -36,7 +37,7 @@ import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
 import { ChatAdmin } from '@/components/admin/admin-chat';
-import { AbuseManager, AdminMessageForm, DiscordReminder } from '@/components/admin/admin-mails';
+import { AbuseManager, AdminMessageForm, DiscordReminder, PanelReminder } from '@/components/admin/admin-mails';
 import { site } from '@/lib/site';
 import { PartnerManager } from '@/components/admin/admin-partners';
 import { DiscordAdmin } from '@/components/admin/admin-discord';
@@ -566,9 +567,28 @@ function LogsTab({ list, fmt }: { list: AdminAuditDTO[]; fmt: ReturnType<typeof 
   );
 }
 
-function MailsTab({ list, me, o, fmt, waiting }: { list: AdminMailDTO[]; me: string; o: AdminOverviewDTO | null; fmt: ReturnType<typeof formatters>; waiting: AdminDiscordWaitingDTO | null }) {
+function MailsTab({
+  list,
+  me,
+  o,
+  fmt,
+  waiting,
+  panelWaiting,
+}: {
+  list: AdminMailDTO[];
+  me: string;
+  o: AdminOverviewDTO | null;
+  fmt: ReturnType<typeof formatters>;
+  waiting: AdminDiscordWaitingDTO | null;
+  panelWaiting: AdminPanelWaitingDTO | null;
+}) {
   return (
     <div className="space-y-5">
+      {panelWaiting && (
+        <Card title="Erinnerung: Panel-Zugang einrichten">
+          <PanelReminder initial={panelWaiting} />
+        </Card>
+      )}
       {waiting && (
         <Card title="Erinnerung: Discord-Konto verbinden">
           <DiscordReminder initial={waiting} />
@@ -858,8 +878,21 @@ export default async function AdminPage({ params, searchParams }: Props) {
   if (tab === 'mails') {
     const res = await apiServer<{ mails: AdminMailDTO[] }>('/admin/mails', lang);
     failed = !res.ok;
-    const waiting = await apiServer<AdminDiscordWaitingDTO>('/admin/mails/discord-waiting', lang);
-    if (res.ok) content = <MailsTab list={res.data.mails} me={user.email} o={overview?.ok ? overview.data.overview : null} fmt={fmt} waiting={waiting.ok ? waiting.data : null} />;
+    const [waiting, panelWaiting] = await Promise.all([
+      apiServer<AdminDiscordWaitingDTO>('/admin/mails/discord-waiting', lang),
+      apiServer<AdminPanelWaitingDTO>('/admin/mails/panel-waiting', lang),
+    ]);
+    if (res.ok)
+      content = (
+        <MailsTab
+          list={res.data.mails}
+          me={user.email}
+          o={overview?.ok ? overview.data.overview : null}
+          fmt={fmt}
+          waiting={waiting.ok ? waiting.data : null}
+          panelWaiting={panelWaiting.ok ? panelWaiting.data : null}
+        />
+      );
   }
   if (tab === 'partners') {
     const [res, settingsRes] = await Promise.all([apiServer<{ partners: AdminPartnerDTO[] }>('/admin/partners', lang), apiServer<{ settings: SiteSettings }>('/admin/settings', lang)]);
