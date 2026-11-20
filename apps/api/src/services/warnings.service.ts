@@ -200,7 +200,7 @@ async function startTimeout(user: User, now: Date): Promise<Date> {
 
 async function startBan(user: User, now: Date): Promise<Date> {
   const deleteAt = new Date(now.getTime() + warningRules.banDeleteDays * DAY);
-  await db.update(users).set({ status: 'locked', bannedAt: now, banDeleteAt: deleteAt, suspendedUntil: null }).where(eq(users.id, user.id));
+  await db.update(users).set({ status: 'locked', bannedAt: now, banDeleteAt: deleteAt, suspendedUntil: null, panelDeadlineAt: null }).where(eq(users.id, user.id));
   await destroyAllSessions(user.id);
   const identities = [...emailHashes(user.email).map((hash) => ({ kind: 'email' as const, hash })), ...(user.discordId ? [{ kind: 'discord' as const, hash: discordHash(user.discordId) }] : [])];
   for (const identity of identities) await db.insert(bannedIdentities).values({ id: uuid(), ...identity, userId: user.id }).onConflictDoNothing();
@@ -350,7 +350,7 @@ export async function liftBan(admin: User, userId: string, ip?: string): Promise
   if (!user || !user.bannedAt) throw Errors.notFound(L('Dieses Konto ist nicht gebannt.', 'This account is not banned.'));
   const now = new Date();
   await restoreReactivationWindow({ userId }, now);
-  await db.update(users).set({ status: 'active', bannedAt: null, banDeleteAt: null }).where(eq(users.id, userId));
+  await db.update(users).set({ status: 'active', bannedAt: null, banDeleteAt: null, panelDeadlineAt: null }).where(eq(users.id, userId));
   // Jedes gebannte Konto hat eigene Einträge (auch bei gemeinsamem Fingerabdruck) – hier gehen nur die dieses Kontos
   await db.delete(bannedIdentities).where(eq(bannedIdentities.userId, userId));
   const n = await releaseServers(userId, 'ban', now);

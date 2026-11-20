@@ -784,14 +784,14 @@ export async function userAction(admin: User, id: string, action: UserAction, ip
   const log = (act: string, message: string) => audit({ userId: user.id, actor: 'admin', action: act, message: `${message} (durch ${admin.email})`, ip });
   switch (action) {
     case 'lock':
-      await db.update(users).set({ status: 'locked' }).where(eq(users.id, id));
+      await db.update(users).set({ status: 'locked', panelDeadlineAt: null }).where(eq(users.id, id));
       await destroyAllSessions(id);
       await log('admin.user_locked', `Konto ${user.email} gesperrt`);
       return;
     case 'unlock':
       // Ein Ban (Verwarnungs-System) wird vollständig aufgehoben: Sperrliste, Server, Löschfrist
       if (user.bannedAt) return liftBan(admin, id, ip);
-      await db.update(users).set({ status: 'active' }).where(eq(users.id, id));
+      await db.update(users).set({ status: 'active', panelDeadlineAt: null }).where(eq(users.id, id));
       await log('admin.user_unlocked', `Konto ${user.email} entsperrt`);
       return;
     case 'make-admin':

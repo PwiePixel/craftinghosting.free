@@ -22,7 +22,7 @@ import { serverAction } from './admin.service';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
 import { pendingReasonFor } from './server.service';
-import { getSettings, resolveBrand } from './settings.service';
+import { deletionsAllowed, getSettings, resolveBrand } from './settings.service';
 import { issueWarning, listWarnings, nextWarningEffect, restoreReactivationWindow, warningParagraph } from './warnings.service';
 
 const DAY_MS = 86_400_000;
@@ -165,7 +165,7 @@ async function panelWaiting(): Promise<{ user: User; servers: string[] }[]> {
   const rows = await db
     .select()
     .from(users)
-    .where(and(isNull(users.pteroUserId), eq(users.status, 'active'), identityConfirmedSql(), notExists(db.select({ id: partners.id }).from(partners).where(eq(partners.userId, users.id)))))
+    .where(and(isNull(users.pteroUserId), eq(users.status, 'active'), eq(users.partner, false), identityConfirmedSql(), notExists(db.select({ id: partners.id }).from(partners).where(eq(partners.userId, users.id)))))
     .orderBy(users.createdAt)
     .limit(2000);
   const list = rows.filter((u) => !isAdmin(u));
@@ -214,10 +214,10 @@ export async function sendPanelReminders(admin: User, days: number, userIds: str
       body: (l) =>
         l === 'en'
           ? `You created an account on CraftingHosting.free but have not set up your panel access yet.${namedEn ? ` Your server ${namedEn} is waiting for it.` : ''}
-Sign in and choose a panel password under “My servers” – it only takes a minute, and your server is created right after.
+Sign in and choose a panel password under “My servers” – it only takes a minute.${namedEn ? ' Your server is set up right after.' : ''}
 If this does not happen by ${date(deadline, 'en')}, your account will be deleted automatically. You can register again at any time.`
           : `Du hast ein Konto bei CraftingHosting.free angelegt, deinen Panel-Zugang aber noch nicht eingerichtet.${named ? ` Darauf wartet dein Server ${named}.` : ''}
-Melde dich an und lege unter „Meine Server“ dein Panel-Passwort fest – das dauert eine Minute, danach wird dein Server sofort erstellt.
+Melde dich an und lege unter „Meine Server“ dein Panel-Passwort fest – das dauert eine Minute.${named ? ' Danach wird dein Server eingerichtet.' : ''}
 Passiert das nicht bis zum ${date(deadline, 'de')}, wird dein Konto automatisch gelöscht. Du kannst dich jederzeit neu registrieren.`,
       dedupeKey: `panel-reminder:${user.id}:${now.toISOString().slice(0, 10)}`,
       email: true,
@@ -230,6 +230,8 @@ Passiert das nicht bis zum ${date(deadline, 'de')}, wird dein Konto automatisch 
 
 /** Job: Konten löschen, deren Frist für den Panel-Zugang abgelaufen ist und die ihn weiterhin nicht haben */
 export async function expirePanelWaiting(now = new Date()): Promise<number> {
+  // Während einer Wartung (und 24 h danach) lässt sich der Panel-Zugang nicht einrichten – dann nichts löschen
+  if (!(await deletionsAllowed(now))) return 0;
   const rows = await db
     .select()
     .from(users)
@@ -237,7 +239,7 @@ export async function expirePanelWaiting(now = new Date()): Promise<number> {
     .limit(200);
   let deleted = 0;
   for (const user of rows) {
-    if (isAdmin(user)) continue;
+    if (isAdmin(user) || user.partner) continue;
     const [partner] = await db.select({ id: partners.id }).from(partners).where(eq(partners.userId, user.id)).limit(1);
     if (partner) continue;
     // Sicherheitshalber: kein Konto löschen, dem ein im Panel angelegter Server gehört
@@ -247,9 +249,8 @@ export async function expirePanelWaiting(now = new Date()): Promise<number> {
     const [fresh] = await db.select({ ptero: users.pteroUserId, deadline: users.panelDeadlineAt }).from(users).where(eq(users.id, user.id)).limit(1);
     if (!fresh || fresh.ptero !== null || !fresh.deadline || fresh.deadline >= now) continue;
     try {
-      await deleteAccount(user, {});
+      await deleteAccount(user, { system: 'Panel-Zugang trotz Erinnerung nicht bis zur Frist eingerichtet' });
       deleted++;
-      await audit({ actor: 'system', action: 'account.panel_deadline_expired', message: `Konto ${user.email} gelöscht: Panel-Zugang trotz Erinnerung nicht eingerichtet` });
     } catch {
       // z. B. offener Abuse-Fall – das Konto bleibt dann bestehen
     }

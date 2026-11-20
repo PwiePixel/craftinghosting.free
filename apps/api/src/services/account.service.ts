@@ -13,7 +13,7 @@ import { hardDeleteServer } from './server.service';
 import { invalidatePublicSite } from './settings.service';
 import { carryWarnings } from './warnings.service';
 
-export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admin?: Pick<User, 'email'> }, ip?: string): Promise<{ servers: number }> {
+export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admin?: Pick<User, 'email'>; /** automatische Löschung mit Grund */ system?: string }, ip?: string): Promise<{ servers: number }> {
   const owned = await db.select().from(servers).where(eq(servers.userId, user.id));
   // Für den Übertrag der Verwarnungen (siehe unten): Identität lesen, bevor die Discord-Verknüpfung gelöst wird
   const [full] = await db.select({ id: users.id, email: users.email, discordId: users.discordId }).from(users).where(eq(users.id, user.id)).limit(1);
@@ -26,11 +26,13 @@ export async function deleteAccount(user: Pick<User, 'id' | 'email'>, by: { admi
   }
   await audit({
     userId: user.id,
-    actor: by.admin ? 'admin' : 'user',
+    actor: by.admin ? 'admin' : by.system ? 'system' : 'user',
     action: 'account.deleted',
     message: by.admin
       ? `Konto ${user.email} gelöscht (${deletedServers} ${deletedServers === 1 ? 'Server' : 'Server'}) (durch ${by.admin.email})`
-      : 'Account gelöscht',
+      : by.system
+        ? `Konto ${user.email} automatisch gelöscht (${deletedServers} Server): ${by.system}`
+        : 'Account gelöscht',
     ip,
   });
   // Verwarnungs-System: Aktive Verwarnungen bleiben als Fingerabdruck bestehen und gehen auf ein neues Konto derselben
