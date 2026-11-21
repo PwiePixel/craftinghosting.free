@@ -2,439 +2,174 @@
  * Partner-Dokumentation (/docs/partner-api) – wird nur an Partner-Konten und Admins ausgeliefert.
  * Platzhalter: {api} = Basis-Adresse der Partner-API.
  */
-import type { DocPage } from "./types";
+import type { DocPage } from './types';
 
 export const partnerDoc: DocPage = {
-  slug: "partner-api",
-  title: { de: "Partner-API", en: "Partner API" },
-  summary: {
-    de: "Unser Hosting in dein Programm einbinden: Server für deine Nutzer erstellen und steuern – zum Beispiel aus einem Minecraft-Launcher.",
-    en: "Integrate our hosting into your software: create and control servers for your users – for example from a Minecraft launcher.",
-  },
+  slug: 'partner-api',
+  title: { de: 'Partner-API', en: 'Partner API' },
+  summary: { de: 'Unser Hosting in dein Programm einbinden: Server für deine Nutzer erstellen und steuern – zum Beispiel aus einem Minecraft-Launcher.', en: 'Integrate our hosting into your software: create and control servers for your users – for example from a Minecraft launcher.' },
   sections: [
     {
-      heading: { de: "Zugang", en: "Access" },
+      heading: { de: 'Zugang', en: 'Access' },
       blocks: [
         {
           ul: [
-            { de: "Basis-Adresse: {api}", en: "Base URL: {api}" },
-            {
-              de: "Kopfzeile: „Authorization: Bearer <API-Key>“ (alternativ „X-API-Key: <API-Key>“)",
-              en: "Header: “Authorization: Bearer <API key>” (alternatively “X-API-Key: <API key>”)",
-            },
-            {
-              de: "Format: JSON. Zeiten sind ISO-8601 in UTC. Sprache der Fehlermeldungen über „Accept-Language: de“ oder „en“.",
-              en: "Format: JSON. Times are ISO 8601 in UTC. Language of error messages via “Accept-Language: de” or “en”.",
-            },
-            {
-              de: "Den API-Key bekommst du von uns. Er wird nur einmal angezeigt; bei Verlust stellen wir einen neuen aus.",
-              en: "You receive the API key from us. It is shown only once; if it is lost we issue a new one.",
-            },
+            { de: 'Basis-Adresse: {api}', en: 'Base URL: {api}' },
+            { de: 'Kopfzeile: „Authorization: Bearer <API-Key>“ (alternativ „X-API-Key: <API-Key>“)', en: 'Header: “Authorization: Bearer <API key>” (alternatively “X-API-Key: <API key>”)' },
+            { de: 'Format: JSON. Zeiten sind ISO-8601 in UTC. Sprache der Fehlermeldungen über „Accept-Language: de“ oder „en“.', en: 'Format: JSON. Times are ISO 8601 in UTC. Language of error messages via “Accept-Language: de” or “en”.' },
+            { de: 'Den API-Key bekommst du von uns. Er wird nur einmal angezeigt; bei Verlust stellen wir einen neuen aus.', en: 'You receive the API key from us. It is shown only once; if it is lost we issue a new one.' },
           ],
         },
-        {
-          note: {
-            de: "Der API-Key gehört auf deinen Server – nicht in ein Programm, das an Nutzer verteilt wird. Dein Launcher spricht mit deinem Server, und der mit dieser API.",
-            en: "The API key belongs on your server – not in software that is distributed to users. Your launcher talks to your server, and your server talks to this API.",
-          },
-        },
+        { note: { de: 'Der API-Key gehört auf deinen Server – nicht in ein Programm, das an Nutzer verteilt wird. Dein Launcher spricht mit deinem Server, und der mit dieser API.', en: 'The API key belongs on your server – not in software that is distributed to users. Your launcher talks to your server, and your server talks to this API.' } },
       ],
     },
     {
-      heading: { de: "So funktioniert es", en: "How it works" },
+      heading: { de: 'So funktioniert es', en: 'How it works' },
       blocks: [
         {
           ol: [
-            {
-              de: "Spieler: Du schickst deine eigene Nutzerkennung mit (player.externalId). Wir legen dazu automatisch eine kurze Spieler-ID an (z. B. P7KXGQXL). Sie steht im Servernamen („Meine Welt #P7KXGQXL“). Alle Server laufen unter deinem Partner-Konto.",
-              en: "Players: you send your own user id (player.externalId). We automatically create a short player id for it (e.g. P7KXGQXL). It is part of the server name (“My World #P7KXGQXL”). All servers run under your partner account.",
-            },
-            {
-              de: "Erstellen: Der Server wird bei uns installiert – samt der gewählten Server-Software (meist ein bis zwei Minuten, state: installing). Gestartet wird er erst durch dich.",
-              en: "Create: the server is installed on our side – including the chosen server software (usually one to two minutes, state: installing). It is only started by you.",
-            },
-            {
-              de: 'Starten: „start“ fährt den Server hoch. Beim ersten Start muss der Spieler die Minecraft-EULA akzeptiert haben ("acceptEula": true).',
-              en: 'Start: “start” boots the server. On the first start the player must have accepted the Minecraft EULA ("acceptEula": true).',
-            },
-            {
-              de: "Lebenszeichen: Solange der Launcher des Hosts offen ist, schickt er regelmäßig „heartbeat“ (empfohlen alle 30–60 Sekunden). Bleibt es länger als heartbeatTimeoutSeconds aus, fährt der Server herunter – die Welt bleibt gespeichert.",
-              en: "Heartbeat: while the host’s launcher is open it regularly sends “heartbeat” (recommended every 30–60 seconds). If it is missing for longer than heartbeatTimeoutSeconds the server shuts down – the world stays saved.",
-            },
-            {
-              de: "Stoppen: Schließt der Spieler den Launcher, schickt dieser „stop“. Beim nächsten „start“ geht es weiter.",
-              en: "Stop: when the player closes the launcher it sends “stop”. The next “start” continues where they left off.",
-            },
-            {
-              de: "Laufzeit-Regel: Nach sessionMaxHours Stunden Laufzeit (Standard 24) wird der Server gestoppt und hat cooldownHours Stunden Pause (Standard 2). Danach muss er mit „start“ neu gestartet werden. Unterbrechungen, die kürzer als die Pause sind, setzen die Laufzeit nicht zurück. Zehn Minuten und eine Minute vorher gibt es einen Hinweis im Spiel.",
-              en: "Runtime rule: after sessionMaxHours hours of runtime (default 24) the server is stopped and pauses for cooldownHours hours (default 2). After that it must be started again with “start”. Interruptions shorter than the pause do not reset the runtime. There is an in-game notice ten minutes and one minute before.",
-            },
-            {
-              de: "Aufräumen: Server, die deleteAfterIdleDays Tage nicht gestartet wurden, werden samt Daten gelöscht.",
-              en: "Clean-up: servers that have not been started for deleteAfterIdleDays days are deleted including their data.",
-            },
+            { de: 'Spieler: Du schickst deine eigene Nutzerkennung mit (player.externalId). Wir legen dazu automatisch eine kurze Spieler-ID an (z. B. P7KXGQXL). Sie steht im Servernamen („Meine Welt #P7KXGQXL“). Alle Server laufen unter deinem Partner-Konto.', en: 'Players: you send your own user id (player.externalId). We automatically create a short player id for it (e.g. P7KXGQXL). It is part of the server name (“My World #P7KXGQXL”). All servers run under your partner account.' },
+            { de: 'Erstellen: Der Server wird bei uns installiert – samt der gewählten Server-Software (meist ein bis zwei Minuten, state: installing). Gestartet wird er erst durch dich.', en: 'Create: the server is installed on our side – including the chosen server software (usually one to two minutes, state: installing). It is only started by you.' },
+            { de: 'Starten: „start“ fährt den Server hoch. Beim ersten Start muss der Spieler die Minecraft-EULA akzeptiert haben ("acceptEula": true).', en: 'Start: “start” boots the server. On the first start the player must have accepted the Minecraft EULA ("acceptEula": true).' },
+            { de: 'Lebenszeichen: Solange der Launcher des Hosts offen ist, schickt er regelmäßig „heartbeat“ (empfohlen alle 30–60 Sekunden). Bleibt es länger als heartbeatTimeoutSeconds aus, fährt der Server herunter – die Welt bleibt gespeichert.', en: 'Heartbeat: while the host’s launcher is open it regularly sends “heartbeat” (recommended every 30–60 seconds). If it is missing for longer than heartbeatTimeoutSeconds the server shuts down – the world stays saved.' },
+            { de: 'Stoppen: Schließt der Spieler den Launcher, schickt dieser „stop“. Beim nächsten „start“ geht es weiter.', en: 'Stop: when the player closes the launcher it sends “stop”. The next “start” continues where they left off.' },
+            { de: 'Laufzeit-Regel: Nach sessionMaxHours Stunden Laufzeit (Standard 24) wird der Server gestoppt und hat cooldownHours Stunden Pause (Standard 2). Danach muss er mit „start“ neu gestartet werden. Unterbrechungen, die kürzer als die Pause sind, setzen die Laufzeit nicht zurück. Zehn Minuten und eine Minute vorher gibt es einen Hinweis im Spiel.', en: 'Runtime rule: after sessionMaxHours hours of runtime (default 24) the server is stopped and pauses for cooldownHours hours (default 2). After that it must be started again with “start”. Interruptions shorter than the pause do not reset the runtime. There is an in-game notice ten minutes and one minute before.' },
+            { de: 'Aufräumen: Server, die deleteAfterIdleDays Tage nicht gestartet wurden, werden samt Daten gelöscht.', en: 'Clean-up: servers that have not been started for deleteAfterIdleDays days are deleted including their data.' },
           ],
         },
-        {
-          note: {
-            de: "Die für dich geltenden Werte (sessionMaxHours, cooldownHours, heartbeatTimeoutSeconds, deleteAfterIdleDays, maxServers, maxServersPerPlayer, serverNameMaxLength) und die aktuelle Auslastung (usedServers) stehen in GET /me unter „limits“ – dazu „plan“, „serverTypes“ und „eulaUrl“ (Link zur Minecraft-EULA, den du dem Spieler vor dem ersten Start zeigst).",
-            en: "The values that apply to you (sessionMaxHours, cooldownHours, heartbeatTimeoutSeconds, deleteAfterIdleDays, maxServers, maxServersPerPlayer, serverNameMaxLength) and the current usage (usedServers) are in GET /me under “limits” – plus “plan”, “serverTypes” and “eulaUrl” (link to the Minecraft EULA you show the player before the first start).",
-          },
-        },
+        { note: { de: 'Die für dich geltenden Werte (sessionMaxHours, cooldownHours, heartbeatTimeoutSeconds, deleteAfterIdleDays, maxServers, maxServersPerPlayer, serverNameMaxLength) und die aktuelle Auslastung (usedServers) stehen in GET /me unter „limits“ – dazu „plan“, „serverTypes“ und „eulaUrl“ (Link zur Minecraft-EULA, den du dem Spieler vor dem ersten Start zeigst).', en: 'The values that apply to you (sessionMaxHours, cooldownHours, heartbeatTimeoutSeconds, deleteAfterIdleDays, maxServers, maxServersPerPlayer, serverNameMaxLength) and the current usage (usedServers) are in GET /me under “limits” – plus “plan”, “serverTypes” and “eulaUrl” (link to the Minecraft EULA you show the player before the first start).' } },
       ],
     },
     {
-      heading: { de: "Endpunkte", en: "Endpoints" },
+      heading: { de: 'Endpunkte', en: 'Endpoints' },
       blocks: [
         {
-          copy: {
-            label: { de: "Basis-Adresse", en: "Base URL" },
-            value: "{api}",
-          },
+          copy: { label: { de: 'Basis-Adresse', en: 'Base URL' }, value: '{api}' },
         },
-        { h3: { de: "Konto und Spieler", en: "Account and players" } },
+        { h3: { de: 'Konto und Spieler', en: 'Account and players' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET",
-                "/me",
-                {
-                  de: "Paket, Servertypen mit Versionen, Grenzen, Auslastung",
-                  en: "Plan, server types with versions, limits, usage",
-                },
-              ],
-              [
-                "POST",
-                "/players",
-                {
-                  de: "Spieler anlegen bzw. abrufen → Spieler-ID",
-                  en: "Create or fetch a player → player id",
-                },
-              ],
-              [
-                "GET",
-                "/players/{externalId | Spieler-ID}",
-                {
-                  de: "Spieler mit seinen Servern",
-                  en: "Player with their servers",
-                },
-              ],
+              ['GET', '/me', { de: 'Paket, Servertypen mit Versionen, Grenzen, Auslastung', en: 'Plan, server types with versions, limits, usage' }],
+              ['POST', '/players', { de: 'Spieler anlegen bzw. abrufen → Spieler-ID', en: 'Create or fetch a player → player id' }],
+              ['GET', '/players/{externalId | playerId}', { de: 'Spieler mit seinen Servern', en: 'Player with their servers' }],
             ],
           },
         },
-        { h3: { de: "Server verwalten", en: "Managing servers" } },
+        { h3: { de: 'Server verwalten', en: 'Managing servers' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET",
-                "/servers?player={externalId}&playerId=&limit=&offset=",
-                {
-                  de: "Server auflisten (neueste zuerst; limit Standard 50, höchstens 100)",
-                  en: "List servers (newest first; limit default 50, at most 100)",
-                },
-              ],
-              [
-                "POST",
-                "/servers",
-                {
-                  de: "Server für einen Spieler erstellen",
-                  en: "Create a server for a player",
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}",
-                { de: "Stand eines Servers", en: "State of a server" },
-              ],
-              [
-                "PATCH",
-                "/servers/{id}",
-                {
-                  de: 'Umbenennen: {"name":"…"} · Typ/Version wechseln: {"serverType":"…","version":"…"}',
-                  en: 'Rename: {"name":"…"} · change type/version: {"serverType":"…","version":"…"}',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/reinstall",
-                {
-                  de: "Neu installieren (Server muss aus sein)",
-                  en: "Reinstall (server must be off)",
-                },
-              ],
-              [
-                "DELETE",
-                "/servers/{id}",
-                {
-                  de: "Server samt Daten löschen (auch POST …/delete)",
-                  en: "Delete the server including data (also POST …/delete)",
-                },
-              ],
+              ['GET', '/servers?player={externalId}&playerId=&limit=&offset=', { de: 'Server auflisten (neueste zuerst; limit Standard 50, höchstens 100)', en: 'List servers (newest first; limit default 50, at most 100)' }],
+              ['POST', '/servers', { de: 'Server für einen Spieler erstellen', en: 'Create a server for a player' }],
+              ['GET', '/servers/{id}', { de: 'Stand eines Servers', en: 'State of a server' }],
+              ['PATCH', '/servers/{id}', { de: 'Umbenennen: {"name":"…"} · Typ/Version wechseln: {"serverType":"…","version":"…"}', en: 'Rename: {"name":"…"} · change type/version: {"serverType":"…","version":"…"}' }],
+              ['POST', '/servers/{id}/reinstall', { de: 'Neu installieren (Server muss aus sein)', en: 'Reinstall (server must be off)' }],
+              ['DELETE', '/servers/{id}', { de: 'Server samt Daten löschen (auch POST …/delete)', en: 'Delete the server including data (also POST …/delete)' }],
             ],
           },
         },
-        {
-          h3: {
-            de: "Sitzung: Starten, Lebenszeichen, Stoppen",
-            en: "Session: start, heartbeat, stop",
-          },
-        },
+        { h3: { de: 'Sitzung: Starten, Lebenszeichen, Stoppen', en: 'Session: start, heartbeat, stop' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "POST",
-                "/servers/{id}/start",
-                {
-                  de: "Starten bzw. nach der Pause reaktivieren",
-                  en: "Start or reactivate after the pause",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/heartbeat",
-                { de: "Lebenszeichen des Hosts", en: "Heartbeat of the host" },
-              ],
-              [
-                "POST",
-                "/heartbeat",
-                {
-                  de: 'Lebenszeichen für bis zu 500 Server: {"servers":["…"]} → {"ok":[…],"notRunning":[…]}',
-                  en: 'Heartbeat for up to 500 servers: {"servers":["…"]} → {"ok":[…],"notRunning":[…]}',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/stop",
-                {
-                  de: 'Herunterfahren (Daten bleiben). Mit {"whenEmpty":true}: erst, wenn keine Spieler mehr da sind (falls für dich freigeschaltet)',
-                  en: 'Shut down (data is kept). With {"whenEmpty":true}: only once no players are left (if enabled for you)',
-                },
-              ],
+              ['POST', '/servers/{id}/start', { de: 'Starten bzw. nach der Pause reaktivieren', en: 'Start or reactivate after the pause' }],
+              ['POST', '/servers/{id}/heartbeat', { de: 'Lebenszeichen des Hosts', en: 'Heartbeat of the host' }],
+              ['POST', '/heartbeat', { de: 'Lebenszeichen für bis zu 500 Server: {"servers":["…"]} → {"ok":[…],"notRunning":[…]}', en: 'Heartbeat for up to 500 servers: {"servers":["…"]} → {"ok":[…],"notRunning":[…]}' }],
+              ['POST', '/servers/{id}/stop', { de: 'Herunterfahren (Daten bleiben). Mit {"whenEmpty":true}: erst, wenn keine Spieler mehr da sind (falls für dich freigeschaltet)', en: 'Shut down (data is kept). With {"whenEmpty":true}: only once no players are left (if enabled for you)' }],
             ],
           },
         },
-        { h3: { de: "Konsole und Live-Werte", en: "Console and live values" } },
+        { h3: { de: 'Konsole und Live-Werte', en: 'Console and live values' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET",
-                "/servers/{id}/console/stream",
-                {
-                  de: "Konsole live (Server-Sent Events)",
-                  en: "Live console (server-sent events)",
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}/stats",
-                {
-                  de: "Live-Werte: CPU, Arbeitsspeicher, Speicherplatz, Netzwerk, Spielerzahl",
-                  en: "Live values: CPU, memory, disk, network, player count",
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}/logs?lines=100",
-                {
-                  de: "Die letzten Zeilen der Konsole (höchstens 1000)",
-                  en: "The last console lines (at most 1000)",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/command",
-                {
-                  de: 'Konsolenbefehl, z. B. {"command":"op Steve"}',
-                  en: 'Console command, e.g. {"command":"op Steve"}',
-                },
-              ],
+              ['GET', '/servers/{id}/console/stream', { de: 'Konsole live (Server-Sent Events)', en: 'Live console (server-sent events)' }],
+              ['GET', '/servers/{id}/stats', { de: 'Live-Werte: CPU, Arbeitsspeicher, Speicherplatz, Netzwerk, Spielerzahl', en: 'Live values: CPU, memory, disk, network, player count' }],
+              ['GET', '/servers/{id}/logs?lines=100', { de: 'Die letzten Zeilen der Konsole (höchstens 1000)', en: 'The last console lines (at most 1000)' }],
+              ['POST', '/servers/{id}/command', { de: 'Konsolenbefehl, z. B. {"command":"op Steve"}', en: 'Console command, e.g. {"command":"op Steve"}' }],
             ],
           },
         },
-        {
-          h3: {
-            de: "Einstellungen, Dateien und Mods",
-            en: "Settings, files and mods",
-          },
-        },
+        { h3: { de: 'Einstellungen, Dateien und Mods', en: 'Settings, files and mods' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET / PATCH",
-                "/servers/{id}/settings",
-                {
-                  de: "Servereinstellungen (server.properties) lesen und setzen",
-                  en: "Read and set server settings (server.properties)",
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}/files?dir=/mods",
-                {
-                  de: "Dateien und Ordner auflisten",
-                  en: "List files and directories",
-                },
-              ],
-              [
-                "GET / PUT",
-                "/servers/{id}/files/content?path=…",
-                {
-                  de: "Textdatei lesen bzw. Datei schreiben (Inhalt als Körper der Anfrage, bis 10 MB)",
-                  en: "Read a text file or write a file (content as request body, up to 10 MB)",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/files/upload-url",
-                {
-                  de: 'Adresse für den direkten Upload großer Dateien: {"directory":"/"}',
-                  en: 'URL for uploading large files directly: {"directory":"/"}',
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}/files/download-url?path=…",
-                {
-                  de: "Adresse zum Herunterladen einer Datei (10 Minuten gültig)",
-                  en: "URL for downloading a file (valid for 10 minutes)",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/files/delete",
-                {
-                  de: 'Löschen: {"paths":["/mods/alt.jar"]} (höchstens 100 Pfade)',
-                  en: 'Delete: {"paths":["/mods/old.jar"]} (at most 100 paths)',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/files/folder",
-                {
-                  de: 'Ordner anlegen: {"path":"/config/neu"}',
-                  en: 'Create a directory: {"path":"/config/new"}',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/files/decompress",
-                {
-                  de: 'Archiv entpacken (zip, tar.gz): {"path":"/welt.zip"}',
-                  en: 'Extract an archive (zip, tar.gz): {"path":"/world.zip"}',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/files/pull",
-                {
-                  de: 'Datei von einer https-Adresse laden: {"url":"…","directory":"/mods","filename":"…"} (directory Standard „/“, filename freiwillig)',
-                  en: 'Fetch a file from an https URL: {"url":"…","directory":"/mods","filename":"…"} (directory defaults to “/”, filename optional)',
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/mods",
-                {
-                  de: 'Mod oder Plugin von Modrinth installieren: {"project":"sodium"}',
-                  en: 'Install a mod or plugin from Modrinth: {"project":"sodium"}',
-                },
-              ],
+              ['GET / PATCH', '/servers/{id}/settings', { de: 'Servereinstellungen (server.properties) lesen und setzen', en: 'Read and set server settings (server.properties)' }],
+              ['GET', '/servers/{id}/files?dir=/mods', { de: 'Dateien und Ordner auflisten', en: 'List files and directories' }],
+              ['GET / PUT', '/servers/{id}/files/content?path=…', { de: 'Textdatei lesen bzw. Datei schreiben (Inhalt als Körper der Anfrage, bis 10 MB)', en: 'Read a text file or write a file (content as request body, up to 10 MB)' }],
+              ['POST', '/servers/{id}/files/upload-url', { de: 'Adresse für den direkten Upload großer Dateien: {"directory":"/"}', en: 'URL for uploading large files directly: {"directory":"/"}' }],
+              ['GET', '/servers/{id}/files/download-url?path=…', { de: 'Adresse zum Herunterladen einer Datei (10 Minuten gültig)', en: 'URL for downloading a file (valid for 10 minutes)' }],
+              ['POST', '/servers/{id}/files/delete', { de: 'Löschen: {"paths":["/mods/alt.jar"]} (höchstens 100 Pfade)', en: 'Delete: {"paths":["/mods/old.jar"]} (at most 100 paths)' }],
+              ['POST', '/servers/{id}/files/folder', { de: 'Ordner anlegen: {"path":"/config/neu"}', en: 'Create a directory: {"path":"/config/new"}' }],
+              ['POST', '/servers/{id}/files/decompress', { de: 'Archiv entpacken (zip, tar.gz): {"path":"/welt.zip"}', en: 'Extract an archive (zip, tar.gz): {"path":"/world.zip"}' }],
+              ['POST', '/servers/{id}/files/pull', { de: 'Datei von einer https-Adresse laden: {"url":"…","directory":"/mods","filename":"…"} (directory Standard „/“, filename freiwillig)', en: 'Fetch a file from an https URL: {"url":"…","directory":"/mods","filename":"…"} (directory defaults to “/”, filename optional)' }],
+              ['POST', '/servers/{id}/mods', { de: 'Mod oder Plugin von Modrinth installieren: {"project":"sodium"}', en: 'Install a mod or plugin from Modrinth: {"project":"sodium"}' }],
             ],
           },
         },
-        { h3: { de: "Backups und Webhook", en: "Backups and webhook" } },
+        { h3: { de: 'Backups und Webhook', en: 'Backups and webhook' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET / POST",
-                "/servers/{id}/backups",
-                {
-                  de: "Backups auflisten bzw. anlegen",
-                  en: "List or create backups",
-                },
-              ],
-              [
-                "GET / PUT / DELETE",
-                "/webhook",
-                {
-                  de: "Webhook für Statuswechsel",
-                  en: "Webhook for status changes",
-                },
-              ],
+              ['GET / POST', '/servers/{id}/backups', { de: 'Backups auflisten bzw. anlegen', en: 'List or create backups' }],
+              ['GET / PUT / DELETE', '/webhook', { de: 'Webhook für Statuswechsel', en: 'Webhook for status changes' }],
             ],
           },
         },
       ],
     },
     {
-      heading: { de: "Server erstellen", en: "Creating a server" },
+      heading: { de: 'Server erstellen', en: 'Creating a server' },
       blocks: [
         {
-          title: {
-            de: "Server für einen Spieler erstellen",
-            en: "Create a server for a player",
-          },
+          title: { de: 'Server für einen Spieler erstellen', en: 'Create a server for a player' },
           code: `curl -X POST {api}/servers \\
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"player":{"externalId":"launcher-user-4711","name":"Steve"},"name":"Meine Welt","serverType":"paper","version":"latest"}'`,
         },
         {
           ul: [
-            {
-              de: "player.externalId: Kennung des Nutzers bei dir (1–80 Zeichen: Buchstaben, Ziffern, . _ : @ -)",
-              en: "player.externalId: your id for the user (1–80 characters: letters, digits, . _ : @ -)",
-            },
+            { de: 'player.externalId: Kennung des Nutzers bei dir (1–80 Zeichen: Buchstaben, Ziffern, . _ : @ -)', en: 'player.externalId: your id for the user (1–80 characters: letters, digits, . _ : @ -)' },
             {
               de: "name: 3–22 Zeichen (Buchstaben, Ziffern, Leerzeichen, . _ ' -)",
               en: "name: 3–22 characters (letters, digits, spaces, . _ ' -)",
             },
-            {
-              de: "player.name: freiwillig, wird auf 40 Zeichen gekürzt",
-              en: "player.name: optional, shortened to 40 characters",
-            },
-            {
-              de: "serverType und version: Werte aus GET /me; version ist freiwillig (Standard „latest“)",
-              en: "serverType and version: values from GET /me; version is optional (default “latest”)",
-            },
+            { de: 'player.name: freiwillig, höchstens 60 Zeichen (länger: 400 validation_error); gespeichert werden die ersten 40', en: 'player.name: optional, at most 60 characters (longer: 400 validation_error); the first 40 are stored' },
+            { de: 'serverType und version: Werte aus GET /me; version ist freiwillig (Standard „latest“)', en: 'serverType and version: values from GET /me; version is optional (default “latest”)' },
           ],
         },
-        { p: { de: "Antwort (201):", en: "Response (201):" } },
+        { p: { de: 'Antwort (201):', en: 'Response (201):' } },
         {
           code: `{
   "server": {
@@ -470,31 +205,16 @@ export const partnerDoc: DocPage = {
         },
         {
           ul: [
-            {
-              de: "state: installing · offline · starting · running · stopping · failed · suspended",
-              en: "state: installing · offline · starting · running · stopping · failed · suspended",
-            },
-            {
-              de: "address, host, port: null, solange der Server noch keinen Platz bei uns hat. install: Fortschritt einer schrittweisen Software-Einrichtung, sonst null (siehe „Servertyp und Version“). deleteAt: Löschdatum bei Nichtnutzung.",
-              en: "address, host, port: null while the server has no slot on our side yet. install: progress of a step-by-step software setup, otherwise null (see “Server type and version”). deleteAt: deletion date if unused.",
-            },
-            {
-              de: "version: Bei Typen, deren Software automatisch aus dem Verzeichnis eingerichtet wird (z. B. Fabric, Forge, NeoForge, Quilt), steht nach der Installation die tatsächlich installierte Version hier (z. B. „1.21.11“ statt „latest“) – oft schon in der Antwort auf POST /servers.",
-              en: "version: for types whose software is set up automatically from the directory (e.g. Fabric, Forge, NeoForge, Quilt), the version actually installed appears here after installation (e.g. “1.21.11” instead of “latest”) – often already in the response to POST /servers.",
-            },
-            {
-              de: "session.lastStopReason: host_stopped (Launcher hat gestoppt) · host_timeout (kein Lebenszeichen) · session_limit (Laufzeit-Grenze) · settings_limit (Einstellungen über den Grenzen) · admin",
-              en: "session.lastStopReason: host_stopped (launcher stopped it) · host_timeout (no heartbeat) · session_limit (runtime limit) · settings_limit (settings above the limits) · admin",
-            },
+            { de: 'state: installing · offline · starting · running · stopping · failed · suspended', en: 'state: installing · offline · starting · running · stopping · failed · suspended' },
+            { de: 'address, host, port: null, solange der Server noch keinen Platz bei uns hat. install: Fortschritt einer schrittweisen Software-Einrichtung, sonst null (siehe „Servertyp und Version“). deleteAt: Löschdatum bei Nichtnutzung.', en: 'address, host, port: null while the server has no slot on our side yet. install: progress of a step-by-step software setup, otherwise null (see “Server type and version”). deleteAt: deletion date if unused.' },
+            { de: 'version: Bei Typen, deren Software automatisch eingerichtet wird (z. B. Fabric, Forge, NeoForge, Quilt), steht nach der Installation die tatsächlich installierte Version hier (z. B. „1.21.11“ statt „latest“) – oft schon in der Antwort auf POST /servers.', en: 'version: for types whose software is set up automatically (e.g. Fabric, Forge, NeoForge, Quilt), the version actually installed appears here after installation (e.g. “1.21.11” instead of “latest”) – often already in the response to POST /servers.' },
+            { de: 'session.lastStopReason: host_stopped (Launcher hat gestoppt) · host_timeout (kein Lebenszeichen) · session_limit (Laufzeit-Grenze) · settings_limit (Einstellungen über den Grenzen) · admin', en: 'session.lastStopReason: host_stopped (launcher stopped it) · host_timeout (no heartbeat) · session_limit (runtime limit) · settings_limit (settings above the limits) · admin' },
           ],
         },
       ],
     },
     {
-      heading: {
-        de: "Starten, Lebenszeichen, Stoppen",
-        en: "Start, heartbeat, stop",
-      },
+      heading: { de: 'Starten, Lebenszeichen, Stoppen', en: 'Start, heartbeat, stop' },
       blocks: [
         {
           code: `curl -X POST {api}/servers/$ID/start -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"acceptEula":true}'
@@ -503,177 +223,100 @@ curl -X POST {api}/servers/$ID/stop -H "Authorization: Bearer $API_KEY"`,
         },
         {
           ol: [
-            {
-              de: "„start“ aufrufen, danach GET /servers/{id} abfragen, bis state = running ist; dann „address“ zum Verbinden anzeigen.",
-              en: "Call “start”, then poll GET /servers/{id} until state = running; then show “address” for connecting.",
-            },
-            {
-              de: "Solange der Launcher offen ist: alle 30–60 Sekunden „heartbeat“. Die Antwort enthält session.remainingSeconds.",
-              en: "While the launcher is open: “heartbeat” every 30–60 seconds. The response contains session.remainingSeconds.",
-            },
-            { de: "Beim Schließen: „stop“.", en: "When closing: “stop”." },
-            {
-              de: "Antwortet „heartbeat“ mit not_running, ist die Sitzung beendet (Grund in fields.reason: host_stopped, host_timeout, session_limit, settings_limit, admin – oder not_started, wenn der Server nie gestartet wurde) – dem Spieler Bescheid sagen und ggf. „start“ anbieten.",
-              en: "If “heartbeat” answers not_running the session has ended (reason in fields.reason: host_stopped, host_timeout, session_limit, settings_limit, admin – or not_started if the server was never started) – tell the player and offer “start” if appropriate.",
-            },
+            { de: '„start“ aufrufen, danach GET /servers/{id} abfragen, bis state = running ist; dann „address“ zum Verbinden anzeigen.', en: 'Call “start”, then poll GET /servers/{id} until state = running; then show “address” for connecting.' },
+            { de: 'Solange der Launcher offen ist: alle 30–60 Sekunden „heartbeat“. Die Antwort enthält session.remainingSeconds.', en: 'While the launcher is open: “heartbeat” every 30–60 seconds. The response contains session.remainingSeconds.' },
+            { de: 'Beim Schließen: „stop“.', en: 'When closing: “stop”.' },
+            { de: 'Antwortet „heartbeat“ mit not_running, ist die Sitzung beendet (Grund in fields.reason: host_stopped, host_timeout, session_limit, settings_limit, admin – oder not_started, wenn der Server nie gestartet wurde) – dem Spieler Bescheid sagen und ggf. „start“ anbieten.', en: 'If “heartbeat” answers not_running the session has ended (reason in fields.reason: host_stopped, host_timeout, session_limit, settings_limit, admin – or not_started if the server was never started) – tell the player and offer “start” if appropriate.' },
           ],
         },
       ],
     },
     {
-      heading: { de: "Dateien, Mods und Welten", en: "Files, mods and worlds" },
+      heading: { de: 'Dateien, Mods und Welten', en: 'Files, mods and worlds' },
       blocks: [
-        {
-          p: {
-            de: "Alle Pfade gelten ab dem Hauptordner des Servers (z. B. /mods, /plugins, /config, /world). Der Server muss fertig installiert sein. Änderungen an Mods, Plugins und Einstellungen wirken nach dem nächsten Start.",
-            en: "All paths are relative to the server root (e.g. /mods, /plugins, /config, /world). The server must be fully installed. Changes to mods, plugins and settings take effect after the next start.",
-          },
-        },
+        { p: { de: 'Alle Pfade gelten ab dem Hauptordner des Servers (z. B. /mods, /plugins, /config, /world). Der Server muss fertig installiert sein. Änderungen an Mods, Plugins und Einstellungen wirken nach dem nächsten Start.', en: 'All paths are relative to the server root (e.g. /mods, /plugins, /config, /world). The server must be fully installed. Changes to mods, plugins and settings take effect after the next start.' } },
         {
           ul: [
+            { de: 'Kleine Dateien (bis 10 MB): PUT /servers/{id}/files/content?path=/mods/mein-mod.jar – der Inhalt der Datei ist der Körper der Anfrage.', en: 'Small files (up to 10 MB): PUT /servers/{id}/files/content?path=/mods/my-mod.jar – the file content is the request body.' },
+            { de: 'Große Dateien (z. B. eine Welt als ZIP): POST …/files/upload-url liefert eine Adresse, die zehn Minuten gilt. Dorthin die Datei als multipart/form-data mit dem Feld „files“ schicken. Danach mit …/files/decompress entpacken.', en: 'Large files (e.g. a world as ZIP): POST …/files/upload-url returns a URL valid for ten minutes. Send the file there as multipart/form-data with the field “files”. Then extract it with …/files/decompress.' },
             {
-              de: "Kleine Dateien (bis 10 MB): PUT /servers/{id}/files/content?path=/mods/mein-mod.jar – der Inhalt der Datei ist der Körper der Anfrage.",
-              en: "Small files (up to 10 MB): PUT /servers/{id}/files/content?path=/mods/my-mod.jar – the file content is the request body.",
+              de: 'Modrinth: POST …/mods mit {"project":"<Kurzname oder ID>"} wählt die neueste Version, die zum Lader des Servers passt – und zu seiner Minecraft-Version, sofern „version“ des Servers eine konkrete Version ist (bei „latest“ wird nicht nach Minecraft-Version gefiltert; dann besser eine bestimmte Mod-Version angeben) – und lädt sie nach /mods (Fabric, Forge, NeoForge, Quilt) bzw. /plugins (Paper, Purpur). Pflicht-Abhängigkeiten werden mit installiert (bis zu 3 Ebenen, höchstens 25 Dateien; "dependencies": false schaltet das ab). Eine bestimmte Version: {"version":"<Versions-ID>"}. Die Antwort nennt „installed“ und nicht gefundene „missingDependencies“. Typen ohne Mods/Plugins (z. B. Vanilla) antworten mit 409 mods_unsupported.',
+              en: 'Modrinth: POST …/mods with {"project":"<slug or id>"} picks the newest version matching the server’s loader – and its Minecraft version if the server’s “version” is a concrete version (with “latest” there is no Minecraft-version filter; then better pass a specific mod version) – and loads it into /mods (Fabric, Forge, NeoForge, Quilt) or /plugins (Paper, Purpur). Required dependencies are installed too (up to 3 levels, at most 25 files; "dependencies": false turns that off). A specific version: {"version":"<version id>"}. The response lists “installed” and any “missingDependencies” that were not found. Types without mods/plugins (e.g. Vanilla) answer 409 mods_unsupported.',
             },
-            {
-              de: "Große Dateien (z. B. eine Welt als ZIP): POST …/files/upload-url liefert eine Adresse, die zehn Minuten gilt. Dorthin die Datei als multipart/form-data mit dem Feld „files“ schicken. Danach mit …/files/decompress entpacken.",
-              en: "Large files (e.g. a world as ZIP): POST …/files/upload-url returns a URL valid for ten minutes. Send the file there as multipart/form-data with the field “files”. Then extract it with …/files/decompress.",
-            },
-            {
-              de: 'Modrinth: POST …/mods mit {"project":"<Kurzname oder ID>"} wählt die neueste Version, die zu Lader und Minecraft-Version des Servers passt, und lädt sie nach /mods (Fabric, Forge, NeoForge, Quilt) bzw. /plugins (Paper, Purpur). Pflicht-Abhängigkeiten werden mit installiert (bis zu 3 Ebenen, höchstens 25 Dateien; "dependencies": false schaltet das ab). Eine bestimmte Version: {"version":"<Versions-ID>"}. Die Antwort nennt „installed“ und nicht gefundene „missingDependencies“. Typen ohne Mods/Plugins (z. B. Vanilla) antworten mit 409 mods_unsupported.',
-              en: 'Modrinth: POST …/mods with {"project":"<slug or id>"} picks the newest version matching the server’s loader and Minecraft version and loads it into /mods (Fabric, Forge, NeoForge, Quilt) or /plugins (Paper, Purpur). Required dependencies are installed too (up to 3 levels, at most 25 files; "dependencies": false turns that off). A specific version: {"version":"<version id>"}. The response lists “installed” and any “missingDependencies” that were not found. Types without mods/plugins (e.g. Vanilla) answer 409 mods_unsupported.',
-            },
-            {
-              de: 'Eigene Dateien von deinem Server: POST …/files/pull mit {"url":"https://…","directory":"/mods"} – „filename“ ist freiwillig (Standard: letzter Teil der Adresse).',
-              en: 'Your own files from your server: POST …/files/pull with {"url":"https://…","directory":"/mods"} – “filename” is optional (default: last part of the URL).',
-            },
+            { de: 'Eigene Dateien von deinem Server: POST …/files/pull mit {"url":"https://…","directory":"/mods"} – „filename“ ist freiwillig (Standard: letzter Teil der Adresse).', en: 'Your own files from your server: POST …/files/pull with {"url":"https://…","directory":"/mods"} – “filename” is optional (default: last part of the URL).' },
           ],
         },
         {
           code: `# Mod-Datei hochladen
-curl -X PUT "{api}/servers/$ID/files/content?path=/mods/mein-mod.jar" \
+curl -X PUT "{api}/servers/$ID/files/content?path=/mods/mein-mod.jar" \\
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/java-archive" --data-binary @mein-mod.jar
 
 # Welt als ZIP: Adresse holen, hochladen, entpacken
-URL=$(curl -s -X POST {api}/servers/$ID/files/upload-url -H "Authorization: Bearer $API_KEY" \
+URL=$(curl -s -X POST {api}/servers/$ID/files/upload-url -H "Authorization: Bearer $API_KEY" \\
   -H "Content-Type: application/json" -d '{"directory":"/"}' | jq -r .url)
 curl -X POST "$URL" -F "files=@welt.zip"
-curl -X POST {api}/servers/$ID/files/decompress -H "Authorization: Bearer $API_KEY" \
+curl -X POST {api}/servers/$ID/files/decompress -H "Authorization: Bearer $API_KEY" \\
   -H "Content-Type: application/json" -d '{"path":"/welt.zip"}'
 
 # Mod von Modrinth
-curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \
+curl -X POST {api}/servers/$ID/mods -H "Authorization: Bearer $API_KEY" \\
   -H "Content-Type: application/json" -d '{"project":"sodium"}'`,
         },
       ],
     },
     {
-      heading: { de: "Servereinstellungen", en: "Server settings" },
+      heading: { de: 'Servereinstellungen', en: 'Server settings' },
       blocks: [
         {
-          p: {
-            de: 'PATCH /servers/{id}/settings setzt Werte in der server.properties – auch schon vor dem ersten Start. Es müssen nur die Werte mitgeschickt werden, die sich ändern sollen. GET liefert {"settings":{…},"exists":…}: Solange es noch keine server.properties gibt, ist „exists“ false und nicht gesetzte Werte sind null (dann gilt der Standard von Minecraft). „seed“ und „levelType“ wirken nur auf eine neu erzeugte Welt.',
-            en: 'PATCH /servers/{id}/settings sets values in server.properties – even before the first start. Only send the values you want to change. GET returns {"settings":{…},"exists":…}: while there is no server.properties yet, “exists” is false and values that are not set are null (Minecraft defaults apply then). “seed” and “levelType” only apply to a newly generated world.',
-          },
+          p: { de: 'PATCH /servers/{id}/settings setzt Werte in der server.properties – auch schon vor dem ersten Start. Es müssen nur die Werte mitgeschickt werden, die sich ändern sollen. GET liefert {"settings":{…},"exists":…}: Solange es noch keine server.properties gibt, ist „exists“ false und nicht gesetzte Werte sind null (dann gilt der Standard von Minecraft). „seed“ und „levelType“ wirken nur auf eine neu erzeugte Welt.', en: 'PATCH /servers/{id}/settings sets values in server.properties – even before the first start. Only send the values you want to change. GET returns {"settings":{…},"exists":…}: while there is no server.properties yet, “exists” is false and values that are not set are null (Minecraft defaults apply then). “seed” and “levelType” only apply to a newly generated world.' },
         },
         {
           table: {
             head: [
-              { de: "Feld", en: "Field" },
-              { de: "Werte", en: "Values" },
+              { de: 'Feld', en: 'Field' },
+              { de: 'Werte', en: 'Values' },
             ],
             rows: [
-              [
-                "motd",
-                {
-                  de: "Text, höchstens 120 Zeichen",
-                  en: "Text, at most 120 characters",
-                },
-              ],
-              ["maxPlayers", "1–100"],
-              ["gamemode", "survival · creative · adventure · spectator"],
-              ["difficulty", "peaceful · easy · normal · hard"],
-              ["hardcore, pvp, whitelist, allowFlight", "true · false"],
-              [
-                "seed",
-                {
-                  de: "Text, höchstens 64 Zeichen",
-                  en: "Text, at most 64 characters",
-                },
-              ],
-              ["levelType", "normal · flat · large_biomes · amplified"],
-              ["spawnProtection", "0–64"],
-              ["viewDistance, simulationDistance", "3–16"],
+              ['motd', { de: 'Text, höchstens 120 Zeichen', en: 'Text, at most 120 characters' }],
+              ['maxPlayers', '1–100'],
+              ['gamemode', 'survival · creative · adventure · spectator'],
+              ['difficulty', 'peaceful · easy · normal · hard'],
+              ['hardcore, pvp, whitelist, allowFlight', 'true · false'],
+              ['seed', { de: 'Text, höchstens 64 Zeichen', en: 'Text, at most 64 characters' }],
+              ['levelType', 'normal · flat · large_biomes · amplified'],
+              ['spawnProtection', '0–64'],
+              ['viewDistance, simulationDistance', '3–16'],
             ],
           },
         },
         {
-          code: `curl -X PATCH {api}/servers/$ID/settings -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+          code: `curl -X PATCH {api}/servers/$ID/settings -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"motd":"Mein Server","maxPlayers":8,"gamemode":"survival","difficulty":"normal","whitelist":true}'`,
         },
       ],
     },
     {
-      heading: { de: "Konsole und Live-Werte", en: "Console and live values" },
+      heading: { de: 'Konsole und Live-Werte', en: 'Console and live values' },
       blocks: [
         {
           ul: [
-            {
-              de: 'GET /servers/{id}/logs?lines=100 (1–1000, Standard 100) liefert die letzten Zeilen der Konsole als {"lines":[…],"totalLines":…,"source":"logs/latest.log"}. totalLines zählt alle Zeilen des aktuellen Protokolls, das bei jedem Start neu beginnt. Vor dem ersten Start ist die Liste leer. Für eine laufende Anzeige alle paar Sekunden abfragen – oder den Stream nutzen.',
-              en: 'GET /servers/{id}/logs?lines=100 (1–1000, default 100) returns the last console lines as {"lines":[…],"totalLines":…,"source":"logs/latest.log"}. totalLines counts all lines of the current log, which starts anew on every start. Before the first start the list is empty. For a live view, poll every few seconds – or use the stream.',
-            },
-            {
-              de: "GET /servers/{id}/stats liefert CPU (Prozent), Arbeitsspeicher und Speicherplatz (Bytes, jeweils mit Grenze), Netzwerk, Laufzeit und „players“ ({online, max} – null, solange der Server nicht antwortet).",
-              en: "GET /servers/{id}/stats returns CPU (percent), memory and disk (bytes, each with its limit), network, uptime and “players” ({online, max} – null while the server does not answer).",
-            },
-            {
-              de: "POST /servers/{id}/command schickt einen Befehl an die Konsole.",
-              en: "POST /servers/{id}/command sends a command to the console.",
-            },
-            {
-              de: "GET /servers/{id}/console/stream liefert die Konsole live als Server-Sent Events (text/event-stream) – ohne ständiges Abfragen.",
-              en: "GET /servers/{id}/console/stream delivers the console live as server-sent events (text/event-stream) – no polling needed.",
-            },
+            { de: 'GET /servers/{id}/logs?lines=100 (1–1000, Standard 100) liefert die letzten Zeilen der Konsole als {"lines":[…],"totalLines":…,"source":"logs/latest.log"}. totalLines zählt alle Zeilen des aktuellen Protokolls, das bei jedem Start neu beginnt. Vor dem ersten Start ist die Liste leer. Für eine laufende Anzeige alle paar Sekunden abfragen – oder den Stream nutzen.', en: 'GET /servers/{id}/logs?lines=100 (1–1000, default 100) returns the last console lines as {"lines":[…],"totalLines":…,"source":"logs/latest.log"}. totalLines counts all lines of the current log, which starts anew on every start. Before the first start the list is empty. For a live view, poll every few seconds – or use the stream.' },
+            { de: 'GET /servers/{id}/stats liefert CPU (Prozent), Arbeitsspeicher und Speicherplatz (Bytes, jeweils mit Grenze), Netzwerk, Laufzeit und „players“ ({online, max} – null, solange der Server nicht antwortet).', en: 'GET /servers/{id}/stats returns CPU (percent), memory and disk (bytes, each with its limit), network, uptime and “players” ({online, max} – null while the server does not answer).' },
+            { de: 'POST /servers/{id}/command schickt einen Befehl an die Konsole.', en: 'POST /servers/{id}/command sends a command to the console.' },
+            { de: 'GET /servers/{id}/console/stream liefert die Konsole live als Server-Sent Events (text/event-stream) – ohne ständiges Abfragen.', en: 'GET /servers/{id}/console/stream delivers the console live as server-sent events (text/event-stream) – no polling needed.' },
           ],
         },
         {
           table: {
             head: [
-              { de: "Ereignis", en: "Event" },
-              {
-                de: "Inhalt (data, immer JSON)",
-                en: "Content (data, always JSON)",
-              },
+              { de: 'Ereignis', en: 'Event' },
+              { de: 'Inhalt (data, immer JSON)', en: 'Content (data, always JSON)' },
             ],
             rows: [
-              [
-                "line",
-                {
-                  de: 'Eine Zeile der Konsole als JSON-Text, z. B. "[12:00:01] Done (4.2s)!"',
-                  en: 'One console line as a JSON string, e.g. "[12:00:01] Done (4.2s)!"',
-                },
-              ],
-              [
-                "status",
-                {
-                  de: '{"state":"running"} – Wechsel des Zustands',
-                  en: '{"state":"running"} – state change',
-                },
-              ],
-              [
-                "info",
-                {
-                  de: '{"source":"live"} oder {"source":"log"} – woher die Zeilen kommen',
-                  en: '{"source":"live"} or {"source":"log"} – where the lines come from',
-                },
-              ],
-              [
-                "end",
-                {
-                  de: '{"reason":"…"} – Verbindung beendet: max_duration (nach 15 Minuten), upstream_closed (Verbindung zum Server verloren) – dann einfach neu verbinden; revoked (Key getauscht, Zugang deaktiviert, Server gelöscht oder gesperrt)',
-                  en: '{"reason":"…"} – connection ended: max_duration (after 15 minutes), upstream_closed (connection to the server lost) – then simply reconnect; revoked (key rotated, access disabled, server deleted or suspended)',
-                },
-              ],
+              ['line', { de: 'Eine Zeile der Konsole als JSON-Text, z. B. "[12:00:01] Done (4.2s)!"', en: 'One console line as a JSON string, e.g. "[12:00:01] Done (4.2s)!"' }],
+              ['status', { de: '{"state":"running"} – Wechsel des Zustands', en: '{"state":"running"} – state change' }],
+              ['info', { de: '{"source":"live"} oder {"source":"log"} – woher die Zeilen kommen', en: '{"source":"live"} or {"source":"log"} – where the lines come from' }],
+              ['end', { de: '{"reason":"…"} – Verbindung beendet: max_duration (nach 15 Minuten), upstream_closed (Verbindung zum Server verloren) – dann einfach neu verbinden; revoked (Key getauscht, Zugang deaktiviert, Server gelöscht oder gesperrt)', en: '{"reason":"…"} – connection ended: max_duration (after 15 minutes), upstream_closed (connection to the server lost) – then simply reconnect; revoked (key rotated, access disabled, server deleted or suspended)' }],
             ],
           },
         },
@@ -688,299 +331,117 @@ data: "[12:00:01] [Server thread/INFO]: Done (4.2s)!"`,
         },
         {
           ul: [
-            {
-              de: "Der Stream ist nur lesend. Befehle gehen weiter über POST /servers/{id}/command.",
-              en: "The stream is read-only. Commands still go through POST /servers/{id}/command.",
-            },
-            {
-              de: "Eine Verbindung läuft höchstens 15 Minuten (danach „end“ – einfach neu verbinden). Gleichzeitig offen: höchstens 3 je Server und 50 insgesamt, sonst 429 too_many_streams.",
-              en: "A connection lasts at most 15 minutes (then “end” – simply reconnect). Open at the same time: at most 3 per server and 50 in total, otherwise 429 too_many_streams.",
-            },
-            {
-              de: "Ein offener Stream ist kein Lebenszeichen: POST /servers/{id}/heartbeat muss weiter kommen.",
-              en: "An open stream is not a heartbeat: POST /servers/{id}/heartbeat must keep coming.",
-            },
-            {
-              de: "Alle 20 Sekunden kommt ein Kommentar „: ping“. Wer zu langsam mitliest, wird ohne „end“ getrennt – eine abgebrochene Verbindung ohne „end“ also einfach neu aufbauen.",
-              en: "A comment “: ping” arrives every 20 seconds. Clients that read too slowly are disconnected without “end” – so simply reconnect after a dropped connection without “end”.",
-            },
-            {
-              de: "Während der Server noch eingerichtet wird, antworten Konsole, logs und stats mit 409 server_installing – die Installation selbst lässt sich nicht mitlesen.",
-              en: "While the server is still being set up, console, logs and stats answer 409 server_installing – the installation itself cannot be followed live.",
-            },
+            { de: 'Der Stream ist nur lesend. Befehle gehen weiter über POST /servers/{id}/command.', en: 'The stream is read-only. Commands still go through POST /servers/{id}/command.' },
+            { de: 'Eine Verbindung läuft höchstens 15 Minuten (danach „end“ – einfach neu verbinden). Gleichzeitig offen: höchstens 3 je Server und 50 insgesamt, sonst 429 too_many_streams.', en: 'A connection lasts at most 15 minutes (then “end” – simply reconnect). Open at the same time: at most 3 per server and 50 in total, otherwise 429 too_many_streams.' },
+            { de: 'Ein offener Stream ist kein Lebenszeichen: POST /servers/{id}/heartbeat muss weiter kommen.', en: 'An open stream is not a heartbeat: POST /servers/{id}/heartbeat must keep coming.' },
+            { de: 'Alle 20 Sekunden kommt ein Kommentar „: ping“. Wer zu langsam mitliest, wird ohne „end“ getrennt – eine abgebrochene Verbindung ohne „end“ also einfach neu aufbauen.', en: 'A comment “: ping” arrives every 20 seconds. Clients that read too slowly are disconnected without “end” – so simply reconnect after a dropped connection without “end”.' },
+            { de: 'Während der Server noch eingerichtet wird, antworten Konsole, logs und stats mit 409 server_installing – die Installation selbst lässt sich nicht mitlesen.', en: 'While the server is still being set up, console, logs and stats answer 409 server_installing – the installation itself cannot be followed live.' },
           ],
         },
       ],
     },
     {
-      heading: { de: "Backups", en: "Backups" },
+      heading: { de: 'Backups', en: 'Backups' },
       blocks: [
-        {
-          p: {
-            de: "Wie viele Backups ein Server haben darf, legt euer Paket fest („limit“ in der Liste). Ist die Zahl erreicht, zuerst ein älteres löschen.",
-            en: "How many backups a server may have is set by your plan (“limit” in the list). Once reached, delete an older one first.",
-          },
-        },
+        { p: { de: 'Wie viele Backups ein Server haben darf, legt euer Paket fest („limit“ in der Liste). Ist die Zahl erreicht, zuerst ein älteres löschen.', en: 'How many backups a server may have is set by your plan (“limit” in the list). Once reached, delete an older one first.' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "GET",
-                "/servers/{id}/backups",
-                {
-                  de: "Liste mit „limit“ und Zustand je Backup (creating, ready, failed)",
-                  en: "List with “limit” and the state of each backup (creating, ready, failed)",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/backups",
-                {
-                  de: 'Backup anlegen: {"name":"Vor dem Update"} (Name freiwillig)',
-                  en: 'Create a backup: {"name":"Before the update"} (name optional)',
-                },
-              ],
-              [
-                "GET",
-                "/servers/{id}/backups/{backup}/download-url",
-                {
-                  de: "Adresse zum Herunterladen (5 Minuten gültig)",
-                  en: "Download URL (valid for 5 minutes)",
-                },
-              ],
-              [
-                "POST",
-                "/servers/{id}/backups/{backup}/restore",
-                {
-                  de: 'Einspielen: {"truncate":false} – mit true werden vorher alle Dateien gelöscht',
-                  en: 'Restore: {"truncate":false} – true deletes all files first',
-                },
-              ],
-              [
-                "DELETE",
-                "/servers/{id}/backups/{backup}",
-                { de: "Backup löschen", en: "Delete the backup" },
-              ],
+              ['GET', '/servers/{id}/backups', { de: 'Liste mit „limit“ und Zustand je Backup (creating, ready, failed)', en: 'List with “limit” and the state of each backup (creating, ready, failed)' }],
+              ['POST', '/servers/{id}/backups', { de: 'Backup anlegen: {"name":"Vor dem Update"} (Name freiwillig)', en: 'Create a backup: {"name":"Before the update"} (name optional)' }],
+              ['GET', '/servers/{id}/backups/{backup}/download-url', { de: 'Adresse zum Herunterladen (5 Minuten gültig)', en: 'Download URL (valid for 5 minutes)' }],
+              ['POST', '/servers/{id}/backups/{backup}/restore', { de: 'Einspielen: {"truncate":false} – mit true werden vorher alle Dateien gelöscht', en: 'Restore: {"truncate":false} – true deletes all files first' }],
+              ['DELETE', '/servers/{id}/backups/{backup}', { de: 'Backup löschen', en: 'Delete the backup' }],
             ],
           },
         },
         {
           ul: [
-            {
-              de: "Einspielen geht nur, wenn der Server aus ist und keine Sitzung läuft (sonst 409 server_running). Danach warten, bis der Zustand wieder „offline“ ist, und normal starten.",
-              en: "Restoring only works while the server is off and no session is running (otherwise 409 server_running). Then wait until the state is “offline” again and start normally.",
-            },
-            {
-              de: "Je Server: höchstens 2 neue Backups und 2 Einspielungen in 10 Minuten (429 too_often, Wartezeit in fields.retryAfterSeconds), und immer nur ein Backup-Vorgang zugleich (409 backup_busy). Einträge der Liste: id, name, bytes, state, createdAt, completedAt. Ohne Namen heißt ein Backup „Backup JJJJ-MM-TT HH:MM“ (UTC).",
-              en: "Per server: at most 2 new backups and 2 restores per 10 minutes (429 too_often, waiting time in fields.retryAfterSeconds), and only one backup operation at a time (409 backup_busy). List entries: id, name, bytes, state, createdAt, completedAt. Without a name a backup is called “Backup YYYY-MM-DD HH:MM” (UTC).",
-            },
-            {
-              de: "Ein Backup ändert nichts an Laufzeit, Pause oder Löschdatum. Wird ein Server gelöscht, werden seine Backups mit gelöscht.",
-              en: "A backup changes nothing about runtime, pause or deletion date. When a server is deleted, its backups are deleted with it.",
-            },
+            { de: 'Einspielen geht nur, wenn der Server aus ist und keine Sitzung läuft (sonst 409 server_running). Danach warten, bis der Zustand wieder „offline“ ist, und normal starten.', en: 'Restoring only works while the server is off and no session is running (otherwise 409 server_running). Then wait until the state is “offline” again and start normally.' },
+            { de: 'Je Server: höchstens 2 neue Backups und 2 Einspielungen in 10 Minuten (429 too_often, Wartezeit in fields.retryAfterSeconds), und immer nur ein Backup-Vorgang zugleich (409 backup_busy). Einträge der Liste: id, name, bytes, state, createdAt, completedAt. Ohne Namen heißt ein Backup „Backup JJJJ-MM-TT HH:MM“ (UTC).', en: 'Per server: at most 2 new backups and 2 restores per 10 minutes (429 too_often, waiting time in fields.retryAfterSeconds), and only one backup operation at a time (409 backup_busy). List entries: id, name, bytes, state, createdAt, completedAt. Without a name a backup is called “Backup YYYY-MM-DD HH:MM” (UTC).' },
+            { de: 'Ein Backup ändert nichts an Laufzeit, Pause oder Löschdatum. Wird ein Server gelöscht, werden seine Backups mit gelöscht.', en: 'A backup changes nothing about runtime, pause or deletion date. When a server is deleted, its backups are deleted with it.' },
           ],
         },
       ],
     },
     {
-      heading: { de: "Servertyp und Version", en: "Server type and version" },
+      heading: { de: 'Servertyp und Version', en: 'Server type and version' },
       blocks: [
+        { p: { de: 'Angeboten werden Paper, Purpur, Vanilla, Fabric, Forge, NeoForge und Quilt – welche Typen und Versionen für euch freigeschaltet sind, steht in GET /me („serverTypes“). Angeboten werden alle veröffentlichten Versionen (keine Vorabversionen); die Liste aktualisiert sich von selbst. Beim Erstellen gebt ihr „serverType“ und „version“ an; „latest“ ist die neueste veröffentlichte Version. Über die API gibt es ausschließlich Java-Spielserver – Bedrock und Proxys (Velocity, BungeeCord) lassen sich nicht erstellen.', en: 'Paper, Purpur, Vanilla, Fabric, Forge, NeoForge and Quilt are offered – which types and versions are enabled for you is listed in GET /me (“serverTypes”). All released versions are offered (no pre-releases); the list updates itself. When creating you pass “serverType” and “version”; “latest” is the newest released version. The API offers Java game servers only – Bedrock and proxies (Velocity, BungeeCord) cannot be created.' } },
+        { p: { de: 'Die Server-Software wird automatisch eingerichtet (inklusive passender Java-Version). So lange ist der Zustand „installing“; erst wenn er „offline“ ist, lässt sich der Server starten. Je nach Einrichtung installiert unser Panel die Software direkt in einem Durchgang (in der Regel in Sekunden bis wenigen Minuten) – dann bleibt „install“ null. Läuft die Einrichtung schrittweise nach der Grundinstallation, zeigt „install“ den Fortschritt.', en: 'The server software is set up automatically (including the matching Java version). Meanwhile the state is “installing”; only once it is “offline” can the server be started. Depending on the setup, our panel installs the software directly in a single pass (typically seconds to a few minutes) – then “install” stays null. If setup runs step by step after the base installation, “install” shows the progress.' } },
+        { note: { de: 'Wertet für eure Logik nur „state“ aus (oder die Webhooks server.installed und server.install_failed) – nicht „install“. Welcher Weg genutzt wird, kann sich ohne Ankündigung ändern.', en: 'Base your logic on “state” only (or on the webhooks server.installed and server.install_failed) – not on “install”. Which path is used may change without notice.' } },
         {
-          p: {
-            de: "Angeboten werden Paper, Purpur, Vanilla, Fabric, Forge, NeoForge und Quilt – welche Typen und Versionen für euch freigeschaltet sind, steht in GET /me („serverTypes“). Angeboten werden alle veröffentlichten Versionen (keine Vorabversionen); die Liste aktualisiert sich von selbst. Beim Erstellen gebt ihr „serverType“ und „version“ an; „latest“ ist die neueste veröffentlichte Version. Über die API gibt es ausschließlich Java-Spielserver – Bedrock und Proxys (Velocity, BungeeCord) lassen sich nicht erstellen.",
-            en: "Paper, Purpur, Vanilla, Fabric, Forge, NeoForge and Quilt are offered – which types and versions are enabled for you is listed in GET /me (“serverTypes”). All released versions are offered (no pre-releases); the list updates itself. When creating you pass “serverType” and “version”; “latest” is the newest released version. The API offers Java game servers only – Bedrock and proxies (Velocity, BungeeCord) cannot be created.",
-          },
-        },
-        {
-          p: {
-            de: "Die Server-Software wird automatisch eingerichtet (inklusive passender Java-Version). So lange ist der Zustand „installing“; erst wenn er „offline“ ist, lässt sich der Server starten. Je nach Einrichtung installiert unser Panel die Software direkt in einem Durchgang (in der Regel in Sekunden bis wenigen Minuten) – dann bleibt „install“ null. Läuft die Einrichtung schrittweise nach der Grundinstallation, zeigt „install“ den Fortschritt.",
-            en: "The server software is set up automatically (including the matching Java version). Meanwhile the state is “installing”; only once it is “offline” can the server be started. Depending on the setup, our panel installs the software directly in a single pass (typically seconds to a few minutes) – then “install” stays null. If setup runs step by step after the base installation, “install” shows the progress.",
-          },
-        },
-        {
-          note: {
-            de: "Wertet für eure Logik nur „state“ aus (oder die Webhooks server.installed und server.install_failed) – nicht „install“. Welcher Weg genutzt wird, kann sich ohne Ankündigung ändern.",
-            en: "Base your logic on “state” only (or on the webhooks server.installed and server.install_failed) – not on “install”. Which path is used may change without notice.",
-          },
-        },
-        {
-          title: {
-            de: "Nur bei schrittweiser Einrichtung",
-            en: "Step-by-step setup only",
-          },
+          title: { de: 'Nur bei schrittweiser Einrichtung', en: 'Step-by-step setup only' },
           code: `"state": "installing",
 "install": { "status": "installing", "serverType": "fabric", "version": "1.21.11", "build": "0.20.1", "step": 1, "steps": 1, "error": null }`,
         },
         {
-          p: {
-            de: "PATCH /servers/{id} mit „serverType“ und/oder „version“ stellt einen vorhandenen Server um – ohne ihn zu löschen. Wird ein anderer „serverType“ ohne „version“ angegeben, gilt „latest“. POST /servers/{id}/reinstall richtet die aktuelle Software noch einmal ein. Danach kann „version“ die tatsächlich installierte Version enthalten (z. B. „1.21.11“ statt „latest“); eine spätere Neuinstallation ohne Angaben richtet genau diese Version erneut ein.",
-            en: "PATCH /servers/{id} with “serverType” and/or “version” switches an existing server – without deleting it. If a different “serverType” is sent without “version”, “latest” applies. POST /servers/{id}/reinstall sets up the current software once more. Afterwards “version” may contain the version actually installed (e.g. “1.21.11” instead of “latest”); a later reinstall without parameters sets up exactly that version again.",
-          },
+          p: { de: 'PATCH /servers/{id} mit „serverType“ und/oder „version“ stellt einen vorhandenen Server um – ohne ihn zu löschen. Wird ein anderer „serverType“ ohne „version“ angegeben, gilt „latest“. POST /servers/{id}/reinstall richtet die aktuelle Software noch einmal ein. Danach kann „version“ die tatsächlich installierte Version enthalten (z. B. „1.21.11“ statt „latest“); eine spätere Neuinstallation ohne Angaben richtet genau diese Version erneut ein.', en: 'PATCH /servers/{id} with “serverType” and/or “version” switches an existing server – without deleting it. If a different “serverType” is sent without “version”, “latest” applies. POST /servers/{id}/reinstall sets up the current software once more. Afterwards “version” may contain the version actually installed (e.g. “1.21.11” instead of “latest”); a later reinstall without parameters sets up exactly that version again.' },
         },
         {
-          code: `curl -X PATCH {api}/servers/$ID -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+          code: `curl -X PATCH {api}/servers/$ID -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"serverType":"fabric","version":"1.21.1"}'`,
         },
         {
           ul: [
+            { de: 'Der Server muss aus sein und darf keine laufende Sitzung haben (sonst 409 server_running).', en: 'The server must be off with no running session (otherwise 409 server_running).' },
+            { de: 'Während der Einrichtung antworten Starten, Dateien, Mods, Einstellungen, Backups, Konsole (logs, console/stream) und stats mit 409 server_installing. Mit einem Webhook kommt „server.installed“, sobald alles fertig ist – oder „server.install_failed“.', en: 'During setup, starting, files, mods, settings, backups, console (logs, console/stream) and stats answer 409 server_installing. With a webhook you get “server.installed” once everything is done – or “server.install_failed”.' },
             {
-              de: "Der Server muss aus sein und darf keine laufende Sitzung haben (sonst 409 server_running).",
-              en: "The server must be off with no running session (otherwise 409 server_running).",
+              de: 'Schlägt die Einrichtung fehl, ist der Zustand „failed“. Bei schrittweiser Einrichtung nennt „install.error“ den Grund (eine fehlgeschlagene Grundinstallation versuchen wir dort vorher einmal von selbst); installiert das Panel direkt, bleibt „install“ null und der Webhook meldet nur einen allgemeinen Hinweis. Starten antwortet dann mit 409 server_failed; mit POST /reinstall oder einem erneuten PATCH wird es noch einmal versucht. Ausnahme: Schlägt schon das Anlegen bei uns fehl („failed“ direkt nach POST /servers, „address“ null), versuchen wir es selbst noch einige Male; Neuinstallation und PATCH antworten solange mit 409 server_installing. Bleibt der Zustand „failed“, löscht den Server und meldet euch bei uns.',
+              en: 'If setup fails, the state is “failed”. With step-by-step setup “install.error” gives the reason (there we retry a failed base installation once on our own first); if the panel installs directly, “install” stays null and the webhook only carries a generic note. Starting then answers 409 server_failed; POST /reinstall or another PATCH tries again. Exception: if creating the server already fails on our side (“failed” right after POST /servers, “address” null), we retry creating it a few times ourselves; reinstall and PATCH answer 409 server_installing meanwhile. If the state stays “failed”, delete the server and contact us.',
             },
-            {
-              de: "Während der Einrichtung antworten Starten, Dateien, Mods, Einstellungen, Backups, Konsole (logs, console/stream) und stats mit 409 server_installing. Mit einem Webhook kommt „server.installed“, sobald alles fertig ist – oder „server.install_failed“.",
-              en: "During setup, starting, files, mods, settings, backups, console (logs, console/stream) and stats answer 409 server_installing. With a webhook you get “server.installed” once everything is done – or “server.install_failed”.",
-            },
-            {
-              de: "Schlägt die Einrichtung fehl, ist der Zustand „failed“. Bei schrittweiser Einrichtung nennt „install.error“ den Grund (eine fehlgeschlagene Grundinstallation versuchen wir dort vorher einmal von selbst); installiert das Panel direkt, bleibt „install“ null und der Webhook meldet nur einen allgemeinen Hinweis. Starten antwortet dann mit 409 server_failed; mit POST /reinstall oder einem erneuten PATCH wird es noch einmal versucht.",
-              en: "If setup fails, the state is “failed”. With step-by-step setup “install.error” gives the reason (there we retry a failed base installation once on our own first); if the panel installs directly, “install” stays null and the webhook only carries a generic note. Starting then answers 409 server_failed; POST /reinstall or another PATCH tries again.",
-            },
-            {
-              de: "Welt, Mods/Plugins und übrige Dateien bleiben beim Wechsel erhalten; ersetzt wird die Server-Software. Mods eines anderen Laders räumt ihr selbst auf (Fabric-Mods laufen nicht unter Forge). Eine Welt aus einer neueren Version lässt sich nicht mit einer älteren öffnen.",
-              en: "World, mods/plugins and other files are kept when switching; the server software is replaced. Clean up mods of another loader yourselves (Fabric mods do not run under Forge). A world from a newer version cannot be opened with an older one.",
-            },
-            {
-              de: "Paket, Arbeitsspeicher, Adresse, Laufzeit-Stand, Pflichtpause und EULA-Zustimmung bleiben unverändert. Startbefehl, Image oder Ressourcen lassen sich nicht mitgeben – andere Felder als name, serverType und version beantwortet die API mit 400 validation_error. Den Startbefehl setzen wir für euch.",
-              en: "Plan, memory, address, runtime counter, mandatory pause and EULA acceptance stay unchanged. Startup command, image or resources cannot be passed – the API answers fields other than name, serverType and version with 400 validation_error. We set the startup command for you.",
-            },
-            {
-              de: "Je Server höchstens 3 Wechsel bzw. Neuinstallationen pro Stunde (429 too_often). Läuft die Einrichtung schrittweise, werden außerdem höchstens 10 eurer Server gleichzeitig eingerichtet (429 too_many_installs – kurz warten und erneut versuchen); fehlgeschlagene Einrichtungen und gesperrte Server zählen nicht mit.",
-              en: "At most 3 switches or reinstalls per server per hour (429 too_often). With step-by-step setup, in addition at most 10 of your servers are set up at the same time (429 too_many_installs – wait briefly and retry); failed setups and suspended servers do not count.",
-            },
-            {
-              de: "Fehlt bei uns das passende Java für eine Version, antworten PATCH und POST /reinstall sofort mit 400 version_unavailable (der Server behält seine bisherige Software); beim Erstellen landet der Server im Zustand „failed“. Bitte meldet euch in dem Fall bei uns.",
-              en: "If the matching Java for a version is missing on our side, PATCH and POST /reinstall immediately answer 400 version_unavailable (the server keeps its previous software); when creating, the server ends up in state “failed”. Please contact us in that case.",
-            },
+            { de: 'Welt, Mods/Plugins und übrige Dateien bleiben beim Wechsel erhalten; ersetzt wird die Server-Software. Mods eines anderen Laders räumt ihr selbst auf (Fabric-Mods laufen nicht unter Forge). Eine Welt aus einer neueren Version lässt sich nicht mit einer älteren öffnen.', en: 'World, mods/plugins and other files are kept when switching; the server software is replaced. Clean up mods of another loader yourselves (Fabric mods do not run under Forge). A world from a newer version cannot be opened with an older one.' },
+            { de: 'Paket, Arbeitsspeicher, Adresse, Laufzeit-Stand, Pflichtpause und EULA-Zustimmung bleiben unverändert. Startbefehl, Image oder Ressourcen lassen sich nicht mitgeben – andere Felder als name, serverType und version beantwortet die API mit 400 validation_error. Den Startbefehl setzen wir für euch.', en: 'Plan, memory, address, runtime counter, mandatory pause and EULA acceptance stay unchanged. Startup command, image or resources cannot be passed – the API answers fields other than name, serverType and version with 400 validation_error. We set the startup command for you.' },
+            { de: 'Je Server höchstens 3 Wechsel bzw. Neuinstallationen pro Stunde (429 too_often). Läuft die Einrichtung schrittweise, werden außerdem höchstens 10 eurer Server gleichzeitig eingerichtet (429 too_many_installs – kurz warten und erneut versuchen); fehlgeschlagene Einrichtungen und gesperrte Server zählen nicht mit.', en: 'At most 3 switches or reinstalls per server per hour (429 too_often). With step-by-step setup, in addition at most 10 of your servers are set up at the same time (429 too_many_installs – wait briefly and retry); failed setups and suspended servers do not count.' },
+            { de: 'Fehlt bei uns das passende Java für eine Version: Installiert das Panel direkt, antworten PATCH und POST /reinstall sofort mit 400 version_unavailable, und der Server behält seine bisherige Software. Bei schrittweiser Einrichtung wird die Anfrage angenommen und endet mit „failed“ (Grund in „install.error“). Beim Erstellen landet der Server im Zustand „failed“. Bitte meldet euch in dem Fall bei uns.', en: 'If the matching Java for a version is missing on our side: when the panel installs directly, PATCH and POST /reinstall immediately answer 400 version_unavailable, and the server keeps its previous software. With step-by-step setup the request is accepted and ends in “failed” (reason in “install.error”). When creating, the server ends up in state “failed”. Please contact us in that case.' },
           ],
         },
       ],
     },
     {
-      heading: { de: "Webhooks", en: "Webhooks" },
+      heading: { de: 'Webhooks', en: 'Webhooks' },
       blocks: [
-        {
-          p: {
-            de: "Statt ständig abzufragen, könnt ihr euch Statuswechsel schicken lassen. Je Zugang gibt es eine Adresse. Beim Setzen bekommt ihr einmalig ein Geheimnis (whsec_…), mit dem ihr jede Zustellung prüft.",
-            en: "Instead of polling you can have status changes sent to you. There is one URL per access. When setting it you receive a secret once (whsec_…) with which you verify every delivery.",
-          },
-        },
+        { p: { de: 'Statt ständig abzufragen, könnt ihr euch Statuswechsel schicken lassen. Je Zugang gibt es eine Adresse. Beim Setzen bekommt ihr einmalig ein Geheimnis (whsec_…), mit dem ihr jede Zustellung prüft.', en: 'Instead of polling you can have status changes sent to you. There is one URL per access. When setting it you receive a secret once (whsec_…) with which you verify every delivery.' } },
         {
           table: {
             head: [
-              { de: "Methode", en: "Method" },
-              { de: "Pfad", en: "Path" },
-              { de: "Zweck", en: "Purpose" },
+              { de: 'Methode', en: 'Method' },
+              { de: 'Pfad', en: 'Path' },
+              { de: 'Zweck', en: 'Purpose' },
             ],
             rows: [
-              [
-                "PUT",
-                "/webhook",
-                {
-                  de: '{"url":"https://…"} setzen oder ändern – Antwort enthält „secret“ (nur dieses eine Mal)',
-                  en: 'Set or change {"url":"https://…"} – the response contains “secret” (this one time only)',
-                },
-              ],
-              [
-                "GET",
-                "/webhook",
-                {
-                  de: "Adresse, wartende Ereignisse und die letzten Zustellungen",
-                  en: "URL, pending events and the latest deliveries",
-                },
-              ],
-              [
-                "POST",
-                "/webhook/test",
-                {
-                  de: "Test-Ereignis „webhook.test“ schicken",
-                  en: "Send the test event “webhook.test”",
-                },
-              ],
-              [
-                "DELETE",
-                "/webhook",
-                { de: "Webhook entfernen", en: "Remove the webhook" },
-              ],
+              ['PUT', '/webhook', { de: '{"url":"https://…"} setzen oder ändern – Antwort enthält „secret“ (nur dieses eine Mal)', en: 'Set or change {"url":"https://…"} – the response contains “secret” (this one time only)' }],
+              ['GET', '/webhook', { de: 'Adresse, wartende Ereignisse und die letzten Zustellungen', en: 'URL, pending events and the latest deliveries' }],
+              ['POST', '/webhook/test', { de: 'Test-Ereignis „webhook.test“ schicken', en: 'Send the test event “webhook.test”' }],
+              ['DELETE', '/webhook', { de: 'Webhook entfernen', en: 'Remove the webhook' }],
             ],
           },
         },
         {
           table: {
             head: [
-              { de: "Ereignis", en: "Event" },
-              { de: "Wann", en: "When" },
-              { de: "Zusätzlich in data", en: "Additionally in data" },
+              { de: 'Ereignis', en: 'Event' },
+              { de: 'Wann', en: 'When' },
+              { de: 'Zusätzlich in data', en: 'Additionally in data' },
             ],
             rows: [
-              [
-                "server.installed",
-                {
-                  de: "Installation bzw. Einrichtung der Server-Software fertig",
-                  en: "Installation or software setup finished",
-                },
-                "address",
-              ],
-              [
-                "server.install_failed",
-                {
-                  de: "Installation bzw. Einrichtung der Server-Software fehlgeschlagen (auch bei der Installation direkt im Panel)",
-                  en: "Installation or software setup failed (also when installing directly in the panel)",
-                },
-                {
-                  de: "serverType, version, error (kurzer Hinweistext auf Deutsch – nicht maschinell auswerten)",
-                  en: "serverType, version, error (short note in German – do not parse)",
-                },
-              ],
-              [
-                "server.running",
-                {
-                  de: "Server ist hochgefahren und erreichbar",
-                  en: "Server is up and reachable",
-                },
-                "address",
-              ],
-              [
-                "server.stopped",
-                { de: "Sitzung beendet", en: "Session ended" },
-                "reason (host_stopped · host_timeout · session_limit · settings_limit · admin), cooldownUntil",
-              ],
-              [
-                "server.cooldown_ended",
-                {
-                  de: "Pflichtpause vorbei – Start wieder möglich",
-                  en: "Mandatory pause over – start possible again",
-                },
-                "–",
-              ],
-              [
-                "server.deletion_soon",
-                {
-                  de: "Server wird bald wegen Nichtnutzung gelöscht",
-                  en: "Server will soon be deleted for inactivity",
-                },
-                "deleteAt",
-              ],
-              [
-                "server.deleted",
-                {
-                  de: "Server wegen Nichtnutzung gelöscht",
-                  en: "Server deleted for inactivity",
-                },
-                "reason (idle)",
-              ],
+              ['server.installed', { de: 'Installation bzw. Einrichtung der Server-Software fertig', en: 'Installation or software setup finished' }, 'address'],
+              ['server.install_failed', { de: 'Installation bzw. Einrichtung der Server-Software fehlgeschlagen (auch bei der Installation direkt im Panel)', en: 'Installation or software setup failed (also when installing directly in the panel)' }, { de: 'serverType, version, error (kurzer Hinweistext auf Deutsch – nicht maschinell auswerten)', en: 'serverType, version, error (short note in German – do not parse)' }],
+              ['server.running', { de: 'Server ist hochgefahren und erreichbar', en: 'Server is up and reachable' }, 'address'],
+              ['server.stopped', { de: 'Sitzung beendet', en: 'Session ended' }, 'reason (host_stopped · host_timeout · session_limit · settings_limit · admin), cooldownUntil'],
+              ['server.cooldown_ended', { de: 'Pflichtpause vorbei – Start wieder möglich', en: 'Mandatory pause over – start possible again' }, '–'],
+              ['server.deletion_soon', { de: 'Server wird bald wegen Nichtnutzung gelöscht', en: 'Server will soon be deleted for inactivity' }, 'deleteAt'],
+              ['server.deleted', { de: 'Server wegen Nichtnutzung gelöscht', en: 'Server deleted for inactivity' }, 'reason (idle)'],
             ],
           },
         },
         {
-          p: {
-            de: 'Jede Zustellung ist ein POST mit JSON. „data“ enthält bei allen server.*-Ereignissen serverId, name und playerId (beim Test-Ereignis nur {"message":"Test"}).',
-            en: 'Every delivery is a POST with JSON. For all server.* events “data” contains serverId, name and playerId (the test event only has {"message":"Test"}).',
-          },
+          p: { de: 'Jede Zustellung ist ein POST mit JSON. „data“ enthält bei allen server.*-Ereignissen serverId, name und playerId (beim Test-Ereignis nur {"message":"Test"}).', en: 'Every delivery is a POST with JSON. For all server.* events “data” contains serverId, name and playerId (the test event only has {"message":"Test"}).' },
         },
         {
           code: `POST https://euer-backend.example/chf-webhook
@@ -1006,423 +467,134 @@ function verify(rawBody, headers, secret) {
         },
         {
           ul: [
-            {
-              de: "Die Adresse muss https auf dem Standard-Port sein und öffentlich erreichbar; Weiterleitungen folgen wir nicht.",
-              en: "The URL must be https on the default port and publicly reachable; we do not follow redirects.",
-            },
-            {
-              de: "Antwortet mit einem 2xx-Status innerhalb von 5 Sekunden. Sonst versuchen wir es erneut: nach 30 Sekunden, 2 Minuten, 10 Minuten, 1 Stunde und 6 Stunden – danach gilt die Zustellung als fehlgeschlagen.",
-              en: "Answer with a 2xx status within 5 seconds. Otherwise we retry: after 30 seconds, 2 minutes, 10 minutes, 1 hour and 6 hours – after that the delivery counts as failed.",
-            },
-            {
-              de: "Ereignisse können doppelt oder in anderer Reihenfolge ankommen. Merkt euch die „id“ und fragt im Zweifel den Stand mit GET /servers/{id} ab.",
-              en: "Events may arrive twice or out of order. Remember the “id” and when in doubt fetch the state with GET /servers/{id}.",
-            },
-            {
-              de: "Webhooks sind reine Benachrichtigungen: Eure Antwort ändert nichts am Server. Gestartet wird weiterhin nur über POST /servers/{id}/start.",
-              en: "Webhooks are notifications only: your response changes nothing on the server. Starting still only happens through POST /servers/{id}/start.",
-            },
-            {
-              de: "GET /webhook zeigt die Adresse, die Zahl wartender Ereignisse und die letzten 20 Zustellungen (Zustand pending, delivered oder failed, Versuche, letzter Fehler). Ereignisse werden nur gesammelt, solange eine Adresse gesetzt ist. Es warten höchstens 5000; weitere werden verworfen. Zugestellte und endgültig fehlgeschlagene Einträge werden nach 7 Tagen entfernt.",
-              en: "GET /webhook shows the URL, the number of pending events and the latest 20 deliveries (state pending, delivered or failed, attempts, last error). Events are only collected while a URL is set. At most 5000 wait; further ones are dropped. Delivered and finally failed entries are removed after 7 days.",
-            },
+            { de: 'Die Adresse muss https auf dem Standard-Port sein und öffentlich erreichbar; Weiterleitungen folgen wir nicht.', en: 'The URL must be https on the default port and publicly reachable; we do not follow redirects.' },
+            { de: 'Antwortet mit einem 2xx-Status innerhalb von 5 Sekunden. Sonst versuchen wir es erneut: nach 30 Sekunden, 2 Minuten, 10 Minuten, 1 Stunde und 6 Stunden – danach gilt die Zustellung als fehlgeschlagen.', en: 'Answer with a 2xx status within 5 seconds. Otherwise we retry: after 30 seconds, 2 minutes, 10 minutes, 1 hour and 6 hours – after that the delivery counts as failed.' },
+            { de: 'Ereignisse können doppelt oder in anderer Reihenfolge ankommen. Merkt euch die „id“ und fragt im Zweifel den Stand mit GET /servers/{id} ab.', en: 'Events may arrive twice or out of order. Remember the “id” and when in doubt fetch the state with GET /servers/{id}.' },
+            { de: 'Webhooks sind reine Benachrichtigungen: Eure Antwort ändert nichts am Server. Gestartet wird weiterhin nur über POST /servers/{id}/start.', en: 'Webhooks are notifications only: your response changes nothing on the server. Starting still only happens through POST /servers/{id}/start.' },
+            { de: 'GET /webhook zeigt die Adresse, die Zahl wartender Ereignisse und die letzten 20 Zustellungen (Zustand pending, delivered oder failed, Versuche, letzter Fehler). Ereignisse werden nur gesammelt, solange eine Adresse gesetzt ist. Es warten höchstens 5000; weitere werden verworfen. Zugestellte und endgültig fehlgeschlagene Einträge werden nach 7 Tagen entfernt.', en: 'GET /webhook shows the URL, the number of pending events and the latest 20 deliveries (state pending, delivered or failed, attempts, last error). Events are only collected while a URL is set. At most 5000 wait; further ones are dropped. Delivered and finally failed entries are removed after 7 days.' },
           ],
         },
       ],
     },
     {
-      heading: {
-        de: "Regeln, die immer gelten",
-        en: "Rules that always apply",
-      },
+      heading: { de: 'Regeln, die immer gelten', en: 'Rules that always apply' },
       blocks: [
-        {
-          p: {
-            de: "Damit die Integration nicht an unerwarteten Stellen hängen bleibt: Diese Regeln setzt unser System fest durch – unabhängig davon, über welchen Endpunkt etwas geändert wurde.",
-            en: "So your integration does not get stuck in unexpected places: our system enforces these rules firmly – regardless of which endpoint was used to change something.",
-          },
-        },
+        { p: { de: 'Damit die Integration nicht an unerwarteten Stellen hängen bleibt: Diese Regeln setzt unser System fest durch – unabhängig davon, über welchen Endpunkt etwas geändert wurde.', en: 'So your integration does not get stuck in unexpected places: our system enforces these rules firmly – regardless of which endpoint was used to change something.' } },
         {
           ul: [
+            { de: 'Laufzeit und Pflichtpause gehören zum Spieler: Wird ein Server gelöscht und neu erstellt, gelten die bereits gelaufene Zeit und eine laufende Pause weiter.', en: 'Runtime and mandatory pause belong to the player: if a server is deleted and recreated, the time already run and a running pause continue to apply.' },
+            { de: 'Gelöschte Server geben ihren Platz erst frei, wenn ihre Pause vorbei ist: Ein Server in der Pflichtpause (oder mit Laufzeit aus den letzten Stunden) zählt nach dem Löschen so lange weiter zu eurer Höchstzahl – außer derselbe Spieler erstellt einen neuen, der den Stand übernimmt.', en: 'Deleted servers only free their slot once their break is over: a server in its mandatory pause (or with runtime from the last hours) keeps counting towards your maximum after deletion for that long – unless the same player creates a new one, which takes over the state.' },
+            { de: 'Ein neuer Start geht erst, wenn der Server aus der vorigen Sitzung wirklich aus ist (bis dahin 409 server_stopping – nach ein paar Sekunden erneut versuchen).', en: 'A new start only works once the server from the previous session is really off (until then 409 server_stopping – retry after a few seconds).' },
+            { de: 'Läuft ein Server nach dem Ende der Sitzung noch weiter (weil er den Stopp-Befehl ignoriert), zählt auch diese Zeit als Laufzeit.', en: 'If a server keeps running after the session has ended (because it ignores the stop command), that time counts as runtime too.' },
+            { de: 'Ohne laufende Sitzung ist ein Server aus. Reagiert er nicht auf den Stopp-Befehl, wird er nach 2 Minuten hart beendet (nicht gespeicherte Änderungen können dann fehlen).', en: 'Without a running session a server is off. If it does not react to the stop command, it is killed after 2 minutes (unsaved changes may then be missing).' },
             {
-              de: "Laufzeit und Pflichtpause gehören zum Spieler: Wird ein Server gelöscht und neu erstellt, gelten die bereits gelaufene Zeit und eine laufende Pause weiter.",
-              en: "Runtime and mandatory pause belong to the player: if a server is deleted and recreated, the time already run and a running pause continue to apply.",
+              de: 'Die Grenzen der Servereinstellungen (z. B. maxPlayers 1–100, viewDistance 3–16) gelten auch für eine hochgeladene server.properties: Vor jedem Start werden zu hohe Werte zurückgesetzt. Das passiert schon beim Speichern über PUT /files/content. Bei Paper und Purpur gilt es auch für die Sichtweite in der spigot.yml. Läuft ein Server trotzdem mit Werten über den Grenzen (Prüfung etwa eine Minute nach dem Start), wird er gestoppt (reason: settings_limit) und kann danach normal neu gestartet werden.',
+              en: 'The limits of the server settings (e.g. maxPlayers 1–100, viewDistance 3–16) also apply to an uploaded server.properties: before every start, values that are too high are reset. This already happens when saving through PUT /files/content. For Paper and Purpur it also applies to the view distance in spigot.yml. If a server still runs with values above the limits (checked about one minute after the start), it is stopped (reason: settings_limit) and can then be started again normally.',
             },
-            {
-              de: "Gelöschte Server geben ihren Platz erst frei, wenn ihre Pause vorbei ist: Ein Server in der Pflichtpause (oder mit Laufzeit aus den letzten Stunden) zählt nach dem Löschen so lange weiter zu eurer Höchstzahl – außer derselbe Spieler erstellt einen neuen, der den Stand übernimmt.",
-              en: "Deleted servers only free their slot once their break is over: a server in its mandatory pause (or with runtime from the last hours) keeps counting towards your maximum after deletion for that long – unless the same player creates a new one, which takes over the state.",
-            },
-            {
-              de: "Ein neuer Start geht erst, wenn der Server aus der vorigen Sitzung wirklich aus ist (bis dahin 409 server_stopping – nach ein paar Sekunden erneut versuchen).",
-              en: "A new start only works once the server from the previous session is really off (until then 409 server_stopping – retry after a few seconds).",
-            },
-            {
-              de: "Läuft ein Server nach dem Ende der Sitzung noch weiter (weil er den Stopp-Befehl ignoriert), zählt auch diese Zeit als Laufzeit.",
-              en: "If a server keeps running after the session has ended (because it ignores the stop command), that time counts as runtime too.",
-            },
-            {
-              de: "Ohne laufende Sitzung ist ein Server aus. Reagiert er nicht auf den Stopp-Befehl, wird er nach 2 Minuten hart beendet (nicht gespeicherte Änderungen können dann fehlen).",
-              en: "Without a running session a server is off. If it does not react to the stop command, it is killed after 2 minutes (unsaved changes may then be missing).",
-            },
-            {
-              de: "Die Grenzen der Servereinstellungen (z. B. maxPlayers 1–100, viewDistance 3–16) gelten auch für eine hochgeladene server.properties: Vor jedem Start werden zu hohe Werte zurückgesetzt. Das passiert schon beim Speichern über PUT /files/content. Bei Paper und Purpur gilt es auch für die Sichtweite in der spigot.yml. Läuft ein Server trotzdem mit Werten über den Grenzen (Prüfung etwa eine Minute nach dem Start), wird er gestoppt (reason: settings_limit) und kann danach normal neu gestartet werden.",
-              en: "The limits of the server settings (e.g. maxPlayers 1–100, viewDistance 3–16) also apply to an uploaded server.properties: before every start, values that are too high are reset. This already happens when saving through PUT /files/content. For Paper and Purpur it also applies to the view distance in spigot.yml. If a server still runs with values above the limits (checked about one minute after the start), it is stopped (reason: settings_limit) and can then be started again normally.",
-            },
-            {
-              de: "„Weiterlaufen, solange Spieler online sind“ gilt höchstens 2 Stunden ohne Lebenszeichen des Hosts.",
-              en: "“Keep running while players are online” applies for at most 2 hours without a heartbeat from the host.",
-            },
-            {
-              de: "Ein Server lässt sich nicht löschen, solange er noch eingerichtet wird (409 server_installing) oder von uns gesperrt ist (409 server_suspended).",
-              en: "A server cannot be deleted while it is still being set up (409 server_installing) or suspended by us (409 server_suspended).",
-            },
-            {
-              de: "Während einer Wartung sind Erstellen, Starten, Löschen, Neuinstallieren, Typ/Version wechseln sowie Backups anlegen und einspielen gesperrt (503 maintenance). Lesen, Stoppen und Lebenszeichen gehen weiter.",
-              en: "During maintenance, creating, starting, deleting, reinstalling, changing type/version as well as creating and restoring backups are blocked (503 maintenance). Reading, stopping and heartbeats still work.",
-            },
+            { de: '„Weiterlaufen, solange Spieler online sind“ gilt höchstens 2 Stunden ohne Lebenszeichen des Hosts.', en: '“Keep running while players are online” applies for at most 2 hours without a heartbeat from the host.' },
+            { de: 'Ein Server lässt sich nicht löschen, solange er noch eingerichtet wird (409 server_installing) oder von uns gesperrt ist (409 server_suspended).', en: 'A server cannot be deleted while it is still being set up (409 server_installing) or suspended by us (409 server_suspended).' },
+            { de: 'Während einer Wartung sind Erstellen, Starten, Löschen, Neuinstallieren, Typ/Version wechseln sowie Backups anlegen und einspielen gesperrt (503 maintenance). Lesen, Stoppen und Lebenszeichen gehen weiter.', en: 'During maintenance, creating, starting, deleting, reinstalling, changing type/version as well as creating and restoring backups are blocked (503 maintenance). Reading, stopping and heartbeats still work.' },
           ],
         },
       ],
     },
     {
-      heading: {
-        de: "Adresse, Löschdatum und Anfrage-Limit",
-        en: "Address, deletion date and rate limit",
-      },
+      heading: { de: 'Adresse, Löschdatum und Anfrage-Limit', en: 'Address, deletion date and rate limit' },
       blocks: [
         {
           ul: [
-            {
-              de: "Feste Adresse: „host“ und „port“ eines Servers bleiben gleich, solange es den Server gibt – ein eigener SRV-Eintrag ist also möglich. Ausnahme: Wir verlegen den Server auf andere Hardware; dann ändert sich die Adresse.",
-              en: "Fixed address: a server’s “host” and “port” stay the same as long as the server exists – so your own SRV record is possible. Exception: we move the server to other hardware; then the address changes.",
-            },
-            {
-              de: "„deleteAt“ in jeder Server-Antwort: Wird der Server bis dahin nicht gestartet, wird er samt Daten gelöscht. Jeder Start verschiebt das Datum.",
-              en: "“deleteAt” in every server response: if the server is not started by then it is deleted including its data. Every start pushes the date back.",
-            },
-            {
-              de: "„session.hostPresent“: false bedeutet, der Launcher des Hosts meldet sich nicht mehr und der Server läuft nur noch, weil Spieler darauf sind.",
-              en: "“session.hostPresent”: false means the host’s launcher no longer reports in and the server only keeps running because players are on it.",
-            },
-            {
-              de: "Anfrage-Limit: je Zugang und Minute, je nach Endpunkt 30 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After. Ein neuer API-Key setzt die Zähler nicht zurück. Anfragen ohne gültigen Key zählen je IP-Adresse und Endpunkt (höchstens 30 je Minute, danach 429 statt 401).",
-              en: "Rate limit: per access and minute, 30 to 12,000 requests depending on the endpoint. Every response contains X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After. A new API key does not reset the counters. Requests without a valid key count per IP address and endpoint (at most 30 per minute, then 429 instead of 401).",
-            },
-            {
-              de: "Zusätzlich gibt es eine Obergrenze für Anfragen, die wir an die Server-Verwaltung weiterreichen müssen (Dateien, Einstellungen, Backups, Zustand). Wer sehr dicht abfragt, bekommt 429 panel_busy – dann seltener abfragen. GET /servers/{id}/stats und der Zustand in GET /servers/{id} sind 5 Sekunden zwischengespeichert; die Liste GET /servers und die Antwort auf ein Lebenszeichen zeigen den zuletzt bekannten Zustand (höchstens eine Minute alt). Für Statuswechsel sind Webhooks der bessere Weg.",
-              en: "In addition there is a cap on requests we have to pass on to the server management (files, settings, backups, state). If you poll very densely you get 429 panel_busy – then poll less often. GET /servers/{id}/stats and the state in GET /servers/{id} are cached for 5 seconds; the list GET /servers and the response to a heartbeat show the last known state (at most one minute old). For status changes, webhooks are the better way.",
-            },
+            { de: 'Feste Adresse: „host“ und „port“ eines Servers bleiben gleich, solange es den Server gibt – ein eigener SRV-Eintrag ist also möglich. Ausnahme: Wir verlegen den Server auf andere Hardware; dann ändert sich die Adresse.', en: 'Fixed address: a server’s “host” and “port” stay the same as long as the server exists – so your own SRV record is possible. Exception: we move the server to other hardware; then the address changes.' },
+            { de: '„deleteAt“ in jeder Server-Antwort: Wird der Server bis dahin nicht gestartet, wird er samt Daten gelöscht. Jeder Start verschiebt das Datum.', en: '“deleteAt” in every server response: if the server is not started by then it is deleted including its data. Every start pushes the date back.' },
+            { de: '„session.hostPresent“: false bedeutet, der Launcher des Hosts meldet sich nicht mehr und der Server läuft nur noch, weil Spieler darauf sind.', en: '“session.hostPresent”: false means the host’s launcher no longer reports in and the server only keeps running because players are on it.' },
+            { de: 'Anfrage-Limit: je Zugang und Minute, je nach Endpunkt 30 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After. Ein neuer API-Key setzt die Zähler nicht zurück. Anfragen ohne gültigen Key zählen je IP-Adresse und Endpunkt (höchstens 30 je Minute, danach 429 statt 401).', en: 'Rate limit: per access and minute, 30 to 12,000 requests depending on the endpoint. Every response contains X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After. A new API key does not reset the counters. Requests without a valid key count per IP address and endpoint (at most 30 per minute, then 429 instead of 401).' },
+            { de: 'Zusätzlich gibt es eine Obergrenze für Anfragen, die wir an die Server-Verwaltung weiterreichen müssen (Dateien, Einstellungen, Backups, Zustand). Wer sehr dicht abfragt, bekommt 429 panel_busy – dann seltener abfragen. GET /servers/{id}/stats und der Zustand in GET /servers/{id} sind 5 Sekunden zwischengespeichert; die Liste GET /servers und die Antwort auf ein Lebenszeichen zeigen den zuletzt bekannten Zustand (höchstens eine Minute alt). Für Statuswechsel sind Webhooks der bessere Weg.', en: 'In addition there is a cap on requests we have to pass on to the server management (files, settings, backups, state). If you poll very densely you get 429 panel_busy – then poll less often. GET /servers/{id}/stats and the state in GET /servers/{id} are cached for 5 seconds; the list GET /servers and the response to a heartbeat show the last known state (at most one minute old). For status changes, webhooks are the better way.' },
           ],
         },
         {
           table: {
             head: [
-              { de: "Endpunkte", en: "Endpoints" },
-              { de: "Anfragen je Minute", en: "Requests per minute" },
+              { de: 'Endpunkte', en: 'Endpoints' },
+              { de: 'Anfragen je Minute', en: 'Requests per minute' },
             ],
             rows: [
-              ["POST /servers/{id}/heartbeat", "12 000"],
-              ["GET /servers/{id}, GET /servers/{id}/stats", "6 000"],
-              [
-                {
-                  de: "Lesen, start, stop, command, logs, settings (GET), files (GET), Backups (GET), POST /heartbeat",
-                  en: "Reads, start, stop, command, logs, settings (GET), files (GET), backups (GET), POST /heartbeat",
-                },
-                "1 200",
-              ],
-              [
-                {
-                  de: "Schreiben: Dateien, Mods, Einstellungen, Löschen, GET /me, GET /webhook, Backup-Download",
-                  en: "Writes: files, mods, settings, delete, GET /me, GET /webhook, backup download",
-                },
-                "600",
-              ],
-              [
-                {
-                  de: "POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE Backup, GET /console/stream",
-                  en: "POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE backup, GET /console/stream",
-                },
-                "300",
-              ],
-              [
-                {
-                  de: "Backup anlegen/einspielen, POST /reinstall",
-                  en: "Create/restore backup, POST /reinstall",
-                },
-                "60",
-              ],
-              [
-                {
-                  de: "Webhook setzen, löschen, testen",
-                  en: "Set, delete, test webhook",
-                },
-                "30",
-              ],
+              ['POST /servers/{id}/heartbeat', '12 000'],
+              ['GET /servers/{id}, GET /servers/{id}/stats', '6 000'],
+              [{ de: 'Lesen, start, stop, command, logs, settings (GET), files (GET), Backups (GET), POST /heartbeat', en: 'Reads, start, stop, command, logs, settings (GET), files (GET), backups (GET), POST /heartbeat' }, '1 200'],
+              [{ de: 'Schreiben: Dateien, Mods, Einstellungen, Löschen, GET /me, GET /webhook, Backup-Download', en: 'Writes: files, mods, settings, delete, GET /me, GET /webhook, backup download' }, '600'],
+              [{ de: 'POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE Backup, GET /console/stream', en: 'POST /servers, POST /files/decompress, PATCH /servers/{id}, DELETE backup, GET /console/stream' }, '300'],
+              [{ de: 'Backup anlegen/einspielen, POST /reinstall', en: 'Create/restore backup, POST /reinstall' }, '60'],
+              [{ de: 'Webhook setzen, löschen, testen', en: 'Set, delete, test webhook' }, '30'],
             ],
           },
         },
       ],
     },
     {
-      heading: { de: "Fehler", en: "Errors" },
+      heading: { de: 'Fehler', en: 'Errors' },
       blocks: [
-        {
-          p: {
-            de: "Fehler kommen mit passendem HTTP-Status und diesem Aufbau:",
-            en: "Errors come with a matching HTTP status and this shape:",
-          },
-        },
+        { p: { de: 'Fehler kommen mit passendem HTTP-Status und diesem Aufbau:', en: 'Errors come with a matching HTTP status and this shape:' } },
         {
           code: `{ "error": { "code": "cooldown", "message": "…", "fields": { "cooldownUntil": "2026-11-18T17:59:37.077Z" } } }`,
         },
         {
           table: {
             head: [
-              { de: "Status", en: "Status" },
-              { de: "code", en: "code" },
-              { de: "Bedeutung", en: "Meaning" },
+              { de: 'Status', en: 'Status' },
+              { de: 'code', en: 'code' },
+              { de: 'Bedeutung', en: 'Meaning' },
             ],
             rows: [
-              [
-                "401",
-                "invalid_api_key",
-                {
-                  de: "Key fehlt, ist falsch oder der Zugang ist deaktiviert",
-                  en: "Key missing, wrong or access disabled",
-                },
-              ],
-              [
-                "403",
-                "forbidden",
-                {
-                  de: "Dieser Spieler ist von uns gesperrt (beim Anlegen, Erstellen und Starten)",
-                  en: "This player has been blocked by us (when creating a player or server and when starting)",
-                },
-              ],
-              [
-                "400",
-                "validation_error, invalid_name, invalid_player, server_type_unavailable, version_unavailable, invalid_json",
-                {
-                  de: "Angaben prüfen (Details in fields)",
-                  en: "Check your input (details in fields)",
-                },
-              ],
-              [
-                "404",
-                "not_found",
-                {
-                  de: "Server bzw. Spieler gibt es nicht (oder gehört nicht zu dir)",
-                  en: "Server or player does not exist (or is not yours)",
-                },
-              ],
-              [
-                "409",
-                "player_limit_reached",
-                {
-                  de: "Der Spieler hat schon die Höchstzahl an Servern",
-                  en: "The player already has the maximum number of servers",
-                },
-              ],
-              [
-                "409",
-                "partner_limit_reached",
-                {
-                  de: "Deine Höchstzahl an Servern ist erreicht",
-                  en: "Your maximum number of servers has been reached",
-                },
-              ],
-              [
-                "409",
-                "plan_unavailable",
-                {
-                  de: "Für deinen Zugang ist gerade kein gültiges Paket eingestellt – bitte bei uns melden",
-                  en: "No valid plan is currently configured for your access – please contact us",
-                },
-              ],
-              [
-                "409",
-                "server_installing",
-                {
-                  de: "Der Server wird noch eingerichtet – gleich noch einmal versuchen",
-                  en: "The server is still being set up – try again shortly",
-                },
-              ],
-              [
-                "409",
-                "eula_required",
-                {
-                  de: 'Erster Start: Der Spieler muss die Minecraft-EULA akzeptieren ("acceptEula": true)',
-                  en: 'First start: the player must accept the Minecraft EULA ("acceptEula": true)',
-                },
-              ],
-              [
-                "409",
-                "cooldown",
-                {
-                  de: "Pflichtpause läuft noch (fields.cooldownUntil)",
-                  en: "The mandatory pause is still running (fields.cooldownUntil)",
-                },
-              ],
-              [
-                "409",
-                "not_running",
-                {
-                  de: "Keine laufende Sitzung (bei heartbeat und command)",
-                  en: "No running session (for heartbeat and command)",
-                },
-              ],
-              [
-                "409",
-                "server_failed, server_suspended",
-                {
-                  de: "Einrichtung fehlgeschlagen (Details ggf. in „install.error“; POST /reinstall versucht es erneut) bzw. Server gesperrt",
-                  en: "Setup failed (details in “install.error” where present; POST /reinstall retries) or server suspended",
-                },
-              ],
-              [
-                "400",
-                "invalid_path, invalid_url, file_rejected",
-                {
-                  de: "Pfad bzw. Adresse ungültig oder vom Server abgelehnt",
-                  en: "Path or URL invalid or rejected by the server",
-                },
-              ],
-              [
-                "404",
-                "file_not_found, mod_not_found",
-                {
-                  de: "Datei gibt es nicht bzw. bei Modrinth keine passende Version",
-                  en: "File does not exist or no matching version on Modrinth",
-                },
-              ],
-              [
-                "409",
-                "mods_unsupported, log_too_large",
-                {
-                  de: "Servertyp ohne Mods/Plugins bzw. Protokoll zu groß zum Abrufen",
-                  en: "Server type without mods/plugins or log too large to fetch",
-                },
-              ],
-              [
-                "409",
-                "server_stopping",
-                {
-                  de: "Der Server fährt aus der vorigen Sitzung noch herunter – in ein paar Sekunden erneut starten",
-                  en: "The server is still shutting down from the previous session – start again in a few seconds",
-                },
-              ],
-              [
-                "409",
-                "server_running",
-                {
-                  de: "Dafür muss der Server aus sein (Backup einspielen, Typ/Version wechseln, neu installieren)",
-                  en: "The server must be off for this (restore backup, change type/version, reinstall)",
-                },
-              ],
-              [
-                "409",
-                "state_changed",
-                {
-                  de: "Der Stand hat sich gerade geändert (z. B. Laufzeit-Grenze im selben Moment erreicht) – noch einmal versuchen",
-                  en: "The state has just changed (e.g. runtime limit reached at the same moment) – try again",
-                },
-              ],
-              [
-                "409 / 404",
-                "backup_limit, backup_busy, backup_rejected, backup_not_found",
-                {
-                  de: "Höchstzahl erreicht, Vorgang läuft schon, vom Server abgelehnt bzw. Backup gibt es nicht",
-                  en: "Maximum reached, operation already running, rejected by the server or backup does not exist",
-                },
-              ],
-              [
-                "409",
-                "no_webhook",
-                {
-                  de: "Es ist kein Webhook eingerichtet",
-                  en: "No webhook is configured",
-                },
-              ],
-              [
-                "429",
-                "rate_limited",
-                {
-                  de: "Zu viele Anfragen – die Grenzen gelten je Zugang",
-                  en: "Too many requests – limits apply per access",
-                },
-              ],
-              [
-                "429",
-                "panel_busy, too_often, too_many_installs, too_many_streams, backup_rate_limited",
-                {
-                  de: "Zu dicht abgefragt, zu viele Backups/Neuinstallationen in kurzer Zeit, zu viele gleichzeitige Einrichtungen bzw. zu viele offene Konsolen-Streams (Wartezeit bei too_often und panel_busy in fields.retryAfterSeconds)",
-                  en: "Polled too densely, too many backups/reinstalls in a short time, too many simultaneous setups or too many open console streams (waiting time for too_often and panel_busy in fields.retryAfterSeconds)",
-                },
-              ],
-              [
-                "503",
-                "maintenance, service_unavailable, panel_unavailable",
-                {
-                  de: "Wartung bzw. vorübergehend nicht erreichbar (z. B. Server-Verwaltung oder Software-Verzeichnis kurz weg) – nach kurzer Zeit erneut versuchen",
-                  en: "Maintenance or temporarily unreachable (e.g. server management or software directory briefly down) – retry after a short while",
-                },
-              ],
+              ['401', 'invalid_api_key', { de: 'Key fehlt, ist falsch oder der Zugang ist deaktiviert', en: 'Key missing, wrong or access disabled' }],
+              ['403', 'forbidden', { de: 'Dieser Spieler ist von uns gesperrt (beim Anlegen, Erstellen und Starten)', en: 'This player has been blocked by us (when creating a player or server and when starting)' }],
+              ['400', 'validation_error, invalid_name, invalid_player, server_type_unavailable, version_unavailable, invalid_json', { de: 'Angaben prüfen (Details in fields)', en: 'Check your input (details in fields)' }],
+              ['404', 'not_found', { de: 'Server bzw. Spieler gibt es nicht (oder gehört nicht zu dir)', en: 'Server or player does not exist (or is not yours)' }],
+              ['409', 'player_limit_reached', { de: 'Der Spieler hat schon die Höchstzahl an Servern', en: 'The player already has the maximum number of servers' }],
+              ['409', 'partner_limit_reached', { de: 'Deine Höchstzahl an Servern ist erreicht', en: 'Your maximum number of servers has been reached' }],
+              ['409', 'plan_unavailable', { de: 'Für deinen Zugang ist gerade kein gültiges Paket eingestellt – bitte bei uns melden', en: 'No valid plan is currently configured for your access – please contact us' }],
+              ['409', 'server_installing', { de: 'Der Server wird noch eingerichtet – gleich noch einmal versuchen', en: 'The server is still being set up – try again shortly' }],
+              ['409', 'eula_required', { de: 'Erster Start: Der Spieler muss die Minecraft-EULA akzeptieren ("acceptEula": true)', en: 'First start: the player must accept the Minecraft EULA ("acceptEula": true)' }],
+              ['409', 'cooldown', { de: 'Pflichtpause läuft noch (fields.cooldownUntil)', en: 'The mandatory pause is still running (fields.cooldownUntil)' }],
+              ['409', 'not_running', { de: 'Keine laufende Sitzung (bei heartbeat und command)', en: 'No running session (for heartbeat and command)' }],
+              ['409', 'server_failed, server_suspended', { de: 'Einrichtung fehlgeschlagen (Details ggf. in „install.error“; POST /reinstall versucht es erneut – außer wenn schon das Anlegen fehlschlug) bzw. Server gesperrt', en: 'Setup failed (details in “install.error” where present; POST /reinstall retries – except when creating the server failed) or server suspended' }],
+              ['400', 'invalid_path, invalid_url, file_rejected', { de: 'Pfad bzw. Adresse ungültig oder vom Server abgelehnt', en: 'Path or URL invalid or rejected by the server' }],
+              ['404', 'file_not_found, mod_not_found', { de: 'Datei gibt es nicht bzw. bei Modrinth keine passende Version', en: 'File does not exist or no matching version on Modrinth' }],
+              ['409', 'mods_unsupported, log_too_large', { de: 'Servertyp ohne Mods/Plugins bzw. Protokoll zu groß zum Abrufen', en: 'Server type without mods/plugins or log too large to fetch' }],
+              ['409', 'server_stopping', { de: 'Der Server fährt aus der vorigen Sitzung noch herunter – in ein paar Sekunden erneut starten', en: 'The server is still shutting down from the previous session – start again in a few seconds' }],
+              ['409', 'server_running', { de: 'Dafür muss der Server aus sein (Backup einspielen, Typ/Version wechseln, neu installieren)', en: 'The server must be off for this (restore backup, change type/version, reinstall)' }],
+              ['409', 'state_changed', { de: 'Der Stand hat sich gerade geändert (z. B. Laufzeit-Grenze im selben Moment erreicht) – noch einmal versuchen', en: 'The state has just changed (e.g. runtime limit reached at the same moment) – try again' }],
+              ['409 / 404', 'backup_limit, backup_busy, backup_rejected, backup_not_found', { de: 'Höchstzahl erreicht, Vorgang läuft schon, vom Server abgelehnt bzw. Backup gibt es nicht', en: 'Maximum reached, operation already running, rejected by the server or backup does not exist' }],
+              ['409', 'no_webhook', { de: 'Es ist kein Webhook eingerichtet', en: 'No webhook is configured' }],
+              ['429', 'rate_limited', { de: 'Zu viele Anfragen – die Grenzen gelten je Zugang', en: 'Too many requests – limits apply per access' }],
+              ['429', 'panel_busy, too_often, too_many_installs, too_many_streams, backup_rate_limited', { de: 'Zu dicht abgefragt, zu viele Backups/Neuinstallationen in kurzer Zeit, zu viele gleichzeitige Einrichtungen bzw. zu viele offene Konsolen-Streams (Wartezeit bei too_often und panel_busy in fields.retryAfterSeconds)', en: 'Polled too densely, too many backups/reinstalls in a short time, too many simultaneous setups or too many open console streams (waiting time for too_often and panel_busy in fields.retryAfterSeconds)' }],
+              ['503', 'maintenance, service_unavailable, panel_unavailable', { de: 'Wartung bzw. vorübergehend nicht erreichbar (z. B. Server-Verwaltung oder Versionsliste kurz nicht erreichbar) – nach kurzer Zeit erneut versuchen', en: 'Maintenance or temporarily unreachable (e.g. server management or version list briefly unreachable) – retry after a short while' }],
             ],
           },
         },
       ],
     },
     {
-      heading: { de: "Änderungen", en: "Changes" },
+      heading: { de: 'Änderungen', en: 'Changes' },
       blocks: [
-        {
-          p: {
-            de: "Was sich an der API und ihrem Verhalten geändert hat – neueste zuerst. Es wurden keine Endpunkte entfernt oder umbenannt.",
-            en: "What has changed in the API and its behaviour – newest first. No endpoints have been removed or renamed.",
-          },
-        },
+        { p: { de: 'Was sich an der API und ihrem Verhalten geändert hat – neueste zuerst. Es wurden keine Endpunkte entfernt oder umbenannt.', en: 'What has changed in the API and its behaviour – newest first. No endpoints have been removed or renamed.' } },
         {
           changes: [
             {
-              date: "2026-11-21",
+              date: '2026-11-21',
               items: [
-                {
-                  de: "Doku vervollständigt: Antwort von GET /me und POST /heartbeat, Felder host, port, install, hostPresent und deleteAt im Beispiel, „exists“ bei GET /settings, weitere Gründe beim Ende des Konsolen-Streams, Fehler 403 forbidden und 409 plan_unavailable.",
-                  en: "Docs completed: response of GET /me and POST /heartbeat, fields host, port, install, hostPresent and deleteAt in the example, “exists” for GET /settings, more reasons for the end of the console stream, errors 403 forbidden and 409 plan_unavailable.",
-                },
-                {
-                  de: "Korrektur: Der Fehlercode für „vorübergehend nicht erreichbar“ heißt service_unavailable (nicht unavailable).",
-                  en: "Correction: the error code for “temporarily unavailable” is service_unavailable (not unavailable).",
-                },
+                { de: 'Doku vervollständigt: Antwort von GET /me und POST /heartbeat, Felder host, port, install, hostPresent und deleteAt im Beispiel, „exists“ bei GET /settings, weitere Gründe beim Ende des Konsolen-Streams, Fehler 403 forbidden und 409 plan_unavailable.', en: 'Docs completed: response of GET /me and POST /heartbeat, fields host, port, install, hostPresent and deleteAt in the example, “exists” for GET /settings, more reasons for the end of the console stream, errors 403 forbidden and 409 plan_unavailable.' },
+                { de: 'Behoben: Wurde ein Wechsel bzw. eine Neuinstallation mit 400 version_unavailable abgelehnt (passendes Java fehlt), kam danach fälschlich das Webhook-Ereignis server.installed, und der Versuch zählte gegen die Grenze von 3 je Stunde. Jetzt bleibt alles unverändert.', en: 'Fixed: when a switch or reinstall was rejected with 400 version_unavailable (matching Java missing), the webhook event server.installed was wrongly sent afterwards, and the attempt counted against the limit of 3 per hour. Now nothing changes.' },
+                { de: 'Korrektur: Der Fehlercode für „vorübergehend nicht erreichbar“ heißt service_unavailable (nicht unavailable).', en: 'Correction: the error code for “temporarily unreachable” is service_unavailable (not unavailable).' },
               ],
             },
             {
-              date: "2026-11-19",
+              date: '2026-11-19',
               items: [
-                {
-                  de: "Schnellinstallation: Die gewählte Software (auch Fabric, Forge, NeoForge, Quilt) wird – je nach Einrichtung – direkt beim Anlegen, Wechseln und Neuinstallieren im Panel eingerichtet. „install“ ist dann null – wertet nur „state“ bzw. die Webhooks aus. Nach der Installation kann „version“ die konkrete Version enthalten.",
-                  en: "Fast install: the chosen software (including Fabric, Forge, NeoForge, Quilt) is – depending on the setup – installed directly in the panel when creating, switching and reinstalling. “install” is then null – rely on “state” or the webhooks only. After installation “version” may contain the concrete version.",
-                },
-                {
-                  de: "Server aus der Schnellinstallation starten mit einem optimierten Startbefehl (von uns gesetzt, nicht über die API änderbar).",
-                  en: "Servers from the fast install start with an optimised startup command (set by us, cannot be changed through the API).",
-                },
-                {
-                  de: "Behoben: Neu erstellte, noch nie gestartete Server antworteten bei POST /start und GET /logs dauerhaft mit 503. Vor dem ersten Start liefert /logs jetzt eine leere Liste; fehlende Dateien ergeben 404 file_not_found.",
-                  en: "Fixed: newly created servers that were never started permanently answered 503 on POST /start and GET /logs. Before the first start /logs now returns an empty list; missing files give 404 file_not_found.",
-                },
-                {
-                  de: "server.install_failed kommt auch, wenn die Installation im Panel scheitert. 429 too_many_installs gilt nur noch für die schrittweise Einrichtung. Fehlt das passende Java, antworten PATCH und /reinstall sofort mit 400 version_unavailable.",
-                  en: "server.install_failed is also sent when the installation in the panel fails. 429 too_many_installs now only applies to step-by-step setup. If the matching Java is missing, PATCH and /reinstall answer 400 version_unavailable immediately.",
-                },
-                {
-                  de: "Über die API gibt es ausschließlich Java-Spielserver: Bedrock und Proxys (Velocity, BungeeCord) sind fest ausgeschlossen.",
-                  en: "The API offers Java game servers only: Bedrock and proxies (Velocity, BungeeCord) are firmly excluded.",
-                },
-                {
-                  de: "Versionsauswahl: alle veröffentlichten Versionen aus dem Verzeichnis, die Liste aktualisiert sich von selbst.",
-                  en: "Version selection: all released versions from the directory, the list updates itself.",
-                },
+                { de: 'Schnellinstallation: Die gewählte Software (auch Fabric, Forge, NeoForge, Quilt) wird – je nach Einrichtung – direkt beim Anlegen, Wechseln und Neuinstallieren im Panel eingerichtet. „install“ ist dann null – wertet nur „state“ bzw. die Webhooks aus. Nach der Installation kann „version“ die konkrete Version enthalten.', en: 'Fast install: the chosen software (including Fabric, Forge, NeoForge, Quilt) is – depending on the setup – installed directly in the panel when creating, switching and reinstalling. “install” is then null – rely on “state” or the webhooks only. After installation “version” may contain the exact version.' },
+                { de: 'Server aus der Schnellinstallation starten mit einem optimierten Startbefehl (von uns gesetzt, nicht über die API änderbar).', en: 'Servers from the fast install start with an optimized startup command (set by us, cannot be changed through the API).' },
+                { de: 'Behoben: Neu erstellte, noch nie gestartete Server antworteten bei POST /start und GET /logs dauerhaft mit 503. Vor dem ersten Start liefert /logs jetzt eine leere Liste; fehlende Dateien ergeben 404 file_not_found.', en: 'Fixed: newly created servers that were never started permanently answered 503 on POST /start and GET /logs. Before the first start /logs now returns an empty list; missing files give 404 file_not_found.' },
+                { de: 'server.install_failed kommt auch, wenn die Installation im Panel scheitert. 429 too_many_installs gilt nur noch für die schrittweise Einrichtung. Fehlt das passende Java, antworten PATCH und /reinstall bei direkter Installation im Panel sofort mit 400 version_unavailable – ohne den Server zu verändern.', en: 'server.install_failed is also sent when the installation in the panel fails. 429 too_many_installs now only applies to step-by-step setup. If the matching Java is missing, PATCH and /reinstall answer 400 version_unavailable immediately when the panel installs directly – without changing the server.' },
+                { de: 'Über die API gibt es ausschließlich Java-Spielserver: Bedrock und Proxys (Velocity, BungeeCord) sind fest ausgeschlossen.', en: 'The API offers Java game servers only: Bedrock and proxies (Velocity, BungeeCord) are not supported.' },
+                { de: 'Versionsauswahl: alle veröffentlichten Versionen, die Liste aktualisiert sich von selbst.', en: 'Version selection: all released versions, the list updates itself.' },
               ],
             },
           ],

@@ -785,19 +785,33 @@ export async function changePartnerServer(partner: Partner, id: string, input: {
   }
   // Typen ohne eigenes Egg: Die Software kommt aus dem Verzeichnis – vorab nachschlagen, damit ein Tippfehler nichts anstößt
   const software = installsViaDirectory(serverType, settings) ? await resolveSoftware(serverType, version) : null;
+  // Mitgeliefertes Egg: Startbefehl samt Java-Version VOR jeder Änderung bestimmen. Fehlt das passende Java, antwortet
+  // die API mit 400 und am Server ändert sich nichts – kein verbrauchter Versuch, kein falscher Webhook „server.installed“
+  const viaInstaller = !!software && (await installerReady(settings));
+  let startup: Awaited<ReturnType<typeof installerStartup>> | null = null;
+  if (software && viaInstaller) {
+    try {
+      startup = await installerStartup(software, settings, { eula: false });
+    } catch (err) {
+      panelFailure(err);
+    }
+  }
   throttle(`reinstall:${id}`, 3, 60 * 60_000, { de: 'Dieser Server wurde gerade erst mehrfach neu installiert.', en: 'This server has been reinstalled several times just now.' });
   // Nur umstellen, wenn inzwischen keine Sitzung begonnen hat (ein gleichzeitiger Start hätte sonst einen laufenden
   // Server, dem die Software unter den Füßen ausgetauscht wird)
   const idle = and(eq(partnerServers.serverId, id), eq(partnerServers.hostActive, false));
   const busy = () => new ApiError(409, 'server_running', L('Dafür muss der Server gestoppt sein. Bitte zuerst stoppen und warten, bis er aus ist.', 'The server must be stopped for this. Please stop it first and wait until it is offline.'));
-  if (software && (await installerReady(settings))) {
+  if (software && startup) {
     // Mitgeliefertes Egg: Software und Java-Version in die Variablen, dann neu installieren – das Panel erledigt den Rest
     // in einem Durchgang (Welt und übrige Dateien bleiben; die alte Software räumt das Installationsskript weg)
+    const [before] = await db.select({ notified: partnerServers.installedNotified }).from(partnerServers).where(eq(partnerServers.serverId, id)).limit(1);
     if (affectedRows(await db.update(partnerServers).set({ softwareJob: null, installedNotified: false }).where(idle)) !== 1) throw busy();
     try {
-      await pterodactyl().updateServerStartup(server.pteroServerId, await installerStartup(software, settings, { eula: false }));
+      await pterodactyl().updateServerStartup(server.pteroServerId, startup);
       await pterodactyl().reinstallServer(server.pteroServerId);
     } catch (err) {
+      // Nichts neu installiert: alten Stand der Benachrichtigung zurück, sonst käme ein falsches „server.installed“
+      await db.update(partnerServers).set({ installedNotified: before?.notified ?? true }).where(eq(partnerServers.serverId, id));
       panelFailure(err);
     }
     await db.update(servers).set({ serverType, version: software.resolvedVersion, powerState: 'installing' }).where(eq(servers.id, id));
