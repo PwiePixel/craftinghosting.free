@@ -26,5 +26,5 @@ export default async function DocPageRoute({ params }: Props) {
   const t = getDict(lang).docs;
   const base = localePath(lang, 'docs');
   const link = (i: number) => (userDocs[i] ? { href: `${base}/${userDocs[i].slug}`, title: userDocs[i].title[lang] } : null);
-  return <DocView page={page} lang={lang} vars={docVars()} prev={index === 0 ? { href: base, title: t.overview } : link(index - 1)} next={link(index + 1)} labels={{ onThisPage: t.onThisPage, prev: t.prev, next: t.next }} />;
+  return <DocView page={page} lang={lang} vars={docVars()} prev={index === 0 ? { href: base, title: t.overview } : link(index - 1)} next={link(index + 1)} labels={{ onThisPage: t.onThisPage, prev: t.prev, next: t.next, copy: t.copy, copied: t.copied }} />;
 }

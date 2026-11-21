@@ -50,7 +50,7 @@ export default async function PartnerDocsPage({ params }: Props) {
       vars={docVars()}
       badge={t.partnerBadge}
       prev={{ href: `${localePath(lang, 'docs')}/${last.slug}`, title: last.title[lang] }}
-      labels={{ onThisPage: t.onThisPage, prev: t.prev, next: t.next }}
+      labels={{ onThisPage: t.onThisPage, prev: t.prev, next: t.next, copy: t.copy, copied: t.copied }}
     />
   );
 }

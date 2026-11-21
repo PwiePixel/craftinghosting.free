@@ -3,11 +3,17 @@ export type L = { de: string; en: string };
 
 export type Block =
   | { p: L }
+  /** Zwischenüberschrift innerhalb eines Abschnitts */
+  | { h3: L }
   | { ul: L[] }
   | { ol: L[] }
-  | { note: L }
-  | { code: string }
-  | { table: { head: L[]; rows: (string | L)[][] } };
+  | { note: L; tone?: 'info' | 'warning' }
+  | { code: string; title?: L }
+  | { table: { head: L[]; rows: (string | L)[][] } }
+  /** Wert zum Kopieren, z. B. die Basis-Adresse der API */
+  | { copy: { label: L; value: string } }
+  /** Änderungsprotokoll: neueste zuerst */
+  | { changes: { date: string; items: L[] }[] };
 
 export interface DocSection {
   heading: L;
