@@ -540,8 +540,8 @@ curl -X POST {api}/servers/$ID/stop -H "Authorization: Bearer $API_KEY"`,
               en: "Large files (e.g. a world as ZIP): POST …/files/upload-url returns a URL valid for ten minutes. Send the file there as multipart/form-data with the field “files”. Then extract it with …/files/decompress.",
             },
             {
-              de: 'Modrinth: POST …/mods mit {"project":"<Kurzname oder ID>"} wählt die neueste Version, die zu Lader und Minecraft-Version des Servers passt, und lädt sie nach /mods (Fabric, Forge, NeoForge, Quilt) bzw. /plugins (Paper, Purpur). Pflicht-Abhängigkeiten werden mit installiert (bis zu 3 Ebenen, höchstens 25 Dateien; "dependencies": false schaltet das ab). Eine bestimmte Version: {"version":"<Versions-ID>"}. Die Antwort nennt „installed“ und nicht gefundene „missingDependencies“. Vanilla kann keine Mods (409 mods_unsupported).',
-              en: 'Modrinth: POST …/mods with {"project":"<slug or id>"} picks the newest version matching the server’s loader and Minecraft version and loads it into /mods (Fabric, Forge, NeoForge, Quilt) or /plugins (Paper, Purpur). Required dependencies are installed too (up to 3 levels, at most 25 files; "dependencies": false turns that off). A specific version: {"version":"<version id>"}. The response lists “installed” and any “missingDependencies” that were not found. Vanilla cannot run mods (409 mods_unsupported).',
+              de: 'Modrinth: POST …/mods mit {"project":"<Kurzname oder ID>"} wählt die neueste Version, die zu Lader und Minecraft-Version des Servers passt, und lädt sie nach /mods (Fabric, Forge, NeoForge, Quilt) bzw. /plugins (Paper, Purpur). Pflicht-Abhängigkeiten werden mit installiert (bis zu 3 Ebenen, höchstens 25 Dateien; "dependencies": false schaltet das ab). Eine bestimmte Version: {"version":"<Versions-ID>"}. Die Antwort nennt „installed“ und nicht gefundene „missingDependencies“. Typen ohne Mods/Plugins (z. B. Vanilla) antworten mit 409 mods_unsupported.',
+              en: 'Modrinth: POST …/mods with {"project":"<slug or id>"} picks the newest version matching the server’s loader and Minecraft version and loads it into /mods (Fabric, Forge, NeoForge, Quilt) or /plugins (Paper, Purpur). Required dependencies are installed too (up to 3 levels, at most 25 files; "dependencies": false turns that off). A specific version: {"version":"<version id>"}. The response lists “installed” and any “missingDependencies” that were not found. Types without mods/plugins (e.g. Vanilla) answer 409 mods_unsupported.',
             },
             {
               de: 'Eigene Dateien von deinem Server: POST …/files/pull mit {"url":"https://…","directory":"/mods"} – „filename“ ist freiwillig (Standard: letzter Teil der Adresse).',
@@ -776,8 +776,8 @@ data: "[12:00:01] [Server thread/INFO]: Done (4.2s)!"`,
               en: "Restoring only works while the server is off and no session is running (otherwise 409 server_running). Then wait until the state is “offline” again and start normally.",
             },
             {
-              de: "Je Server: höchstens 2 neue Backups und 2 Einspielungen in 10 Minuten (429 too_often, Wartezeit in fields.retryAfterSeconds), und immer nur ein Backup-Vorgang zugleich (409 backup_busy). Einträge der Liste: id, name, bytes, state, createdAt, completedAt.",
-              en: "Per server: at most 2 new backups and 2 restores per 10 minutes (429 too_often, waiting time in fields.retryAfterSeconds), and only one backup operation at a time (409 backup_busy). List entries: id, name, bytes, state, createdAt, completedAt.",
+              de: "Je Server: höchstens 2 neue Backups und 2 Einspielungen in 10 Minuten (429 too_often, Wartezeit in fields.retryAfterSeconds), und immer nur ein Backup-Vorgang zugleich (409 backup_busy). Einträge der Liste: id, name, bytes, state, createdAt, completedAt. Ohne Namen heißt ein Backup „Backup JJJJ-MM-TT HH:MM“ (UTC).",
+              en: "Per server: at most 2 new backups and 2 restores per 10 minutes (429 too_often, waiting time in fields.retryAfterSeconds), and only one backup operation at a time (409 backup_busy). List entries: id, name, bytes, state, createdAt, completedAt. Without a name a backup is called “Backup YYYY-MM-DD HH:MM” (UTC).",
             },
             {
               de: "Ein Backup ändert nichts an Laufzeit, Pause oder Löschdatum. Wird ein Server gelöscht, werden seine Backups mit gelöscht.",
@@ -798,8 +798,8 @@ data: "[12:00:01] [Server thread/INFO]: Done (4.2s)!"`,
         },
         {
           p: {
-            de: "Die Server-Software wird automatisch eingerichtet (inklusive passender Java-Version). So lange ist der Zustand „installing“; erst wenn er „offline“ ist, lässt sich der Server starten. Meist installiert unser Panel die Software direkt in einem Durchgang (in der Regel in Sekunden bis wenigen Minuten) – dann bleibt „install“ null. Läuft die Einrichtung schrittweise nach der Grundinstallation, zeigt „install“ den Fortschritt.",
-            en: "The server software is set up automatically (including the matching Java version). Meanwhile the state is “installing”; only once it is “offline” can the server be started. Usually our panel installs the software directly in a single pass (typically seconds to a few minutes) – then “install” stays null. If setup runs step by step after the base installation, “install” shows the progress.",
+            de: "Die Server-Software wird automatisch eingerichtet (inklusive passender Java-Version). So lange ist der Zustand „installing“; erst wenn er „offline“ ist, lässt sich der Server starten. Je nach Einrichtung installiert unser Panel die Software direkt in einem Durchgang (in der Regel in Sekunden bis wenigen Minuten) – dann bleibt „install“ null. Läuft die Einrichtung schrittweise nach der Grundinstallation, zeigt „install“ den Fortschritt.",
+            en: "The server software is set up automatically (including the matching Java version). Meanwhile the state is “installing”; only once it is “offline” can the server be started. Depending on the setup, our panel installs the software directly in a single pass (typically seconds to a few minutes) – then “install” stays null. If setup runs step by step after the base installation, “install” shows the progress.",
           },
         },
         {
@@ -818,8 +818,8 @@ data: "[12:00:01] [Server thread/INFO]: Done (4.2s)!"`,
         },
         {
           p: {
-            de: "PATCH /servers/{id} mit „serverType“ und/oder „version“ stellt einen vorhandenen Server um – ohne ihn zu löschen. Wird nur „serverType“ geändert, gilt „version“: „latest“. POST /servers/{id}/reinstall richtet die aktuelle Software noch einmal ein. Danach kann „version“ die tatsächlich installierte Version enthalten (z. B. „1.21.11“ statt „latest“); eine spätere Neuinstallation ohne Angaben richtet genau diese Version erneut ein.",
-            en: "PATCH /servers/{id} with “serverType” and/or “version” switches an existing server – without deleting it. If only “serverType” is changed, “version” is “latest”. POST /servers/{id}/reinstall sets up the current software once more. Afterwards “version” may contain the version actually installed (e.g. “1.21.11” instead of “latest”); a later reinstall without parameters sets up exactly that version again.",
+            de: "PATCH /servers/{id} mit „serverType“ und/oder „version“ stellt einen vorhandenen Server um – ohne ihn zu löschen. Wird ein anderer „serverType“ ohne „version“ angegeben, gilt „latest“. POST /servers/{id}/reinstall richtet die aktuelle Software noch einmal ein. Danach kann „version“ die tatsächlich installierte Version enthalten (z. B. „1.21.11“ statt „latest“); eine spätere Neuinstallation ohne Angaben richtet genau diese Version erneut ein.",
+            en: "PATCH /servers/{id} with “serverType” and/or “version” switches an existing server – without deleting it. If a different “serverType” is sent without “version”, “latest” applies. POST /servers/{id}/reinstall sets up the current software once more. Afterwards “version” may contain the version actually installed (e.g. “1.21.11” instead of “latest”); a later reinstall without parameters sets up exactly that version again.",
           },
         },
         {
@@ -1023,8 +1023,8 @@ function verify(rawBody, headers, secret) {
               en: "Webhooks are notifications only: your response changes nothing on the server. Starting still only happens through POST /servers/{id}/start.",
             },
             {
-              de: "GET /webhook zeigt die Adresse, die Zahl wartender Ereignisse und die letzten 20 Zustellungen (Zustand pending, delivered oder failed, Versuche, letzter Fehler). Es warten höchstens 5000 Ereignisse; weitere werden verworfen, Einträge werden nach 7 Tagen entfernt.",
-              en: "GET /webhook shows the URL, the number of pending events and the latest 20 deliveries (state pending, delivered or failed, attempts, last error). At most 5000 events wait; further ones are dropped, entries are removed after 7 days.",
+              de: "GET /webhook zeigt die Adresse, die Zahl wartender Ereignisse und die letzten 20 Zustellungen (Zustand pending, delivered oder failed, Versuche, letzter Fehler). Ereignisse werden nur gesammelt, solange eine Adresse gesetzt ist. Es warten höchstens 5000; weitere werden verworfen. Zugestellte und endgültig fehlgeschlagene Einträge werden nach 7 Tagen entfernt.",
+              en: "GET /webhook shows the URL, the number of pending events and the latest 20 deliveries (state pending, delivered or failed, attempts, last error). Events are only collected while a URL is set. At most 5000 wait; further ones are dropped. Delivered and finally failed entries are removed after 7 days.",
             },
           ],
         },
@@ -1105,8 +1105,8 @@ function verify(rawBody, headers, secret) {
               en: "“session.hostPresent”: false means the host’s launcher no longer reports in and the server only keeps running because players are on it.",
             },
             {
-              de: "Anfrage-Limit: je Zugang und Minute, je nach Endpunkt 30 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After. Ein neuer API-Key setzt die Zähler nicht zurück. Anfragen ohne gültigen Key zählen je IP-Adresse (höchstens 30 je Minute).",
-              en: "Rate limit: per access and minute, 30 to 12,000 requests depending on the endpoint. Every response contains X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After. A new API key does not reset the counters. Requests without a valid key count per IP address (at most 30 per minute).",
+              de: "Anfrage-Limit: je Zugang und Minute, je nach Endpunkt 30 bis 12 000 Anfragen. Jede Antwort enthält X-RateLimit-Limit, X-RateLimit-Remaining und X-RateLimit-Reset (Sekunden bis zum Zurücksetzen). Bei Überschreitung: 429 mit Retry-After. Ein neuer API-Key setzt die Zähler nicht zurück. Anfragen ohne gültigen Key zählen je IP-Adresse und Endpunkt (höchstens 30 je Minute, danach 429 statt 401).",
+              en: "Rate limit: per access and minute, 30 to 12,000 requests depending on the endpoint. Every response contains X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset (seconds until reset). When exceeded: 429 with Retry-After. A new API key does not reset the counters. Requests without a valid key count per IP address and endpoint (at most 30 per minute, then 429 instead of 401).",
             },
             {
               de: "Zusätzlich gibt es eine Obergrenze für Anfragen, die wir an die Server-Verwaltung weiterreichen müssen (Dateien, Einstellungen, Backups, Zustand). Wer sehr dicht abfragt, bekommt 429 panel_busy – dann seltener abfragen. GET /servers/{id}/stats und der Zustand in GET /servers/{id} sind 5 Sekunden zwischengespeichert; die Liste GET /servers und die Antwort auf ein Lebenszeichen zeigen den zuletzt bekannten Zustand (höchstens eine Minute alt). Für Statuswechsel sind Webhooks der bessere Weg.",
@@ -1400,8 +1400,8 @@ function verify(rawBody, headers, secret) {
               date: "2026-11-19",
               items: [
                 {
-                  de: "Schnellinstallation: Die gewählte Software (auch Fabric, Forge, NeoForge, Quilt) wird meist direkt beim Anlegen, Wechseln und Neuinstallieren im Panel eingerichtet. „install“ ist dann null – wertet nur „state“ bzw. die Webhooks aus. Nach der Installation kann „version“ die konkrete Version enthalten.",
-                  en: "Fast install: the chosen software (including Fabric, Forge, NeoForge, Quilt) is usually set up directly in the panel when creating, switching and reinstalling. “install” is then null – rely on “state” or the webhooks only. After installation “version” may contain the concrete version.",
+                  de: "Schnellinstallation: Die gewählte Software (auch Fabric, Forge, NeoForge, Quilt) wird – je nach Einrichtung – direkt beim Anlegen, Wechseln und Neuinstallieren im Panel eingerichtet. „install“ ist dann null – wertet nur „state“ bzw. die Webhooks aus. Nach der Installation kann „version“ die konkrete Version enthalten.",
+                  en: "Fast install: the chosen software (including Fabric, Forge, NeoForge, Quilt) is – depending on the setup – installed directly in the panel when creating, switching and reinstalling. “install” is then null – rely on “state” or the webhooks only. After installation “version” may contain the concrete version.",
                 },
                 {
                   de: "Server aus der Schnellinstallation starten mit einem optimierten Startbefehl (von uns gesetzt, nicht über die API änderbar).",
