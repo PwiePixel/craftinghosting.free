@@ -13,6 +13,7 @@ import {
   type AdminPartnerDTO,
   type AdminDiscordDTO,
   type AdminDiscordWaitingDTO,
+  type AdminPanelUsageDTO,
   type AdminPanelWaitingDTO,
   type AdminDiscordJoinWaitingDTO,
   type PendingReason,
@@ -289,7 +290,49 @@ function usage(used: number, capacity: number | null): string {
   return capacity !== null ? `${used} / ${capacity} belegt · ${Math.max(0, capacity - used)} frei` : `${used} belegt (unbegrenzt)`;
 }
 
-function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: SiteSettings | null; fmt: ReturnType<typeof formatters> }) {
+/** Auslastung des Anfrage-Limits von Pterodactyl (API- und Worker-Prozess) */
+function PanelUsageCard({ data, fmt }: { data: AdminPanelUsageDTO; fmt: ReturnType<typeof formatters> }) {
+  const rows = data.snapshots.flatMap((s) => s.usage.map((u) => ({ ...u, role: s.role })));
+  if (rows.length === 0) return null;
+  // Gemeinsamer Stand beim Panel: der kleinste gemeldete Rest je API (beide Prozesse teilen sich dasselbe Limit)
+  const apis = (['client', 'application'] as const).map((api) => {
+    const own = rows.filter((r) => r.api === api);
+    const limit = Math.max(...own.map((r) => r.limit));
+    const known = own.map((r) => r.remaining).filter((v): v is number => v !== null);
+    const sent = own.reduce((n, r) => n + r.sentLastMinute, 0);
+    return { api, limit, source: own.some((r) => r.limitSource === 'panel') ? 'vom Panel gemeldet' : 'Einstellung', remaining: known.length ? Math.min(...known) : null, sent, throttled: own.reduce((n, r) => n + r.throttledLastHour, 0), deferred: own.reduce((n, r) => n + r.deferredLastHour, 0), last: own.map((r) => r.lastThrottledAt).filter(Boolean).sort().pop() ?? null };
+  });
+  return (
+    <Card title="Pterodactyl: Anfrage-Limit">
+      <div className="grid gap-4 sm:grid-cols-2">
+        {apis.map((a) => {
+          const used = a.remaining !== null ? a.limit - a.remaining : a.sent;
+          const ratio = a.limit > 0 ? Math.min(1, used / a.limit) : 0;
+          return (
+            <div key={a.api} className="rounded-lg border border-line p-4">
+              <p className="text-sm font-medium text-white">{a.api === 'client' ? 'Client-API' : 'Application-API'}</p>
+              <p className="mt-1 text-[13px] text-subtle">
+                {used} von {a.limit} Anfragen in dieser Minute ({a.source})
+              </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" role="meter" aria-valuemin={0} aria-valuemax={a.limit} aria-valuenow={used} aria-label={`${a.api}: ${used} von ${a.limit}`}>
+                <div className={cn('h-full rounded-full', ratio >= 0.9 ? 'bg-red-400' : ratio >= 0.65 ? 'bg-amber-400' : 'bg-blue-400')} style={{ width: `${Math.max(2, ratio * 100)}%` }} />
+              </div>
+              <p className="mt-2 text-[13px] text-subtle">
+                Letzte Stunde: {a.throttled} × vom Panel abgewiesen (429){a.deferred ? ` · ${a.deferred} Hintergrund-Abfragen zurückgestellt` : ''}
+                {a.last ? ` · zuletzt abgewiesen ${fmt.dateTime(a.last)}` : ''}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[13px] leading-relaxed text-subtle">
+        Hintergrund-Abfragen treten zurück, sobald 65 % des Limits verbraucht sind; Website und Partner-API nutzen bis 92 %, Befehle (Starten, Stoppen) kommen immer durch. Das Limit gilt je Panel-Benutzer – am besten gehören die API-Keys einem eigenen Panel-Benutzer, nicht deinem Admin-Konto.
+      </p>
+    </Card>
+  );
+}
+
+function OverviewTab({ o, settings, fmt, panel }: { o: AdminOverviewDTO; settings: SiteSettings | null; fmt: ReturnType<typeof formatters>; panel: AdminPanelUsageDTO | null }) {
   const s = o.servers.byStatus;
   const base = adminPath();
   return (
@@ -318,6 +361,7 @@ function OverviewTab({ o, settings, fmt }: { o: AdminOverviewDTO; settings: Site
           </div>
         </div>
       </Card>
+      {panel && <PanelUsageCard data={panel} fmt={fmt} />}
       {o.system.pterodactylMode === 'mock' && (
         <Alert tone="warning" title="Mock-Modus aktiv">
           Das Panel wird nur simuliert – es werden keine echten Server angelegt. Für den Betrieb PTERODACTYL_MODE=live setzen.
@@ -815,7 +859,10 @@ export default async function AdminPage({ params, searchParams }: Props) {
   const settingsRes = needsSettings ? await apiServer<{ settings: SiteSettings }>('/admin/settings', lang) : null;
   const settings = settingsRes?.ok ? settingsRes.data.settings : null;
 
-  if (tab === 'overview' && overview?.ok) content = <OverviewTab o={overview.data.overview} settings={settings} fmt={fmt} />;
+  if (tab === 'overview' && overview?.ok) {
+    const panel = await apiServer<AdminPanelUsageDTO>('/admin/panel-usage', lang);
+    content = <OverviewTab o={overview.data.overview} settings={settings} fmt={fmt} panel={panel.ok ? panel.data : null} />;
+  }
   if (tab === 'settings') {
     const pub = await apiServer<{ site: PublicSiteDTO }>('/site', lang);
     failed = !settings;

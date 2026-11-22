@@ -5,6 +5,7 @@ import { clearAbuseFlag, listAbuse, listAbuseServers, listDiscordWaiting, previe
 import { syncStatusFeedSoon } from '../discord/status-feed';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { panelUsageSnapshots } from '../pterodactyl/governor';
 import { emailSchema, serverNameSchema } from '@chfree/shared';
 import { env } from '../env';
 import { Errors, L } from '../lib/errors';
@@ -56,6 +57,8 @@ export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin);
 
   app.get('/admin/overview', async () => ({ overview: await getOverview() }));
+  /** Auslastung des Panel-Anfrage-Limits (API- und Worker-Prozess) */
+  app.get('/admin/panel-usage', async () => ({ snapshots: await panelUsageSnapshots() }));
   // Listen seitenweise (50 pro Seite): ?page=2
   app.get('/admin/servers', async (request) => listServersAdmin(listQuery.parse(request.query)));
   app.get('/admin/users', async (request) => listUsersAdmin(listQuery.parse(request.query)));

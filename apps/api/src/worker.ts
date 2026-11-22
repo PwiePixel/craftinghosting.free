@@ -8,6 +8,7 @@ import { closeDb } from './db/client';
 import { startDiscordGateway } from './discord/gateway';
 import { env, isProd } from './env';
 import { startScheduler } from './jobs/scheduler';
+import { startPanelUsageReporter } from './pterodactyl/governor';
 import { verifySmtpOnStartup } from './services/mail/mailer';
 
 const logger = pino({
@@ -16,6 +17,7 @@ const logger = pino({
 });
 
 const scheduler = startScheduler(logger);
+startPanelUsageReporter('worker');
 const discord = startDiscordGateway(logger);
 logger.info(`Worker gestartet (Pterodactyl-Modus: ${env.PTERODACTYL_MODE})`);
 void verifySmtpOnStartup({ info: (m) => logger.info(m), warn: (m) => logger.warn(m), error: (m) => logger.error(m) });

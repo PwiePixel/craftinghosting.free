@@ -47,10 +47,17 @@ const split = (path: string) => {
   return { root: path.slice(0, at) || '/', name: path.slice(at + 1) };
 };
 
+/** Anfrage-Limit des Panels erreicht: wie das Kontingent der Partner-API melden (429 panel_busy mit Wartezeit) */
+const panelBusy = (err: PterodactylError) =>
+  new ApiError(429, 'panel_busy', L('Die Server-Verwaltung ist gerade ausgelastet. Bitte kurz warten und seltener abfragen.', 'The server management is busy right now. Please wait a moment and poll less often.'), {
+    retryAfterSeconds: String(Math.max(1, Math.ceil(((err as { retryAfterMs?: number }).retryAfterMs ?? 10_000) / 1000))),
+  });
+
 /** Fehler des Panels in eine verständliche Antwort übersetzen */
 function panelFailure(err: unknown, notFound = L('Diese Datei gibt es nicht.', 'This file does not exist.')): never {
   if (err instanceof ApiError) throw err;
   if (err instanceof PterodactylError) {
+    if (err.status === 429) throw panelBusy(err);
     if (err.status === 404) throw new ApiError(404, 'file_not_found', notFound);
     if (err.status === 400 || err.status === 413 || err.status === 422) throw new ApiError(400, 'file_rejected', L(`Das hat der Server abgelehnt: ${err.message}`.slice(0, 240), `The server rejected this: ${err.message}`.slice(0, 240)));
   }

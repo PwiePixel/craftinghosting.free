@@ -79,7 +79,8 @@ async function live(server: Server, fresh = false): Promise<ServerLiveDTO | null
   const hit = liveCache.get(server.id);
   if (!fresh && hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.value;
   if (!fresh && !takeWebPanelCall()) return hit?.value ?? null;
-  const value = await liveFromPanel(server);
+  // Panel gerade nicht erreichbar oder ausgelastet: den letzten bekannten Stand weiter zeigen statt „kein Wert“
+  const value = (await liveFromPanel(server)) ?? hit?.value ?? null;
   trim(liveCache);
   liveCache.set(server.id, { at: Date.now(), value });
   return value;

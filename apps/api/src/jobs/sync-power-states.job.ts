@@ -17,6 +17,15 @@ import { runPostProvision } from '../services/provisioning.service';
 import { requestSiteSoftware } from '../services/partner-software.service';
 import { mapLimit, type JobDefinition } from './types';
 
+/** Ausgeschaltete Server werden nur alle so viele Minuten abgefragt */
+const OFFLINE_EVERY_MINUTES = 3;
+/** Fester Platz je Server (0 … OFFLINE_EVERY_MINUTES-1), damit sich die Abfragen auf die Minuten verteilen */
+const slotOf = (id: string) => {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % OFFLINE_EVERY_MINUTES;
+};
+
 function endReasonFor(server: Server, now: Date) {
   if (server.status === 'expiring') return 'cycle' as const;
   if (server.pausedUntil && server.pausedUntil > now) {
@@ -44,16 +53,34 @@ export const syncPowerStatesJob: JobDefinition = {
         ),
       );
 
-    const stats = { checked: 0, changed: 0, sessionsOpened: 0, sessionsClosed: 0, reconciled: 0, postProvisioned: 0, botFairUse: 0, errors: 0 };
+    const stats = { checked: 0, changed: 0, sessionsOpened: 0, sessionsClosed: 0, reconciled: 0, postProvisioned: 0, botFairUse: 0, errors: 0, skippedOffline: 0, deferred: 0 };
     const settings = await getSettings();
     const ptero = pterodactyl();
 
-    const { failed } = await mapLimit(rows, 8, async (server) => {
+    // Anfragen sparen (das Panel begrenzt sie je Minute): Ausgeschaltete Server, die schon eine Weile aus sind, nur jede
+    // dritte Minute abfragen – verteilt nach Server, damit die Last gleichmäßig bleibt. Ein Start über das Panel fällt so
+    // spätestens nach drei Minuten auf. Alles andere (läuft, startet, stoppt, Installation, unbekannt, gerade gestoppt,
+    // gesperrt, Nacharbeiten offen) weiter jede Minute.
+    const minute = Math.floor(now.getTime() / 60_000);
+    const due = rows.filter((s) => {
+      const quiet = s.powerState === 'offline' && s.status !== 'suspended' && s.postProvisionDone && !s.softwareJob && (!s.powerStateAt || now.getTime() - s.powerStateAt.getTime() > 5 * 60_000);
+      if (!quiet) return true;
+      if ((minute + slotOf(s.id)) % OFFLINE_EVERY_MINUTES === 0) return true;
+      stats.skippedOffline++;
+      return false;
+    });
+
+    const { failed } = await mapLimit(due, 8, async (server) => {
       stats.checked++;
       let res;
       try {
         res = await ptero.getResources(server.pteroIdentifier!);
       } catch (err) {
+        // Panel ausgelastet (429 bzw. zurückgestellt): Stand nicht verändern – „unbekannt“ würde weitere Abfragen auslösen
+        if (err instanceof PterodactylError && err.status === 429) {
+          stats.deferred++;
+          return;
+        }
         stats.errors++;
         if (err instanceof PterodactylError && err.status === 404) {
           log.warn({ serverId: server.id }, 'Server existiert in Pterodactyl nicht mehr');

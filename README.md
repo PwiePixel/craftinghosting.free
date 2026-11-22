@@ -303,6 +303,15 @@ npm run cli -w @chfree/api -- run all      # alle Jobs einmalig ausführen
 4. **Eggs** im Admin unter *Pterodactyl* wählen – alle Eggs des Panels werden erkannt, passende vorgeschlagen. Für Minecraft genügt **ein** Java-Egg (z. B. Paper): Alle weiteren Java-Servertypen richtet das System über MCJars darauf ein (Admin → *Einstellungen* → „Server-Software“). Nur Bedrock und Proxys brauchen ein eigenes Egg. Für Discord-Bots ein Python- und ein Node.js-Egg importieren (z. B. „generic python“ / „generic nodejs“ aus github.com/pelican-eggs). Ohne Egg zeigt die Website „bald“. Die `.env`-Variablen `PTERODACTYL_EGG_*` bleiben als Alternative.
 5. `PTERODACTYL_MODE=live`, `PTERODACTYL_URL`, `PTERODACTYL_PUBLIC_URL` setzen
 
+### Anfrage-Limit des Panels (wichtig bei vielen Servern)
+
+Pterodactyl begrenzt Anfragen **je Panel-Benutzer und Minute**: Client-API Standard 720, Application-API 240. Alle Aufrufe dieses Systems laufen über die beiden Keys oben – und das Panel-Frontend desselben Benutzers teilt sich das Client-Limit. Wird es erreicht, antwortet das Panel mit „Too Many Attempts“ (429), für das System **und** für den Benutzer im Panel.
+
+- **Steuerung im System** (`apps/api/src/pterodactyl/governor.ts`): Jede Antwort des Panels meldet in `X-RateLimit-Remaining`, wie viele Anfragen in der laufenden Minute noch frei sind – das ist der echte Stand, auch wenn API und Worker gleichzeitig fragen. Hintergrund-Abfragen der Jobs halten 35 % frei und warten, sobald es knapp wird; Website und Partner-API halten 8 % frei; Befehle (Starten, Stoppen, Schreiben) kommen immer durch. Nach einem 429 fragt niemand vor Ablauf der genannten Wartezeit erneut. Anzeige: Admin → *Übersicht* → „Pterodactyl: Anfrage-Limit“.
+- **Sparsam abfragen:** Ausgeschaltete Server fragt der Status-Abgleich nur alle 3 Minuten ab (laufende weiter jede Minute), Installations-Nacharbeiten fragen gestaffelt nach, Partner-Sitzungen nutzen den gemerkten Stand, die Statusseite braucht eine Abfrage statt zwei.
+- **Mehr Luft im Panel** (empfohlen ab etwa 100 Servern): In der `.env` des Panels (`/var/www/pterodactyl/.env`) `APP_API_CLIENT_RATELIMIT=2000` und `APP_API_APPLICATION_RATELIMIT=600` setzen, danach `cd /var/www/pterodactyl && php artisan config:clear`. Das System übernimmt die neuen Werte automatisch aus den Kopfzeilen des Panels (`PTERODACTYL_CLIENT_RATE_LIMIT` / `PTERODACTYL_APP_RATE_LIMIT` sind nur der Rückfall).
+- **Eigener Panel-Benutzer für die Keys:** Lege für die API-Keys einen eigenen Admin-Benutzer an (z. B. `chfree-api`), in den sich niemand im Browser einloggt. Dann teilt sich das System das Limit nicht mit deiner eigenen Arbeit im Panel – und „Too Many Attempts“ trifft dich im Panel nicht mehr.
+
 Panel-Konten bekommen `external_id = chf-user-<id>`, Server `chf-server-<id>` – dadurch entstehen bei Wiederholungen keine Duplikate. Die Serverbeschreibung wird über `PATCH /servers/{id}/details` gesetzt (Name und Besitzer bleiben unverändert, auch wenn der Nutzer den Server im Panel umbenennt).
 
 ---
@@ -313,7 +322,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 
 | Job | Intervall | Aufgabe |
 | --- | --- | --- |
-| `sync-power-states` | 60 s | Zustand aus dem Panel lesen, Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation, **Fair-Use für Discord-Bots** (CPU-Dauerlast, Inaktivität) |
+| `sync-power-states` | 60 s | Zustand aus dem Panel lesen (ausgeschaltete Server nur alle 3 Minuten, verteilt), Laufzeit-Sessions führen, Suspendierung abgleichen, Nacharbeiten nach Installation, **Fair-Use für Discord-Bots** (CPU-Dauerlast, Inaktivität) |
 | `enforce-fair-use` | 60 s | Chat-Warnungen, 24-h-Limit, Wochen-Offline-Zeit, Pausen-Verstöße |
 | `cycle-lifecycle` | 60 s | 30-Tage-Zyklus der Minecraft-Server: Erinnerungen, Chat-Hinweise, Ablauf → Stopp → Info → Suspendierung → Löschung 48 h nach dem Ruhetag. Discord-Bots haben keinen Zyklus; der Job suspendiert sie nur nach einer Freigabe wegen Inaktivität |
 | `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |

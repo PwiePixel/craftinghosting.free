@@ -20,6 +20,7 @@ import {
   type PteroUser,
   type PterodactylGateway,
 } from './types';
+import { acquirePanelCall, observePanelResponse, panelCallFailed } from './governor';
 
 interface Options {
   baseUrl: string;
@@ -47,6 +48,8 @@ export class PterodactylHttpClient implements PterodactylGateway {
     timeoutMs = this.opts.timeoutMs,
   ): Promise<T> {
     const key = api === 'application' ? this.opts.appKey : this.opts.clientKey;
+    // Anfrage-Limit des Panels nie erreichen: wartet bzw. stellt Hintergrund-Abfragen zurück (siehe governor.ts)
+    await acquirePanelCall(api, method);
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/api/${api}${path}`, {
@@ -60,6 +63,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
+      panelCallFailed(api);
       if (method === 'GET' && attempt < 2) {
         await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
         return this.request(api, method, path, body, attempt + 1, timeoutMs);
@@ -67,7 +71,10 @@ export class PterodactylHttpClient implements PterodactylGateway {
       throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
     }
 
-    if ((res.status === 429 || res.status >= 500) && method === 'GET' && attempt < 2) {
+    observePanelResponse(api, res);
+    // 429: höchstens ein neuer Versuch – acquirePanelCall wartet dafür die vom Panel genannte Zeit ab (oder gibt auf)
+    if (res.status === 429 && method === 'GET' && attempt < 1) return this.request(api, method, path, body, attempt + 1, timeoutMs);
+    if (res.status >= 500 && method === 'GET' && attempt < 2) {
       await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
       return this.request(api, method, path, body, attempt + 1, timeoutMs);
     }
@@ -425,14 +432,18 @@ export class PterodactylHttpClient implements PterodactylGateway {
 
   /** Dateien gehen als reiner Text über die Client-API (nicht als JSON) */
   private async fileRequest(method: 'GET' | 'POST', identifier: string, action: 'contents' | 'write', path: string, content?: string): Promise<Response> {
+    await acquirePanelCall('client', method);
     try {
-      return await fetch(`${this.baseUrl}/api/client/servers/${identifier}/files/${action}?file=${encodeURIComponent(path)}`, {
+      const res = await fetch(`${this.baseUrl}/api/client/servers/${identifier}/files/${action}?file=${encodeURIComponent(path)}`, {
         method,
         headers: { Authorization: `Bearer ${this.opts.clientKey}`, Accept: 'Application/vnd.pterodactyl.v1+json', ...(content !== undefined ? { 'Content-Type': 'text/plain' } : {}) },
         body: content,
         signal: AbortSignal.timeout(this.opts.timeoutMs),
       });
+      observePanelResponse('client', res);
+      return res;
     } catch (err) {
+      panelCallFailed('client');
       throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
     }
   }
@@ -458,7 +469,9 @@ export class PterodactylHttpClient implements PterodactylGateway {
     const parts = path.split('/').filter(Boolean);
     let dir = '/';
     for (let i = 0; i < parts.length; i++) {
-      const entry = (await this.listFiles(identifier, dir)).find((f) => f.name === parts[i]);
+      // Ohne Wiederholungen (attempt = 2): Das ist nur eine Rückfrage, sie soll keine Anfragen vervielfachen
+      const res = await this.request('client', 'GET', `/servers/${identifier}/files/list?directory=${encodeURIComponent(dir)}`, undefined, 2);
+      const entry = ((res.data ?? []) as Json[]).map((f) => ({ name: String(f.attributes.name), directory: !f.attributes.is_file })).find((f) => f.name === parts[i]);
       const last = i === parts.length - 1;
       if (!entry || (last ? entry.directory : !entry.directory)) return false;
       dir = `${dir === '/' ? '' : dir}/${parts[i]}`;
@@ -479,6 +492,7 @@ export class PterodactylHttpClient implements PterodactylGateway {
   }
 
   async writeFileRaw(identifier: string, path: string, content: Buffer): Promise<void> {
+    await acquirePanelCall('client', 'POST');
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/api/client/servers/${identifier}/files/write?file=${encodeURIComponent(path)}`, {
@@ -488,8 +502,10 @@ export class PterodactylHttpClient implements PterodactylGateway {
         signal: AbortSignal.timeout(Math.max(this.opts.timeoutMs, 60_000)),
       });
     } catch (err) {
+      panelCallFailed('client');
       throw new PterodactylError(`Pterodactyl nicht erreichbar: ${(err as Error).message}`, 0);
     }
+    observePanelResponse('client', res);
     if (!res.ok) throw new PterodactylError(`Pterodactyl POST files/write → ${res.status}`, res.status);
   }
 

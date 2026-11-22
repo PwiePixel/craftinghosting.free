@@ -29,7 +29,7 @@ import {
 import { env } from '../env';
 import { db, pingDb } from '../db/client';
 import { jobRuns, statusChecks, statusIncidents } from '../db/schema';
-import { pterodactyl } from '../pterodactyl';
+import { pterodactyl, PterodactylError } from '../pterodactyl';
 import type { PteroNode } from '../pterodactyl/types';
 import { getSettings } from './settings.service';
 
@@ -47,12 +47,16 @@ const SEVERITY: ComponentStatus[] = ['operational', 'maintenance', 'unknown', 'd
 const worst = (list: ComponentStatus[]): ComponentStatus =>
   list.reduce<ComponentStatus>((acc, s) => (SEVERITY.indexOf(s) > SEVERITY.indexOf(acc) ? s : acc), 'operational');
 
+/** Gesetzt, wenn während der laufenden Prüfung das Anfrage-Limit des Panels griff (429) – das ist kein Ausfall */
+let panelBusyDuringCheck = false;
+
 async function timed<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T; ms: number } | { ok: false; ms: number }> {
   const started = performance.now();
   try {
     const value = await fn();
     return { ok: true, value, ms: Math.round(performance.now() - started) };
-  } catch {
+  } catch (err) {
+    if (err instanceof PterodactylError && err.status === 429) panelBusyDuringCheck = true;
     return { ok: false, ms: Math.round(performance.now() - started) };
   }
 }
@@ -75,7 +79,8 @@ async function runChecks(settings: SiteSettings['status'], privateNodeIds: numbe
 
   const [dbCheck, panelCheck, nodesCheck, webCheck, workerCheck] = await Promise.all([
     needs('api', 'service') ? timed(() => pingDb()) : null,
-    needs('panel', 'service') ? timed(() => ptero.ping()) : null,
+    // Eine Abfrage für beides: Die Node-Liste zeigt auch, ob das Panel antwortet (spart eine Abfrage je Prüfung)
+    needs('panel', 'service') && !needs('nodes', 'node') ? timed(() => ptero.ping()) : null,
     needs('nodes', 'node') ? timed(() => ptero.listNodes()) : null,
     needs('website') && env.WEB_INTERNAL_URL ? timed(() => reachable(env.WEB_INTERNAL_URL!, 'HEAD', true)) : null,
     needs('service')
@@ -91,6 +96,7 @@ async function runChecks(settings: SiteSettings['status'], privateNodeIds: numbe
       : null,
   ]);
 
+  const panelSource = panelCheck ?? (needs('panel', 'service') ? nodesCheck : null);
   // Nodes: Wartungsmodus aus dem Panel, dazu (wenn eingeschaltet) ein direkter Ping auf Wings
   // Private Nodes gehören nicht zum Angebot – sie zählen nicht in den Sammelstatus „Server-Nodes“ (einzeln beobachten geht weiter)
   const allNodes: PteroNode[] = nodesCheck?.ok ? nodesCheck.value : [];
@@ -108,7 +114,7 @@ async function runChecks(settings: SiteSettings['status'], privateNodeIds: numbe
   );
 
   const api: CheckResult | null = dbCheck && { status: dbCheck.ok ? (dbCheck.ms > 500 ? 'degraded' : 'operational') : 'major_outage', latencyMs: dbCheck.ms };
-  const panel: CheckResult | null = panelCheck && { status: panelCheck.ok ? (panelCheck.ms > 2000 ? 'degraded' : 'operational') : 'major_outage', latencyMs: panelCheck.ms };
+  const panel: CheckResult | null = panelSource && { status: panelSource.ok ? (panelSource.ms > 2000 ? 'degraded' : 'operational') : 'major_outage', latencyMs: panelSource.ms };
 
   const httpChecks = new Map<string, CheckResult>();
   await Promise.all(
@@ -171,19 +177,24 @@ async function runChecks(settings: SiteSettings['status'], privateNodeIds: numbe
 let rawCache: { at: number; key: string; value: RawStatus } | null = null;
 let inflight: { key: string; promise: Promise<RawStatus> } | null = null;
 
-/** Automatische Prüfungen mit 30 Sekunden Cache (verhindert Last durch viele Besucher). */
+/** Automatische Prüfungen mit 55 Sekunden Cache (verhindert Last durch viele Besucher und schont das Anfrage-Limit des Panels). */
 async function getRawStatus(settings: SiteSettings['status'], privateNodeIds: number[], fresh = false): Promise<RawStatus> {
   // Ändert der Admin die Komponenten, gilt der alte Stand nicht mehr
   const key = JSON.stringify([settings.pingNodes, privateNodeIds, settings.components.map((c) => [c.id, c.source, c.target])]);
-  if (!fresh && rawCache && rawCache.key === key && Date.now() - rawCache.at < 30_000) return rawCache.value;
+  if (!fresh && rawCache && rawCache.key === key && Date.now() - rawCache.at < 55_000) return rawCache.value;
   if (!inflight || inflight.key !== key) {
     const isStatic = env.STATUS_PROVIDER === 'static';
     const promise = (
       isStatic
         ? Promise.resolve(Object.fromEntries(settings.components.map((c) => [c.id, { status: 'operational', latencyMs: null } as CheckResult])))
-        : runChecks(settings, privateNodeIds)
+        : (() => {
+            panelBusyDuringCheck = false;
+            return runChecks(settings, privateNodeIds);
+          })()
     )
       .then((results) => {
+        // Panel ausgelastet (429): Es antwortet – kein Ausfall. Den letzten bekannten Stand weiter zeigen.
+        if (panelBusyDuringCheck && rawCache && rawCache.key === key) return rawCache.value;
         const value: RawStatus = { results, provider: isStatic ? 'static' : 'internal', checkedAt: new Date().toISOString() };
         rawCache = { at: Date.now(), key, value };
         return value;

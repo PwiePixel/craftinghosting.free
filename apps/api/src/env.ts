@@ -91,6 +91,12 @@ const schema = z
     PTERODACTYL_LOCATION_IDS_EPYC: csv,
     PTERODACTYL_LOCATION_IDS_XEON: csv,
     PTERODACTYL_TIMEOUT_MS: z.coerce.number().int().default(10000),
+    /**
+     * Anfrage-Limit des Panels je Minute (wie APP_API_CLIENT_RATELIMIT / APP_API_APPLICATION_RATELIMIT in der .env des
+     * Panels). Nur ein Rückfall: Schickt das Panel X-RateLimit-Kopfzeilen, gelten deren Werte.
+     */
+    PTERODACTYL_CLIENT_RATE_LIMIT: z.coerce.number().int().min(10).default(720),
+    PTERODACTYL_APP_RATE_LIMIT: z.coerce.number().int().min(10).default(240),
     PTERODACTYL_MOCK_STATE_FILE: z.string().default('.pterodactyl-mock.json'),
 
     SMTP_HOST: z.string().optional(),

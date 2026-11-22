@@ -37,11 +37,13 @@ export const postInstallJob: JobDefinition = {
     const stats = { checked: rows.length, ready: 0 };
     const ptero = pterodactyl();
     await mapLimit(rows, 4, async (server) => {
-      // In den ersten 10 Minuten alle 5 Sekunden, danach höchstens einmal pro Minute nachsehen
+      // Gestaffelt nachsehen (jede Abfrage zählt gegen das Anfrage-Limit des Panels): in der ersten Minute alle
+      // 5 Sekunden (die Schnellinstallation ist oft in Sekunden fertig), bis 3 Minuten alle 15 Sekunden, bis 10 Minuten
+      // alle 30 Sekunden. Danach übernimmt der minütliche Abgleich (sync-power-states).
       const age = now.getTime() - (server.powerStateAt?.getTime() ?? 0);
-      const next = nextCheck.get(server.id) ?? 0;
-      if (age > 10 * 60_000 && now.getTime() < next) return;
-      nextCheck.set(server.id, now.getTime() + (age > 10 * 60_000 ? 60_000 : 0));
+      if (age > 10 * 60_000) return;
+      if (now.getTime() < (nextCheck.get(server.id) ?? 0)) return;
+      nextCheck.set(server.id, now.getTime() + (age < 60_000 ? 0 : age < 3 * 60_000 ? 15_000 : 30_000));
       const panel = await ptero.getServer(server.pteroServerId!);
       // Fertig installiert: kein Status mehr (nicht „installing“/„install_failed“), nicht gesperrt
       // Fehlgeschlagen oder gesperrt: übernimmt der minütliche Abgleich (sync-power-states)
@@ -49,8 +51,14 @@ export const postInstallJob: JobDefinition = {
         if (panel && (panel.status === 'install_failed' || panel.suspended)) nextCheck.set(server.id, now.getTime() + 10 * 60_000);
         return;
       }
-      nextCheck.delete(server.id);
-      if (await runPostProvision({ ...server, powerState: server.powerState === 'installing' || server.powerState === 'unknown' ? 'offline' : server.powerState })) stats.ready++;
+      try {
+        if (await runPostProvision({ ...server, powerState: server.powerState === 'installing' || server.powerState === 'unknown' ? 'offline' : server.powerState })) stats.ready++;
+        nextCheck.delete(server.id);
+      } catch (err) {
+        // z. B. Backup-Zeitplan konnte nicht angelegt werden: nicht alle 5 Sekunden erneut, sondern in 5 Minuten
+        nextCheck.set(server.id, now.getTime() + 5 * 60_000);
+        throw err;
+      }
     });
     return stats;
   },

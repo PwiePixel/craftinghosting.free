@@ -2,6 +2,7 @@ import type { FastifyError, FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { issueMessage, type Locale, type Localized } from '@chfree/shared';
 import { resolveText, type LText } from './text';
+import { PterodactylError } from '../pterodactyl/types';
 
 /** Text in beiden Sprachen – kurz für Fehlermeldungen */
 export const L = (de: string, en: string): Localized => ({ de, en });
@@ -60,6 +61,14 @@ export function registerErrorHandler(app: FastifyInstance) {
           fields: zodFields(error, locale),
         },
       });
+    }
+    // Panel ausgelastet (Anfrage-Limit von Pterodactyl): verständliche Meldung statt „interner Fehler“
+    if (error instanceof PterodactylError && error.status === 429) {
+      const seconds = Math.max(1, Math.ceil(((error as { retryAfterMs?: number }).retryAfterMs ?? 10_000) / 1000));
+      return reply
+        .status(429)
+        .header('Retry-After', String(seconds))
+        .send({ error: { code: 'panel_busy', message: resolveText(L('Die Server-Verwaltung ist gerade stark ausgelastet. Bitte versuche es in ein paar Sekunden erneut.', 'The server management is very busy right now. Please try again in a few seconds.'), locale), fields: { retryAfterSeconds: String(seconds) } } });
     }
     const fe = error as FastifyError;
     if (fe.statusCode === 429) {

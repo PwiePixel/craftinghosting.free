@@ -11,6 +11,7 @@
  *  – Partner-Server sind vom 30-Tage-Zyklus und vom Fair-Use-System der Website ausgenommen.
  *  – Lange nicht gestartete Server werden nach `deleteAfterIdleDays` Tagen gelöscht.
  */
+import { applyPowerState } from './power-state';
 import { randomBytes, randomInt } from 'node:crypto';
 import { and, count, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import { NO_CYCLE_END, serverTypesOf, findPlan, freeHostingConfig, getServerType, versionsFor, type AdminPartnerDTO, type AdminPartnerInput } from '@chfree/shared';
@@ -582,7 +583,8 @@ async function endSession(partner: Partner, server: Server, ps: PartnerServer, r
     })
     .where(and(eq(partnerServers.serverId, server.id), eq(partnerServers.hostActive, true)));
   if (affectedRows(ended) !== 1) return;
-  liveCache.delete(server.id);
+  // Der Stand ist bekannt („stoppt“) – nicht gleich wieder im Panel nachfragen
+  liveCache.set(server.id, { at: Date.now(), state: 'stopping' });
   // Das Durchsetzen einer Grenze darf nie am Kontingent für Partner-Anfragen scheitern. Kommt der Befehl trotzdem nicht
   // an, holt ihn der Hintergrund-Job nach (und beendet den Server notfalls hart).
   if (server.pteroIdentifier) await unbudgeted(() => pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'stop')).catch(() => {});
@@ -675,7 +677,8 @@ export async function startPartnerServer(partner: Partner, id: string, opts: { a
     }
     throw Errors.unavailable(L('Der Server konnte gerade nicht gestartet werden. Bitte gleich noch einmal versuchen.', 'The server could not be started right now. Please try again shortly.'));
   }
-  liveCache.delete(id);
+  // Der Stand ist bekannt („startet“) – nicht gleich wieder im Panel nachfragen
+  liveCache.set(id, { at: Date.now(), state: 'starting' });
   return getPartnerServer(partner, id);
 }
 
@@ -796,7 +799,7 @@ export async function deletePartnerServer(partner: Partner, id: string, ip?: str
 const settingsCheckedAt = new Map<string, number>();
 const settingsUnreadable = new Map<string, number>();
 const SETTINGS_FIRST_CHECK_MS = 60_000;
-const SETTINGS_RECHECK_MS = 5 * 60_000;
+const SETTINGS_RECHECK_MS = 30 * 60_000;
 
 /** Ist für diese Sitzung eine Nachprüfung fällig? (eine Minute nach dem Start, danach alle fünf Minuten – unabhängig vom gemeldeten Zustand) */
 function settingsCheckDue(ps: PartnerServer, serverId: string, now: Date): boolean {
@@ -918,7 +921,11 @@ export async function runPartnerSessions(now = new Date()) {
   const enforced = await mapLimit(mustBeOff, 8, async ({ server, ps }) => {
     // Im Panel nachsehen: Der gemerkte Stand kann bis zu einer Minute alt sein
     const state = (await pterodactyl().getResources(server.pteroIdentifier!)).state;
-    if (state !== 'running' && state !== 'starting' && state !== 'stopping') return;
+    if (state !== 'running' && state !== 'starting' && state !== 'stopping') {
+      // Aus: den Stand gleich merken, damit der Server nicht alle 30 Sekunden erneut abgefragt wird
+      if (server.powerState !== state) await applyPowerState(server, state, now).catch(() => {});
+      return;
+    }
     seen.add(server.id);
     // Zeit, die ein Server nach dem Ende der Sitzung weiterläuft, zählt als Laufzeit – sonst ließe sie sich mit einem
     // Server, der den Stopp-Befehl ignoriert, immer wieder kostenlos herausholen
@@ -980,7 +987,10 @@ export async function runPartnerSessions(now = new Date()) {
     if (!partner) return;
     const patch: Partial<typeof partnerServers.$inferInsert> = {};
     const wantsInstalled = !ps.installedNotified && !ps.softwareJob && server.status === 'active';
-    const state = wantsInstalled || (ps.hostActive && !ps.runningNotified) ? await liveState(server) : null;
+    // In den ersten Minuten nach Start bzw. Erstellen frisch im Panel nachsehen (schnelle Webhooks); danach genügt der
+    // Stand aus dem Power-Abgleich (jede Minute) – sonst würde ein Server, der nie hochkommt, alle 30 s abgefragt
+    const recent = Math.max(ps.lastStartAt?.getTime() ?? 0, server.createdAt.getTime()) > now.getTime() - 3 * 60_000;
+    const state = wantsInstalled || (ps.hostActive && !ps.runningNotified) ? (recent ? await liveState(server) : knownState(server)) : null;
     if (wantsInstalled && state !== null && state !== 'installing') {
       patch.installedNotified = true;
       if (state === 'failed') await emitPartnerEvent(partner.id, 'server.install_failed', { ...eventServer(server, ps), serverType: server.serverType, version: server.version, error: 'Die Installation im Panel ist fehlgeschlagen.' }).catch(() => {});

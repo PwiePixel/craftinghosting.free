@@ -287,6 +287,15 @@ export interface AdminJobDTO {
   stale: boolean;
 }
 
+/** Auslastung des Anfrage-Limits von Pterodactyl je Prozess (Admin → Übersicht) */
+export interface AdminPanelUsageDTO {
+  snapshots: {
+    role: 'api' | 'worker';
+    at: string;
+    usage: { api: 'client' | 'application'; limit: number; limitSource: 'panel' | 'setting'; remaining: number | null; sentLastMinute: number; sentLastHour: number; throttledLastHour: number; deferredLastHour: number; lastThrottledAt: string | null }[];
+  }[];
+}
+
 export interface AdminOverviewDTO {
   site: { maintenance: boolean; registrationMode: RegistrationMode; limits: ServerLimits; waitlistConfirmed: number; waitlistUnconfirmed: number };
   /** Belegung je Produkt (Minecraft / Discord-Bots) */

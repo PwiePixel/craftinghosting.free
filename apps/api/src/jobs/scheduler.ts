@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+import { withPanelPriority } from '../pterodactyl/governor';
 import { randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
@@ -17,7 +18,8 @@ export async function runJobOnce(job: JobDefinition, log: JobLogger): Promise<'r
   try {
     const [res] = await db.insert(jobRuns).values({ job: job.name, status: 'running', startedAt }).returning({ id: jobRuns.id });
     runId = res?.id;
-    const stats = await job.run({ now: new Date(), log });
+    // Hintergrund-Abfragen ans Panel mit niedriger Priorität: Sie treten zurück, bevor das Limit erreicht ist
+    const stats = await withPanelPriority('low', () => job.run({ now: new Date(), log }));
     if (runId) await db.update(jobRuns).set({ status: 'success', finishedAt: new Date(), stats }).where(eq(jobRuns.id, runId));
     const changed = Object.entries(stats).filter(([, v]) => v > 0);
     if (changed.length) log.info({ job: job.name, stats }, `Job ${job.name} abgeschlossen`);
