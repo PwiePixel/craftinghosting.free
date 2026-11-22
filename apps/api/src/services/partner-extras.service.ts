@@ -8,6 +8,7 @@ import { affectedRows, db } from '../db/client';
 import { partnerServers, servers, type Partner, type Server } from '../db/schema';
 import { env } from '../env';
 import { ApiError, Errors, L } from '../lib/errors';
+import { PanelBusyError } from '../pterodactyl/governor';
 import { pterodactyl } from '../pterodactyl';
 import { PterodactylError } from '../pterodactyl/types';
 import { audit } from './audit.service';
@@ -674,6 +675,8 @@ export async function purgePartnerBackups(identifier: string, force = false): Pr
 const backupDTO = (b: { uuid: string; name: string; bytes: number; completedAt: string | null; successful: boolean; createdAt: string }) => ({ id: b.uuid, name: b.name, bytes: b.bytes, state: b.completedAt ? (b.successful ? 'ready' : 'failed') : 'creating', createdAt: b.createdAt, completedAt: b.completedAt });
 
 function backupFailure(err: unknown): never {
+  // Panel ausgelastet (Steuerung hat zurückgestellt): nicht als „zu viele Backups“ melden
+  if (err instanceof PanelBusyError) panelFailure(err);
   if (err instanceof PterodactylError) {
     const text = JSON.stringify(err.details ?? '') + err.message;
     if (err.status === 404) throw new ApiError(404, 'backup_not_found', L('Dieses Backup gibt es nicht.', 'This backup does not exist.'));

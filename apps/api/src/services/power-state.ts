@@ -17,6 +17,8 @@ export async function applyPowerState(
   state: PowerState,
   now: Date,
   endReason: EndReason = 'detected',
+  /** Tatsächlicher Startzeitpunkt (aus der vom Panel gemeldeten Laufzeit) – für Starts, die erst verspätet auffallen */
+  startedAt?: Date,
 ): Promise<{ opened: boolean; closed: boolean }> {
   let opened = false;
   let closed = false;
@@ -35,7 +37,7 @@ export async function applyPowerState(
       .where(and(eq(serverSessions.serverId, server.id), isNull(serverSessions.endedAt)))
       .limit(1);
     if (!open) {
-      const res = await db.insert(serverSessions).values({ serverId: server.id, startedAt: now }).onConflictDoNothing();
+      const res = await db.insert(serverSessions).values({ serverId: server.id, startedAt: startedAt && startedAt < now ? startedAt : now }).onConflictDoNothing();
       opened = affectedRows(res) === 1;
     }
   } else {

@@ -583,8 +583,10 @@ async function endSession(partner: Partner, server: Server, ps: PartnerServer, r
     })
     .where(and(eq(partnerServers.serverId, server.id), eq(partnerServers.hostActive, true)));
   if (affectedRows(ended) !== 1) return;
-  // Der Stand ist bekannt („stoppt“) – nicht gleich wieder im Panel nachfragen
+  // Der Stand ist bekannt („stoppt“) – nicht gleich wieder im Panel nachfragen. Der Zeitpunkt zählt als Zustandswechsel:
+  // Der Power-Abgleich prüft den Server danach noch mehrere Minuten lang jede Minute (Server, die den Stopp ignorieren)
   liveCache.set(server.id, { at: Date.now(), state: 'stopping' });
+  await db.update(servers).set({ powerStateAt: new Date() }).where(eq(servers.id, server.id));
   // Das Durchsetzen einer Grenze darf nie am Kontingent für Partner-Anfragen scheitern. Kommt der Befehl trotzdem nicht
   // an, holt ihn der Hintergrund-Job nach (und beendet den Server notfalls hart).
   if (server.pteroIdentifier) await unbudgeted(() => pterodactyl().sendPowerSignal(server.pteroIdentifier!, 'stop')).catch(() => {});
@@ -677,8 +679,10 @@ export async function startPartnerServer(partner: Partner, id: string, opts: { a
     }
     throw Errors.unavailable(L('Der Server konnte gerade nicht gestartet werden. Bitte gleich noch einmal versuchen.', 'The server could not be started right now. Please try again shortly.'));
   }
-  // Der Stand ist bekannt („startet“) – nicht gleich wieder im Panel nachfragen
+  // Der Stand ist bekannt („startet“) – nicht gleich wieder im Panel nachfragen, und gleich merken: So fragt der
+  // Power-Abgleich den Server jede Minute ab (statt nur alle 3 Minuten wie ausgeschaltete)
   liveCache.set(id, { at: Date.now(), state: 'starting' });
+  await db.update(servers).set({ powerState: 'starting', powerStateAt: new Date() }).where(and(eq(servers.id, id), inArray(servers.powerState, ['offline', 'unknown'])));
   return getPartnerServer(partner, id);
 }
 

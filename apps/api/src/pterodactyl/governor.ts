@@ -61,6 +61,8 @@ class ApiState {
   blockedUntil = 0;
   /** Geschickt, aber noch ohne Antwort (stecken noch nicht im Rest, den das Panel meldet) */
   inflight = 0;
+  /** Zeitpunkt der letzten Antwort mit Kopfzeilen */
+  lastHeaderAt = 0;
   /** Eigenes Kontingent, falls das Panel keine Kopfzeilen schickt */
   private tokens: number;
   private refilledAt = Date.now();
@@ -137,12 +139,16 @@ export async function acquirePanelCall(api: PanelApi, method: string): Promise<v
     const blocked = s.blockedUntil > now;
     // Vor der ersten Antwort ist das echte Limit unbekannt: nur vorsichtig anfragen, bis es die Kopfzeilen verraten
     const probing = s.limit === null && s.remaining === null && s.inflight >= PROBE_CONCURRENCY && s.sent.length < 50;
-    if (!blocked && !probing && s.free(now) > reserve) {
+    // Unser Fenster-Ende ist nur geschätzt (das Panel-Fenster beginnt mit der ersten Anfrage irgendeines Prozesses).
+    // Ist der Rest aufgebraucht und die letzte Meldung älter als 5 s, darf EINE Anfrage als Probe raus – ihre Antwort
+    // zeigt, ob beim Panel schon ein neues Fenster begonnen hat.
+    const probe = !blocked && s.remaining !== null && s.inflight === 0 && now - s.lastHeaderAt > 5_000 && priority !== 'low';
+    if (!blocked && !probing && (s.free(now) > reserve || probe)) {
       s.inflight++;
       s.consume(now);
       return;
     }
-    const until = blocked ? s.blockedUntil : probing ? now + 100 : s.freeAt(now);
+    const until = blocked ? s.blockedUntil : probing ? now + 100 : s.remaining !== null && priority !== 'low' ? Math.min(s.freeAt(now), Math.max(now + 250, s.lastHeaderAt + 5_100)) : s.freeAt(now);
     if (until > deadline) {
       push(s.deferred, now);
       throw new PanelBusyError(api, until - now);
@@ -160,6 +166,7 @@ export function observePanelResponse(api: PanelApi, res: Pick<Response, 'status'
   const remaining = Number(res.headers.get('x-ratelimit-remaining'));
   if (Number.isFinite(limit) && limit > 0 && res.headers.has('x-ratelimit-limit')) s.limit = limit;
   if (Number.isFinite(remaining) && res.headers.has('x-ratelimit-remaining')) {
+    s.lastHeaderAt = now;
     // Der gemeldete Rest enthält unsere noch laufenden Anfragen nicht – unser eigener Stand ist deshalb meist kleiner.
     // Liegt die Meldung deutlich darüber (mehr als die laufenden Anfragen), hat beim Panel ein neues Fenster begonnen.
     const fresh = s.remaining === null || now >= s.windowStart + WINDOW_MS || remaining > s.remaining + s.inflight + 1;
@@ -168,13 +175,18 @@ export function observePanelResponse(api: PanelApi, res: Pick<Response, 'status'
       s.remaining = Math.max(0, remaining - s.inflight);
     } else s.remaining = Math.min(s.remaining!, remaining);
   }
-  if (res.status === 429) {
-    const retryAfter = Number(res.headers.get('retry-after'));
+  // Nur ein 429 des Anfrage-Limits sperrt alles. Andere 429 (z. B. „zu viele Backups“) haben noch freien Rest.
+  const limitHit = res.status === 429 && (!res.headers.has('x-ratelimit-remaining') || remaining === 0);
+  if (limitHit) {
+    const retryAfterRaw = res.headers.get('retry-after');
+    const retryAfter = Number(retryAfterRaw);
     const resetAt = Number(res.headers.get('x-ratelimit-reset')) * 1000;
-    const until = Number.isFinite(retryAfter) && retryAfter > 0 ? now + retryAfter * 1000 : Number.isFinite(resetAt) && resetAt > now ? resetAt : now + 15_000;
-    s.blockedUntil = Math.max(s.blockedUntil, until);
+    const until =
+      retryAfterRaw !== null && Number.isFinite(retryAfter) ? now + Math.max(1, retryAfter) * 1000 : Number.isFinite(resetAt) && resetAt > now ? resetAt : now + 15_000;
+    // Ein festes Minutenfenster braucht nie länger als eine Minute
+    s.blockedUntil = Math.max(s.blockedUntil, Math.min(until, now + WINDOW_MS));
     s.remaining = 0;
-    s.windowStart = until - WINDOW_MS;
+    s.windowStart = Math.min(until, now + WINDOW_MS) - WINDOW_MS;
     push(s.throttled, now);
   }
 }

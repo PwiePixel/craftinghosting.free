@@ -63,7 +63,14 @@ export const syncPowerStatesJob: JobDefinition = {
     // gesperrt, Nacharbeiten offen) weiter jede Minute.
     const minute = Math.floor(now.getTime() / 60_000);
     const due = rows.filter((s) => {
-      const quiet = s.powerState === 'offline' && s.status !== 'suspended' && s.postProvisionDone && !s.softwareJob && (!s.powerStateAt || now.getTime() - s.powerStateAt.getTime() > 5 * 60_000);
+      const quiet =
+        s.powerState === 'offline' &&
+        s.status !== 'suspended' &&
+        s.postProvisionDone &&
+        !s.softwareJob &&
+        // In einer Fair-Use-Pause darf ein Start über das Panel nicht unbemerkt bleiben
+        !(s.pausedUntil && s.pausedUntil > now) &&
+        (!s.powerStateAt || now.getTime() - s.powerStateAt.getTime() > 5 * 60_000);
       if (!quiet) return true;
       if ((minute + slotOf(s.id)) % OFFLINE_EVERY_MINUTES === 0) return true;
       stats.skippedOffline++;
@@ -133,7 +140,15 @@ export const syncPowerStatesJob: JobDefinition = {
         }
       }
 
-      const result = await applyPowerState(server, res.state, now, endReasonFor(server, now));
+      // Start erst jetzt bemerkt (ausgeschaltete Server werden nur alle 3 Minuten abgefragt, z. B. Start über das Panel):
+      // Laufzeit ab dem echten Start zählen – aus der Laufzeit, die das Panel meldet. Nie vor dem letzten bekannten
+      // Zustandswechsel und höchstens 10 Minuten zurück (Schutz vor unplausiblen Werten).
+      let startedAt: Date | undefined;
+      if ((res.state === 'running' || res.state === 'starting') && server.powerState === 'offline' && res.uptimeMs > 0) {
+        const earliest = Math.max(now.getTime() - 10 * 60_000, server.powerStateAt?.getTime() ?? 0);
+        startedAt = new Date(Math.max(earliest, now.getTime() - res.uptimeMs));
+      }
+      const result = await applyPowerState(server, res.state, now, endReasonFor(server, now), startedAt);
       if (res.state !== server.powerState) stats.changed++;
       if (result.opened) stats.sessionsOpened++;
       if (result.closed) stats.sessionsClosed++;
