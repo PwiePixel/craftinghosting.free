@@ -261,7 +261,7 @@ return {
     stepRuntime: 'Programming language',
     runtimeGroup: 'Programming language',
     runtimeHint: 'You set the exact version (e.g. Python 3.12 or Node.js 22) later in the panel under “Startup”.',
-    nameHintBot: 'This is the name of your bot server in the panel, e.g. “My music bot”.',
+    nameHintBot: 'This is the name of your bot server in the panel, e.g. “My moderation bot”.',
     noPlans: 'There are currently no plans for this offer.',
     acceptRulesBot: 'terms of use for Discord bots',
     acceptSummaryBot: (fairUseOn: boolean) =>

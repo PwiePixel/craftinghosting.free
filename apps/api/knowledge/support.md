@@ -94,6 +94,11 @@ steht unter „Meine Server“.
   Dashboard für den eigenen Bot – mit Anmeldung (z. B. Login mit Discord), Impressum nach § 5 DDG, soweit nötig, und
   unter Beachtung des Rechts im eigenen Land. Auch ein erlaubtes Dashboard kann vom System auffallen; dann kann der
   Server vorsorglich gesperrt werden, bis im Support-Ticket geklärt ist, dass es zum Bot gehört.
+- Musik- und Audio-Streaming ist auf Bot-Servern nicht erlaubt: keine Audio-Knoten oder Streaming-Server wie Lavalink,
+  NodeLink oder vergleichbare Software, und kein Abspielen, Umwandeln oder Weiterleiten von Musik, Audio oder Video
+  über den Server (z. B. aus YouTube, Spotify, SoundCloud oder Internetradios). Das steht in den Nutzungsbedingungen
+  für Discord-Bot-Hosting, Ziffer 5 und 6, und gilt als Abuse (Verwarnung bzw. Sperre). Fragt jemand nach einem
+  Musik-Bot oder nach Lavalink: freundlich sagen, dass das bei uns nicht geht.
 
 ## Abuse (Regelverstöße)
 

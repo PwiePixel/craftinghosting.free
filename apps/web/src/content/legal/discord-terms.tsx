@@ -145,6 +145,10 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           oder eines Webhook-Empfängers für den Bot.
         </p>
         <p>
+          <strong>Kein Audio- und Musik-Streaming.</strong> Audio-Knoten und Streaming-Server wie Lavalink, NodeLink und jede vergleichbare Software gehören nicht zu den
+          zulässigen Hilfsprozessen. Auch das Streamen, Umwandeln oder Weiterleiten von Musik, Audio oder Video über den Server ist nicht erlaubt (siehe Ziffer 6).
+        </p>
+        <p>
           <strong>Keine Websites.</strong> Der Server ist ein Discord-Bot-Server, kein Webserver. Das Hosten von Websites ist nicht erlaubt – weder zusätzlich zum Bot noch
           anstelle eines Bots. Das gilt für jede Art von Website, z. B. Homepage, Landingpage, Blog, Shop, Portfolio, Linkseite oder Dateidownloads.
         </p>
@@ -189,6 +193,12 @@ export function DiscordTermsDe({ site }: { site: PublicSiteDTO }) {
           <li>Raid-, Nuke-, Spam- und Massen-DM-Bots</li>
           <li>Phishing- und Scam-Bots</li>
           <li>Scraping und Datensammlung entgegen den Bedingungen von Discord</li>
+          <li>
+            <strong>Strengstens verboten:</strong> Audio-Knoten und Streaming-Server wie Lavalink, NodeLink und jede vergleichbare Software (auch umbenannt, selbst gebaut
+            oder in den Bot eingebaut) sowie das
+            Streamen, Umwandeln oder Weiterleiten von Musik, Audio oder Video über den Server – zum Beispiel das Abspielen von Inhalten aus YouTube, Spotify, SoundCloud
+            oder Internetradios
+          </li>
           <li>Kryptomining, Proxy-/VPN-Dienste und Tunnel</li>
           <li>Angriffe auf andere Systeme, Portscans und DDoS-Werkzeuge</li>
           <li>Betrieb von Websites jeder Art – ausgenommen ein Dashboard für den eigenen Bot unter den Voraussetzungen aus Ziffer 5</li>
@@ -380,6 +390,10 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           The server may only be used to run Discord bots – including directly related helper processes, e.g. a small database or a webhook listener for the bot.
         </p>
         <p>
+          <strong>No audio or music streaming.</strong> Audio nodes and streaming servers such as Lavalink, NodeLink and any comparable software are not permitted
+          helper processes. Streaming, transcoding or relaying music, audio or video through the server is not allowed either (see section 6).
+        </p>
+        <p>
           <strong>No websites.</strong> The server is a Discord bot server, not a web server. Hosting websites is not allowed – neither in addition to the bot nor instead of
           a bot. This applies to every kind of website, e.g. homepage, landing page, blog, shop, portfolio, link page or file downloads.
         </p>
@@ -423,6 +437,12 @@ export function DiscordTermsEn({ site }: { site: PublicSiteDTO }) {
           <li>Raid, nuke, spam and mass-DM bots</li>
           <li>Phishing and scam bots</li>
           <li>Scraping and data collection in violation of Discord’s terms</li>
+          <li>
+            <strong>Strictly prohibited:</strong> audio nodes and streaming servers such as Lavalink, NodeLink and any comparable software (including renamed, self-built
+            or built into the bot), as well as
+            streaming, transcoding or relaying music, audio or video through the server – for example playing content from YouTube, Spotify, SoundCloud or internet
+            radio
+          </li>
           <li>Crypto mining, proxy/VPN services and tunnels</li>
           <li>Attacks on other systems, port scans and DDoS tools</li>
           <li>Hosting websites of any kind – except a dashboard for your own bot under the requirements of section 5</li>

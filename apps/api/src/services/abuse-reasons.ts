@@ -46,6 +46,15 @@ export const ABUSE_REASONS: { id: string; label: string; title: Localized; text:
     },
   },
   {
+    id: 'audio',
+    label: 'Lavalink / Audio-Streaming (Lavalink, NodeLink, Musik-Bots)',
+    title: { de: 'Verstoß gegen die Regeln: Lavalink bzw. Audio-Streaming', en: 'Rule violation: Lavalink or audio streaming' },
+    text: {
+      de: 'Auf deinem Server wird ein Audio-Knoten bzw. Streaming-Server betrieben (z. B. Lavalink, NodeLink oder vergleichbare Software) oder es wird Musik, Audio oder Video über den Server gestreamt. Das ist auf CraftingHosting.free strengstens verboten – auch umbenannt, selbst gebaut oder in den Bot eingebaut (Nutzungsbedingungen für Discord-Bot-Hosting, Ziffer 5 und 6). Bitte entferne die Software vollständig von deinem Server.',
+      en: 'An audio node or streaming server is running on your server (e.g. Lavalink, NodeLink or comparable software), or music, audio or video is being streamed through the server. This is strictly prohibited on CraftingHosting.free – including renamed, self-built or built into the bot (terms of use for Discord bot hosting, sections 5 and 6). Please remove the software from your server completely.',
+    },
+  },
+  {
     id: 'multi',
     label: 'Mehrfach-Accounts',
     title: { de: 'Verstoß gegen die Regeln: mehrere Accounts', en: 'Rule violation: multiple accounts' },

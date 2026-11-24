@@ -281,7 +281,7 @@ export const freeHostingConfig: FreeHostingConfig = {
     {
       id: 'bot-1gb',
       name: 'Bot 1 GB',
-      tagline: { de: 'Für Bots mit Datenbank oder Musik', en: 'For bots with a database or music' },
+      tagline: { de: 'Für größere Bots mit Datenbank', en: 'For larger bots with a database' },
       memoryMb: 1024,
       cpuPercent: 75,
       cpuLabel: { de: 'Geteilte CPU (bis zu 0,75 Threads)', en: 'Shared CPU (up to 0.75 threads)' },

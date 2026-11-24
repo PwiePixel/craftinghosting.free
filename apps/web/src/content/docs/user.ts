@@ -101,6 +101,7 @@ export const userDocs: DocPage[] = [
             ul: [
               { de: 'Der Server ist für deinen Discord-Bot gedacht – keine anderen Programme, kein Mining, keine Angriffe.', en: 'The server is meant for your Discord bot – no other software, no mining, no attacks.' },
               { de: 'Websites sind nicht erlaubt – Ausnahme: ein Dashboard für deinen eigenen Bot mit klarer Anmeldung und Impressum.', en: 'Websites are not allowed – exception: a dashboard for your own bot with a clear sign-in and legal notice.' },
+              { de: 'Strengstens verboten: Lavalink, NodeLink und jede vergleichbare Audio-Software sowie Musik- und Audio-Streaming über den Server.', en: 'Strictly prohibited: Lavalink, NodeLink and any comparable audio software, as well as music and audio streaming through the server.' },
               { de: 'Bots laufen durchgehend. Dauerhaft sehr hohe CPU-Last führt zu einem automatischen Stopp.', en: 'Bots run continuously. Permanently very high CPU load leads to an automatic stop.' },
             ],
           },
