@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowUpRight, Bot, FlaskConical, Pickaxe, Plus, ShieldAlert, SquareTerminal } from 'lucide-react';
 import { TileUsage } from '@/components/my/server-tile';
-import { kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type ProductKind, type UserLimitsDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
+import { addonFits, kindExhausted, localePath, productKinds, serverPagePath, type BonusSlot, type DiscordMeDTO, type ProductKind, type UserLimitsDTO, type Locale, type ServerDTO, type WarningStatusDTO } from '@chfree/shared';
 import { DiscordIcon } from '@/components/discord/discord-note';
 import { AutoRefresh, CopyText, DeleteServer, PanelSetupCard, ReactivateButton } from '@/components/my/client-bits';
 import { ButtonLink, buttonClasses } from '@/components/ui/button';
@@ -78,7 +78,7 @@ function ServerBanner({ kind, tone, label }: { kind: ServerDTO['kind']; tone: 'g
   );
 }
 
-function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl, extras }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null; /** Extras werden angeboten */ extras: boolean }) {
+function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl, extras, alwaysOnOffered }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null; /** Extras werden angeboten */ extras: boolean; /** Für diesen Server gibt es das Extra „24/7“ */ alwaysOnOffered: boolean }) {
   const d = getDict(lang);
   const t = d.my;
   const x = d.extras;
@@ -174,7 +174,15 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl, ex
               )}
               {s.deleteAt && <span className="mt-2 block text-amber-300">{t.deleteAt(fmt.dateTime(s.deleteAt))}</span>}
             </p>
-            <ReactivateButton server={s} />
+            <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+              <ReactivateButton server={s} />
+              {/* Auch ein ruhender Server kann Extras haben: bezahlen, Abo kündigen, 24/7 buchen */}
+              {(extras || s.alwaysOn) && s.suspensionReason === 'cycle_expired' && !!s.panelUrl && (
+                <Link prefetch={false} href={`${serverPagePath(lang, s.id)}#extras`} className="text-[13px] text-muted underline underline-offset-4 hover:text-white">
+                  {x.manageLink}
+                </Link>
+              )}
+            </div>
           </div>
         ) : s.status === 'waitlist' ? (
           <div className="space-y-3">
@@ -247,7 +255,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl, ex
               </p>
               <p className="mt-0.5 text-[13px] text-subtle">{s.alwaysOn ? x.alwaysOnFairUseHint : s.fairUseEnabled ? t.rulesShort : t.alwaysOnHint}</p>
               {/* Im Moment der Pause: Hinweis auf das Extra „24/7“ (nur wenn es angeboten wird) */}
-              {extras && manageable && s.fairUseEnabled && f.isPaused && f.pauseReason !== 'cpu_overload' && (
+              {alwaysOnOffered && manageable && s.fairUseEnabled && f.isPaused && f.pauseReason !== 'cpu_overload' && (
                 <p className="mt-2 text-[13px] text-blue-300">
                   {x.upsellPaused}{' '}
                   <Link prefetch={false} href={`${serverPagePath(lang, s.id)}#extras`} className="underline underline-offset-4 hover:text-white">
@@ -428,7 +436,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {servers.length > 0 && (
             <div className="grid auto-rows-fr gap-5 md:grid-cols-2 2xl:grid-cols-3">
               {servers.map((s) => (
-                <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} extras={settings.addons.enabled} />
+                <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} extras={settings.addons.enabled} alwaysOnOffered={settings.addons.enabled && !settings.addons.testMode && settings.addons.items.some((a) => a.effect === 'always_on' && addonFits(a, { kind: s.kind, planId: s.planId }))} />
               ))}
             </div>
           )}

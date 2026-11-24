@@ -260,12 +260,14 @@ export interface PublicAddonCatalog {
   online: boolean;
   /** Mindestens ein Extra gibt es auch als Abo */
   subscriptions: boolean;
+  /** Die Online-Zahlung läuft im Testbetrieb: Extras sind sichtbar, bestellen können nur Admins */
+  testMode: boolean;
 }
 
 /** Katalog für die öffentliche Website: nur eingeschaltete Extras mit Preis */
-export function publicAddonCatalog(s: AddonSettings, online = false): PublicAddonCatalog {
+export function publicAddonCatalog(s: AddonSettings, online = false, testMode = false): PublicAddonCatalog {
   const items = s.enabled ? s.items.filter((a) => a.enabled && a.priceCents > 0).map((a) => publicAddon(a, online)) : [];
-  return { enabled: s.enabled, priceNote: s.priceNote, items, pendingDays: s.pendingDays, remindDaysBefore: s.remindDaysBefore, online, subscriptions: items.some((a) => a.subscription) };
+  return { enabled: s.enabled, priceNote: s.priceNote, items, pendingDays: s.pendingDays, remindDaysBefore: s.remindDaysBefore, online, subscriptions: items.some((a) => a.subscription), testMode };
 }
 
 /** Abo: so viele Tage vor dem Ende der Laufzeit wird abgebucht (Lastschriften brauchen ein paar Tage) */

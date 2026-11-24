@@ -83,6 +83,11 @@ export default async function MaintenancePage({ params }: Props) {
             <Link href={localePath(lang, 'terms')} className="hover:text-white">
               {d.footer.terms}
             </Link>
+            {settings.addons.online && (
+              <Link href={localePath(lang, 'cancelSubscription')} className="hover:text-white">
+                {d.footer.cancelSubscription}
+              </Link>
+            )}
             <a href={`mailto:${site.supportEmail}`} className="hover:text-white">
               {d.footer.contact}
             </a>

@@ -202,7 +202,7 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
             {data?.payment.online ? (
               <p>
                 Automatische Freischaltung aktiv.{' '}
-                {data.payment.testMode && <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[12px] text-amber-200">Testmodus – es fließt kein echtes Geld (Schlüssel beginnt mit test_)</span>}
+                {data.payment.testMode && <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[12px] text-amber-200">Testbetrieb – es fließt kein echtes Geld. Bestellen können jetzt nur Admins; Kunden sehen „in Kürze buchbar“. Mit dem Live-Schlüssel enden Test-Buchungen von selbst.</span>}
               </p>
             ) : (
               <p>
@@ -219,6 +219,19 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
           </div>
         </div>
       </Section>
+
+      {data && data.notices.length > 0 && (
+        <Section title="Hinweise (letzte 14 Tage)" description="Vorgänge, die du kennen solltest: Zahlungen, für die sich nichts freischalten ließ (werden automatisch erstattet), Rückbuchungen, Kündigungen ohne Treffer, gescheiterte Abbuchungen. Alles steht auch im Protokoll.">
+          <ul className="divide-y divide-line rounded-xl border border-line text-[13px]">
+            {data.notices.map((n, i) => (
+              <li key={`${n.at}-${i}`} className={cn('flex flex-wrap gap-x-3 gap-y-1 px-4 py-2.5', n.action === 'addon.refund_failed' || n.action === 'addon.chargeback' || n.action === 'addon.cancel_request_unmatched' ? 'text-amber-200' : 'text-muted')}>
+                <span className="shrink-0 text-subtle tabular-nums">{date(n.at)}</span>
+                <span className="min-w-0 flex-1">{n.message}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
 
       <Section title="Buchungen" description="Oben steht, was etwas von dir braucht: Extras, die eingerichtet oder zurückgenommen werden müssen, und offene Zahlungen.">
         <div className="flex flex-wrap items-center gap-2">
@@ -279,6 +292,7 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
                       {r.fulfilment === 'todo' && <p className="mt-1 text-[13px] text-amber-200">Bezahlt – bitte einrichten und danach „Eingerichtet“ klicken. Der Kunde bekommt dann eine Nachricht.</p>}
                       {r.fulfilment === 'revoke' && <p className="mt-1 text-[13px] text-amber-200">Das Extra ist beendet – bitte die Leistung zurücknehmen (z. B. IP entfernen) und danach bestätigen.</p>}
                       {r.adminNote && <p className="mt-1 text-[13px] text-gray-300">Notiz: {r.adminNote}</p>}
+                      {r.chargebackBlocked && <p className="mt-1 text-[13px] text-amber-200">Dieses Konto hat eine Zahlung zurückgeholt (Rücklastschrift) und kann keine Extras buchen, bis du die Sperre aufhebst.</p>}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {open && (
@@ -307,6 +321,16 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
                             </Button>
                           )}
                         </>
+                      )}
+                      {r.chargebackBlocked && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy === r.id}
+                          onClick={() => window.confirm('Sperre aufheben? Das Konto kann danach wieder Extras buchen – z. B. wenn der Betrag nachgezahlt wurde.') && void act(r.id, '/admin/addons/unblock', { userId: r.userId }, 'Sperre aufgehoben.')}
+                        >
+                          Sperre aufheben
+                        </Button>
                       )}
                       <Button size="sm" variant="ghost" disabled={busy === r.id} onClick={() => editNote(r)}>
                         Notiz

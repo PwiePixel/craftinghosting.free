@@ -345,6 +345,9 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
                   </>
                 )}
               </p>
+              <p className="mt-0.5 font-mono text-[12px] text-subtle">
+                {t.refLabel}: {b.ref}
+              </p>
               {b.status === 'active' && b.fulfilment === 'todo' && <p className="mt-1 text-[13px] text-amber-200">{t.setupTodo}</p>}
               {b.status === 'active' && b.fulfilment === 'done' && <p className="mt-1 text-[13px] text-subtle">{t.setupDone}</p>}
               {b.status === 'active' && b.renewalRequested && !inFlight && <p className="mt-1 text-[13px] text-amber-200">{t.renewalOpen}</p>}

@@ -70,7 +70,13 @@ async function request(method: 'GET' | 'POST' | 'DELETE', path: string, body?: u
     throw new MollieError(`Mollie nicht erreichbar: ${(err as Error).message}`, 0);
   }
   if (res.status === 204) return {};
-  const text = await res.text();
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (err) {
+    // Verbindung beim Lesen abgebrochen: Ob die Anfrage wirkte, ist offen – wie „nicht erreichbar“ behandeln
+    throw new MollieError(`Mollie-Antwort unvollständig: ${(err as Error).message}`, 0);
+  }
   let data: Json = {};
   try {
     data = text ? (JSON.parse(text) as Json) : {};
@@ -174,4 +180,16 @@ export async function revokeMollieMandate(customerId: string, mandateId: string)
     if (err instanceof MollieError && (err.status === 404 || err.status === 410)) return;
     throw err;
   }
+}
+
+/** Zahlungen eines Mollie-Kunden (neueste zuerst) – um eine Abbuchung wiederzufinden, deren Antwort verloren ging */
+export async function listMollieCustomerPayments(customerId: string): Promise<MolliePayment[]> {
+  const d = await request('GET', `/v2/customers/${encodeURIComponent(customerId)}/payments?limit=50`);
+  const list: Json[] = Array.isArray(d._embedded?.payments) ? d._embedded.payments : [];
+  return list.map(map);
+}
+
+/** Zahlung (ganz oder teilweise) erstatten – für Zahlungen, für die sich nichts freischalten ließ */
+export async function refundMolliePayment(paymentId: string, cents: number, description: string, idempotencyKey: string): Promise<void> {
+  await request('POST', `/v2/payments/${encodeURIComponent(paymentId)}/refunds`, { amount: { currency: 'EUR', value: toValue(Math.round(cents)) }, description: description.slice(0, 140) }, idempotencyKey);
 }

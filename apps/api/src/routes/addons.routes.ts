@@ -6,6 +6,7 @@ import { assertNotMaintenance } from '../lib/maintenance';
 import { currentUser, requireAdmin, requireAuth } from '../plugins/auth';
 import {
   adminAddonNote,
+  adminClearChargeback,
   adminConfirmAddonPayment,
   adminEndAddon,
   adminExtendAddon,
@@ -181,6 +182,12 @@ export async function addonAdminRoutes(app: FastifyInstance) {
   app.post('/admin/addons/:rowId/fulfil', async (request) => {
     const { rowId } = row.parse(request.params);
     await adminFulfilAddon(currentUser(request), rowId, request.ip);
+    return { ok: true };
+  });
+
+  app.post('/admin/addons/unblock', async (request) => {
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.body);
+    await adminClearChargeback(currentUser(request), userId, request.ip);
     return { ok: true };
   });
 

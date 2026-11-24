@@ -35,7 +35,7 @@ import { offeredVersionsCached } from './software-directory';
 import { installMethodOf } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
-import { mollieConfigured } from '../payments/mollie';
+import { mollieConfigured, mollieTestMode } from '../payments/mollie';
 import { db } from '../db/client';
 import { getChatApiKey } from '../chat/store';
 import { getDiscordSecrets, getDiscordState } from '../discord/store';
@@ -389,7 +389,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
-    addons: publicAddonCatalog(s.addons, mollieConfigured()),
+    addons: publicAddonCatalog(s.addons, mollieConfigured(), mollieTestMode()),
     chat: s.chat.enabled
       ? {
           name: s.chat.name,

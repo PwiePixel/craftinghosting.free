@@ -30,7 +30,9 @@ function Address() {
 
 export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
   const priceNote = site.addons.priceNote.de;
-  const { pendingDays, remindDaysBefore, subscriptions } = site.addons;
+  const { pendingDays, remindDaysBefore } = site.addons;
+  // Die Abo-Regeln stehen immer da, sobald online bezahlt werden kann – auch wenn gerade kein Extra als Abo angeboten wird, können Abos noch laufen
+  const subscriptions = site.addons.online || site.addons.subscriptions;
   return (
     <>
       <section>
@@ -237,7 +239,9 @@ export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
 
 export function ExtrasTermsEn({ site }: { site: PublicSiteDTO }) {
   const priceNote = site.addons.priceNote.en;
-  const { pendingDays, remindDaysBefore, subscriptions } = site.addons;
+  const { pendingDays, remindDaysBefore } = site.addons;
+  // Die Abo-Regeln stehen immer da, sobald online bezahlt werden kann – auch wenn gerade kein Extra als Abo angeboten wird, können Abos noch laufen
+  const subscriptions = site.addons.online || site.addons.subscriptions;
   return (
     <>
       <section>

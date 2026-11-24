@@ -1396,10 +1396,14 @@ export interface AdminAddonRowDTO extends Omit<ServerAddonDTO, 'payment' | 'canR
   paidCents: number;
   payments: number;
   checkoutPending: boolean;
+  /** Das Konto hat eine Zahlung zurückgeholt (Rücklastschrift) und kann keine Extras buchen, bis das Team die Sperre aufhebt */
+  chargebackBlocked: boolean;
 }
 
 export interface AdminAddonsDTO extends PageInfo {
   rows: AdminAddonRowDTO[];
+  /** Vorgänge der letzten 14 Tage, die das Team sehen soll (nicht zuordenbare Zahlungen, Rückbuchungen …) */
+  notices: { at: string; action: string; message: string }[];
   stats: {
     active: number;
     /** Bestellt, Zahlung offen (inklusive angefragter Verlängerungen) */

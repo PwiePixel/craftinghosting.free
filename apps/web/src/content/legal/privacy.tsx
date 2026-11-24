@@ -173,19 +173,34 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
           Abwicklung der Spende, für die Buchführung und für Erstattungen (Art. 6 Abs. 1 lit. b und f DSGVO) und bewahren sie im Rahmen der gesetzlichen Aufbewahrungsfristen
           auf.
         </p>
-        {site.addons.enabled && (
+        {(site.addons.enabled || site.addons.online) && (
           <>
             <h3>Kostenpflichtige Extras</h3>
             <p>
               Buchst du ein kostenpflichtiges Extra für einen Server, speichern wir die Bestellung: welches Extra, für welchen Server, Preis, Laufzeit, Zeitpunkt, deine
-              Zustimmung zu den Bedingungen und den Verwendungszweck. Bezahlt wird über Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Niederlande); du
-              gibst deine Zahlungsdaten ausschließlich dort ein. Mollie verarbeitet sie als eigenständiger Verantwortlicher nach seiner eigenen Datenschutzerklärung.
-              Wir übermitteln an Mollie den Betrag, die Bezeichnung des Extras und den Verwendungszweck – nicht deinen Namen und nicht deine E-Mail-Adresse. Wir
-              erhalten von Mollie nur die Kennung der Zahlung, ihren Status, den Betrag und die Währung – keine Karten- oder Kontodaten. Bei einem Abo speichern wir
-              zusätzlich die Kennung des Kunden-Eintrags und der Einzugsermächtigung bei Mollie, um die Verlängerung abbuchen und die Ermächtigung bei einer
-              Kündigung widerrufen zu können. Kündigst du über die Kündigungsseite, verarbeiten wir die dort angegebene E-Mail-Adresse, um die Kündigung zuzuordnen. Diese Daten brauchen wir, um den Vertrag zu erfüllen (Art. 6 Abs. 1 lit. b DSGVO). Zahlungsbelege (Betrag, Datum, Extra,
-              Kennung der Zahlung) bewahren wir so lange auf, wie es die handels- und steuerrechtlichen Aufbewahrungsfristen verlangen (Art. 6 Abs. 1 lit. c DSGVO) –
-              auch dann, wenn du dein Konto vorher löschst.
+              Zustimmung zu den Bedingungen und den Verwendungszweck.
+            </p>
+            {site.addons.online ? (
+              <p>
+                Bezahlt wird über Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Niederlande); du gibst deine Zahlungsdaten ausschließlich dort ein. Mollie
+                verarbeitet sie als eigenständiger Verantwortlicher nach seiner eigenen Datenschutzerklärung. Wir übermitteln an Mollie den Betrag, die Bezeichnung des
+                Extras, den Verwendungszweck und interne Kennungen der Buchung und des Servers – nicht deinen Namen und nicht deine E-Mail-Adresse. Wir rufen von
+                Mollie nur die Kennung der Zahlung, ihren Status, den Betrag und die Währung ab und speichern keine Karten- oder Kontodaten; im Händlerkonto bei Mollie
+                sind zu einer Zahlung der Name des Zahlers und teilweise unkenntlich gemachte Zahlungsdaten einsehbar. Bei einem Abo speichern wir zusätzlich die
+                Kennung des Kunden-Eintrags und der Einzugsermächtigung bei Mollie, um die Verlängerung abbuchen und die Ermächtigung bei einer Kündigung widerrufen
+                zu können. Kündigst du über die Kündigungsseite, verarbeiten wir die dort angegebene E-Mail-Adresse, um die Kündigung zuzuordnen.
+              </p>
+            ) : (
+              <p>
+                Bezahlt wird über den auf der Bestellseite genannten Zahlungsweg (Zahlungslink eines Zahlungsdienstleisters). Du gibst deine Zahlungsdaten
+                ausschließlich dort ein; der Zahlungsdienstleister verarbeitet sie als eigenständiger Verantwortlicher. Wir erhalten die Zahlungsbestätigung mit
+                Betrag, Verwendungszweck und dem Namen des Zahlers, wie ihn der Zahlungsdienstleister übermittelt – keine Karten- oder Kontodaten.
+              </p>
+            )}
+            <p>
+              Diese Daten brauchen wir, um den Vertrag zu erfüllen (Art. 6 Abs. 1 lit. b DSGVO). Zahlungsbelege (Betrag, Datum, Extra, Kennung der Zahlung) bewahren
+              wir so lange auf, wie es die handels- und steuerrechtlichen Aufbewahrungsfristen verlangen (Art. 6 Abs. 1 lit. c DSGVO) – auch dann, wenn du dein Konto
+              vorher löschst.
             </p>
           </>
         )}
@@ -372,18 +387,33 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
           amount and the payer’s name as provided by SumUp – no card data. We use this information to process the donation, for bookkeeping and for refunds (Art. 6 (1) (b)
           and (f) GDPR) and keep it for the statutory retention periods.
         </p>
-        {site.addons.enabled && (
+        {(site.addons.enabled || site.addons.online) && (
           <>
             <h3>Paid extras</h3>
             <p>
               If you book a paid extra for a server, we store the order: which extra, for which server, price, term, time, your consent to the terms and the payment
-              reference. Payment is made via Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Netherlands); you enter your payment details only there. Mollie
-              processes them as an independent controller under its own privacy policy. We send Mollie the amount, the name of the extra and the payment reference –
-              not your name and not your email address. We receive from Mollie only the identifier of the payment, its status, the amount and the currency – no card
-              or account data. For a subscription we additionally store the identifiers of the customer record and the mandate at Mollie in order to charge renewals
-              and to revoke the mandate when you cancel. If you cancel via the cancellation page, we process the email address entered there to match the cancellation. We need this data to perform the contract
-              (Art. 6 (1) (b) GDPR). We keep payment records (amount, date, extra, payment identifier) for as long as required by commercial and tax retention periods
-              (Art. 6 (1) (c) GDPR) – even if you delete your account before then.
+              reference.
+            </p>
+            {site.addons.online ? (
+              <p>
+                Payment is made via Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Netherlands); you enter your payment details only there. Mollie
+                processes them as an independent controller under its own privacy policy. We send Mollie the amount, the name of the extra, the payment reference and
+                internal identifiers of the booking and the server – not your name and not your email address. We retrieve from Mollie only the identifier of the
+                payment, its status, the amount and the currency and store no card or account data; in the merchant account at Mollie the payer’s name and
+                partially masked payment details are visible for a payment. For a subscription we additionally store the identifiers of the customer record and the
+                mandate at Mollie in order to charge renewals and to revoke the mandate when you cancel. If you cancel via the cancellation page, we process the
+                email address entered there to match the cancellation.
+              </p>
+            ) : (
+              <p>
+                Payment is made via the payment method named on the order page (payment link of a payment provider). You enter your payment details only there; the
+                payment provider processes them as an independent controller. We receive the payment confirmation with the amount, the payment reference and the
+                payer’s name as provided by the payment provider – no card or account data.
+              </p>
+            )}
+            <p>
+              We need this data to perform the contract (Art. 6 (1) (b) GDPR). We keep payment records (amount, date, extra, payment identifier) for as long as
+              required by commercial and tax retention periods (Art. 6 (1) (c) GDPR) – even if you delete your account before then.
             </p>
           </>
         )}

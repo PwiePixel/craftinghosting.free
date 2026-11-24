@@ -16,7 +16,7 @@
  *    sie nie ohne laufende Buchung bestehen bleibt.
  */
 import { randomInt } from 'node:crypto';
-import { and, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, like, lte, ne, or, sql } from 'drizzle-orm';
 import {
   ADMIN_PAGE_SIZE,
   NO_CYCLE_END,
@@ -40,11 +40,12 @@ import {
   type SiteSettings,
 } from '@chfree/shared';
 import { affectedRows, db, isUniqueViolation, writeTx } from '../db/client';
-import { addonPayments, serverAddons, servers, users, type Server, type ServerAddon, type User } from '../db/schema';
+import { addonPayments, auditLogs, notifications, serverAddons, servers, users, type Server, type ServerAddon, type User } from '../db/schema';
 import { env } from '../env';
 import { uuid } from '../lib/crypto';
 import { ApiError, Errors, L } from '../lib/errors';
-import { createMollieCustomer, createMolliePayment, findMollieMandate, getMolliePayment, mollieConfigured, MollieError, mollieTestMode, revokeMollieMandate, type MolliePayment } from '../payments/mollie';
+import { createMollieCustomer, createMolliePayment, findMollieMandate, getMolliePayment, listMollieCustomerPayments, mollieConfigured, MollieError, mollieTestMode, refundMolliePayment, revokeMollieMandate, type MolliePayment } from '../payments/mollie';
+import { isAdmin } from '../plugins/auth';
 import { pterodactyl } from '../pterodactyl';
 import { audit } from './audit.service';
 import { notify } from './notification.service';
@@ -75,6 +76,39 @@ export const paymentWebhookUrl = () => `${baseUrl()}/api/v1/payments/mollie/webh
 
 /** Online-Zahlung eingerichtet (Mollie)? Sonst: Zahlungslink und Bestätigung durch das Team */
 const online = (): boolean => mollieConfigured();
+
+/**
+ * Testbetrieb (Mollie-Schlüssel beginnt mit test_): Auf der Testseite von Mollie lässt sich „bezahlt“ einfach
+ * anklicken, es fließt kein Geld. Deshalb dürfen dann nur Admins bestellen und bezahlen – sonst bekäme jeder Kunde
+ * Extras umsonst. Testzahlungen sind eigens gekennzeichnet (mollie-test:…) und enden beim Wechsel auf den Live-Schlüssel.
+ */
+const testOnly = (user: Pick<User, 'role' | 'email'>): boolean => mollieTestMode() && !isAdmin(user);
+const TEST_REF = 'mollie-test:%';
+
+/** So lange sperrt eine zurückgeholte Zahlung (Rücklastschrift/Chargeback) weitere Bestellungen, bis das Team sie aufhebt */
+const CHARGEBACK_BLOCK_MS = 180 * DAY_MS;
+
+/**
+ * Hat dieses Konto eine Zahlung zurückgeholt, ohne dass das Team die Sperre aufgehoben hat? Dann gibt es keine neuen
+ * Extras – sonst ließe sich „bezahlen, nutzen, zurückholen“ beliebig wiederholen.
+ */
+async function chargebackBlocked(userId: string, now = new Date()): Promise<boolean> {
+  const since = new Date(now.getTime() - CHARGEBACK_BLOCK_MS);
+  const [last] = await db
+    .select({ at: addonPayments.createdAt })
+    .from(addonPayments)
+    .where(and(eq(addonPayments.userId, userId), like(addonPayments.providerRef, '%:chargeback%'), gt(addonPayments.createdAt, since)))
+    .orderBy(desc(addonPayments.createdAt))
+    .limit(1);
+  if (!last) return false;
+  const [cleared] = await db
+    .select({ id: addonPayments.id })
+    .from(addonPayments)
+    .where(and(eq(addonPayments.userId, userId), like(addonPayments.providerRef, 'chargeback-cleared:%'), gt(addonPayments.createdAt, last.at)))
+    .limit(1);
+  return !cleared;
+}
+const chargebackError = () => Errors.conflict('chargeback_block', L('Eine frühere Zahlung für ein Extra wurde von deiner Bank zurückgeholt. Bitte melde dich bei unserem Team, bevor du wieder ein Extra buchst.', 'An earlier payment for an extra was reversed by your bank. Please contact our team before booking an extra again.'));
 
 /* ------------------------------------------------------------ Katalog */
 
@@ -202,13 +236,15 @@ function toDTO(row: ServerAddon, settings: SiteSettings, lang: Locale, now: Date
   };
 }
 
-async function viewFor(server: Server, lang: Locale): Promise<ServerAddonsDTO> {
+async function viewFor(server: Server, lang: Locale, viewer: Pick<User, 'role' | 'email'>): Promise<ServerAddonsDTO> {
   const settings = await getSettings();
   const now = new Date();
   const rows = await db.select().from(serverAddons).where(eq(serverAddons.serverId, server.id)).orderBy(desc(serverAddons.createdAt)).limit(60);
   const open = rows.filter((r) => r.status !== 'ended');
   const ended = rows.filter((r) => r.status === 'ended').slice(0, 5);
-  const catalog = settings.addons.enabled ? settings.addons.items.filter((a) => a.enabled && a.priceCents > 0 && addonFits(a, server)) : [];
+  // Im Testbetrieb sehen nur Admins Angebote (siehe testOnly)
+  const offered = settings.addons.enabled && !testOnly(viewer);
+  const catalog = offered ? settings.addons.items.filter((a) => a.enabled && a.priceCents > 0 && addonFits(a, server)) : [];
   const offers: AddonOfferDTO[] = [];
   for (const a of catalog) {
     const booked = open.some((r) => r.addonId === a.id);
@@ -216,7 +252,7 @@ async function viewFor(server: Server, lang: Locale): Promise<ServerAddonsDTO> {
     offers.push({ ...publicAddon(a, online()), available: !booked && !soldOut && orderable(server), unavailable: booked ? 'booked' : soldOut ? 'sold_out' : null });
   }
   return {
-    enabled: settings.addons.enabled,
+    enabled: offered,
     priceNote: settings.addons.priceNote[lang] || settings.addons.priceNote.de,
     requireAdultConfirm: settings.addons.requireAdultConfirm,
     offers,
@@ -225,7 +261,7 @@ async function viewFor(server: Server, lang: Locale): Promise<ServerAddonsDTO> {
 }
 
 export async function listServerAddons(user: User, serverId: string, lang: Locale): Promise<ServerAddonsDTO> {
-  return viewFor(await ownServer(user, serverId), lang);
+  return viewFor(await ownServer(user, serverId), lang, user);
 }
 
 /* ------------------------------------------------------------ Bestellen, verlängern, bezahlen */
@@ -282,7 +318,7 @@ const BLOCK_TEXT = {
 
 /** „24/7“ hebt den Zyklus auf – deshalb gelten beim Buchen und Verlängern dieselben Schranken wie beim Reaktivieren */
 async function assertAlwaysOnAllowed(user: User, server: Server): Promise<void> {
-  const block = await renewalBlock(user, server);
+  const block = await renewalBlock(user, server, new Date(), { strict: true });
   if (block) throw Errors.conflict(block === 'limit' ? 'boost_reward_ended' : block === 'discord' ? 'discord_required' : 'account_blocked', BLOCK_TEXT[block]);
 }
 
@@ -340,7 +376,9 @@ export async function orderAddon(user: User, serverId: string, addonId: string, 
   assertNoTimeout(user);
   const server = await ownServer(user, serverId);
   const settings = await getSettings();
+  if (testOnly(user)) throw disabled();
   const addon = catalogItem(settings, addonId, server);
+  if (await chargebackBlocked(user.id)) throw chargebackError();
   const subscribe = input.subscribe === true;
   if (subscribe && !(online() && addon.subscription && addon.periodDays > 0)) throw Errors.conflict('subscription_unavailable', L('Dieses Extra gibt es gerade nicht als Abo.', 'This extra is not available as a subscription right now.'));
   assertConsent(input.consent, settings, subscribe);
@@ -381,7 +419,7 @@ export async function orderAddon(user: User, serverId: string, addonId: string, 
   } catch {
     // Die Bestellung steht – bezahlt wird dann über „Jetzt bezahlen“ in der Liste
   }
-  return { addons: await viewFor(server, lang), orderId: id, checkoutUrl };
+  return { addons: await viewFor(server, lang, user), orderId: id, checkoutUrl };
 }
 
 /** „Jetzt bezahlen“ für eine offene Bestellung oder angefragte Verlängerung */
@@ -391,8 +429,25 @@ export async function payAddon(user: User, serverId: string, rowId: string, lang
   const open = row.status === 'pending' || (row.status === 'active' && row.renewalRequestedAt !== null);
   if (!open) throw Errors.conflict('nothing_to_pay', L('Für diese Buchung ist keine Zahlung offen.', 'No payment is due for this booking.'));
   if (!orderable(server)) throw Errors.conflict('server_not_eligible', L('Für diesen Server lassen sich gerade keine Extras bezahlen (gesperrt).', 'Extras cannot be paid for this server right now (suspended).'));
+  if (testOnly(user)) throw disabled();
+  if (await chargebackBlocked(user.id)) throw chargebackError();
+  // Zwischen Bestellen und Bezahlen kann sich etwas geändert haben: dieselben Prüfungen noch einmal
+  const settings = await getSettings();
+  const addon = settings.addons.items.find((a) => a.id === row.addonId);
+  if (row.status === 'pending') {
+    catalogItem(settings, row.addonId, server);
+    // Der Platz einer alten unbezahlten Bestellung ist nicht mehr reserviert – erst prüfen, dann Geld nehmen
+    if (addon && addon.maxActive !== null && Date.now() - row.createdAt.getTime() > stockHoldMs()) {
+      const [used] = await db
+        .select({ n: count() })
+        .from(serverAddons)
+        .where(and(eq(serverAddons.addonId, row.addonId), ne(serverAddons.id, row.id), or(eq(serverAddons.status, 'active'), and(eq(serverAddons.status, 'pending'), gt(serverAddons.createdAt, new Date(Date.now() - stockHoldMs()))))));
+      if (Number(used?.n ?? 0) >= addon.maxActive) throw Errors.conflict('sold_out', L('Dieses Extra ist inzwischen ausgebucht. Du kannst die Bestellung stornieren und es später erneut versuchen.', 'This extra is fully booked by now. You can cancel the order and try again later.'));
+    }
+  }
+  if (row.effect === 'always_on') await assertAlwaysOnAllowed(user, server);
   const checkoutUrl = await openCheckout(row, lang);
-  return { addons: await viewFor(server, lang), checkoutUrl };
+  return { addons: await viewFor(server, lang, user), checkoutUrl };
 }
 
 /** Verlängerung anfragen: gilt zum aktuellen Preis des Katalogs und schließt an die laufende Zeit an – wahlweise ab jetzt als Abo */
@@ -401,6 +456,8 @@ export async function renewAddon(user: User, serverId: string, rowId: string, in
   const { server, row } = await ownRow(user, serverId, rowId);
   const settings = await getSettings();
   if (!canRenew(row, settings, new Date(), server)) throw Errors.conflict('not_renewable', L('Diese Buchung lässt sich gerade nicht verlängern.', 'This booking cannot be renewed right now.'));
+  if (testOnly(user)) throw disabled();
+  if (await chargebackBlocked(user.id)) throw chargebackError();
   const addon = catalogItem(settings, row.addonId, server);
   const subscribe = input.subscribe === true;
   if (subscribe && !(online() && addon.subscription && addon.periodDays > 0)) throw Errors.conflict('subscription_unavailable', L('Dieses Extra gibt es gerade nicht als Abo.', 'This extra is not available as a subscription right now.'));
@@ -410,7 +467,7 @@ export async function renewAddon(user: User, serverId: string, rowId: string, in
   // Läuft schon eine Zahlung, erst deren Ergebnis holen (sonst zwei Zahlungen für dieselbe Verlängerung)
   if (row.checkoutId) {
     const state = await checkAddonPayment(row.id);
-    if (state === 'paid' || state === 'processing') return { addons: await viewFor(server, lang), checkoutUrl: null };
+    if (state === 'paid' || state === 'processing') return { addons: await viewFor(server, lang, user), checkoutUrl: null };
     if (state === 'unknown') throw paymentUnavailable();
   }
   // Eine alte, noch nicht widerrufene Einzugsermächtigung (gekündigtes Abo) zuerst loswerden – ein neues Abo bekommt eine neue
@@ -433,7 +490,7 @@ export async function renewAddon(user: User, serverId: string, rowId: string, in
   } catch {
     /* Bezahlen später über „Jetzt bezahlen“ */
   }
-  return { addons: await viewFor(server, lang), checkoutUrl };
+  return { addons: await viewFor(server, lang, user), checkoutUrl };
 }
 
 /** Offene Bestellung stornieren bzw. angefragte Verlängerung zurücknehmen (nichts bezahlt → nichts zu erstatten) */
@@ -455,7 +512,7 @@ export async function cancelAddonOrder(user: User, serverId: string, rowId: stri
       .set({ renewalRequestedAt: null, checkoutId: null, checkoutUrl: null, checkoutAt: null, ...(now.mandateId ? {} : { autoRenew: false }) })
       .where(and(eq(serverAddons.id, row.id), eq(serverAddons.status, 'active'), isNotNull(serverAddons.renewalRequestedAt)));
   }
-  return viewFor(server, lang);
+  return viewFor(server, lang, user);
 }
 
 /* ------------------------------------------------------------ Zahlung bestätigen */
@@ -585,8 +642,10 @@ async function applyPayment(rowId: string, pay: PaymentSource): Promise<ApplyOut
   }
   if (oversold) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.oversold', message: `Extra „${row.name.de}“ (${row.ref}) wurde bezahlt, obwohl die Höchstzahl schon erreicht war – bitte prüfen (einrichten oder erstatten)` });
   if (noMandate) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.subscription_unavailable', message: `Extra „${row.name.de}“ (${row.ref}): Die Zahlung kam ohne Einzugsermächtigung – es läuft einmalig statt als Abo` });
+  let waiting = false;
   if (row.effect === 'always_on') {
     const block = await activateAlwaysOn(row.serverId, now);
+    waiting = block !== null;
     if (block) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.always_on_waiting', message: `Extra „${row.name.de}“ (${row.ref}) ist bezahlt, der Server bleibt aber vorerst gesperrt (${BLOCK_AUDIT[block]}) – „24/7“ greift, sobald das Hindernis wegfällt` });
   }
   const until = row.paidUntil;
@@ -618,8 +677,8 @@ async function applyPayment(rowId: string, pay: PaymentSource): Promise<ApplyOut
             : '\nEs gibt keine automatische Verlängerung – es endet einfach, wenn du nicht verlängerst.'
           : '';
       return l === 'en'
-        ? `${pay.provider === 'admin' ? 'We have added' : 'Thank you – we have received your payment for'} “${name}” for your server “${server!.name}”.\n${till ? `It runs until ${till}.` : 'It has no end date.'}${manual ? '\nOur team sets it up for you and lets you know as soon as it is done.' : ''}${renewal}`
-        : `${pay.provider === 'admin' ? 'Wir haben' : 'Danke – deine Zahlung ist eingegangen. Wir haben'} „${name}“ für deinen Server „${server!.name}“ ${activated ? 'freigeschaltet' : 'verlängert'}.\n${till ? `Es läuft bis ${till}.` : 'Es hat kein Enddatum.'}${manual ? '\nUnser Team richtet es für dich ein und meldet sich, sobald es erledigt ist.' : ''}${renewal}`;
+        ? `${pay.provider === 'admin' ? 'We have added' : 'Thank you – we have received your payment for'} “${name}” for your server “${server!.name}” (reference ${row!.ref}).\n${till ? `It runs until ${till}.` : 'It has no end date.'}${waiting ? '\nNote: the server itself is currently still locked – the extra takes effect as soon as the lock is lifted.' : ''}${manual ? '\nOur team sets it up for you and lets you know as soon as it is done.' : ''}${renewal}`
+        : `${pay.provider === 'admin' ? 'Wir haben' : 'Danke – deine Zahlung ist eingegangen. Wir haben'} „${name}“ für deinen Server „${server!.name}“ ${activated ? 'freigeschaltet' : 'verlängert'} (Verwendungszweck ${row!.ref}).\n${till ? `Es läuft bis ${till}.` : 'Es hat kein Enddatum.'}${waiting ? '\nHinweis: Der Server selbst ist derzeit noch gesperrt – das Extra greift, sobald die Sperre aufgehoben ist.' : ''}${manual ? '\nUnser Team richtet es für dich ein und meldet sich, sobald es erledigt ist.' : ''}${renewal}`;
     },
     dedupeKey: `addon-paid:${row.id}:${until?.getTime() ?? 'unlimited'}:${activated ? 'a' : 'r'}`,
     email: true,
@@ -636,29 +695,44 @@ const BLOCK_AUDIT = { locked: 'Konto gesperrt', timeout: 'Auszeit wegen Verwarnu
  */
 export type PayState = 'paid' | 'processing' | 'open' | 'failed' | 'none' | 'unknown';
 
-const providerRef = (paymentId: string) => `mollie:${paymentId}`;
+/** Kennung einer Zahlung in der Buchhaltung – Testzahlungen sind eigens gekennzeichnet und zählen nicht als Einnahme */
+const providerRef = (p: Pick<MolliePayment, 'id' | 'mode'>) => `${p.mode === 'test' ? 'mollie-test' : 'mollie'}:${p.id}`;
 
 /** Zahlung wurde nach der Verbuchung zurückgeholt (Rücklastschrift, Chargeback) oder erstattet */
 async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void> {
-  const [booked] = await db.select({ id: addonPayments.id }).from(addonPayments).where(eq(addonPayments.providerRef, providerRef(p.id))).limit(1);
+  const [booked] = await db.select({ id: addonPayments.id }).from(addonPayments).where(eq(addonPayments.providerRef, providerRef(p))).limit(1);
   if (!booked) return;
-  const record = async (kind: 'chargeback' | 'refund', cents: number): Promise<boolean> => {
+  // Mollie nennt jeweils die Summe aller Erstattungen bzw. Rückbuchungen einer Zahlung. Verbucht wird nur, was neu
+  // dazugekommen ist – so zählt auch eine zweite Teil-Erstattung, und eine wiederholte Meldung zählt nicht doppelt.
+  const record = async (kind: 'chargeback' | 'refund', totalCents: number): Promise<number> => {
+    const [sum] = await db
+      .select({ cents: sql<number>`coalesce(sum(${addonPayments.amountCents}), 0)` })
+      .from(addonPayments)
+      .where(like(addonPayments.providerRef, `${providerRef(p)}:${kind}%`));
+    const delta = totalCents + Number(sum?.cents ?? 0);
+    if (delta <= 0) return 0;
     try {
-      await db.insert(addonPayments).values({ id: uuid(), serverAddonId: row.id, ref: row.ref, userId: row.userId, serverId: row.serverId, addonId: row.addonId, addonName: row.name.de, amountCents: -cents, periodDays: 0, provider: 'mollie', providerRef: `${providerRef(p.id)}:${kind}`, confirmedBy: 'Mollie' });
-      return true;
+      await db.insert(addonPayments).values({ id: uuid(), serverAddonId: row.id, ref: row.ref, userId: row.userId, serverId: row.serverId, addonId: row.addonId, addonName: row.name.de, amountCents: -delta, periodDays: 0, provider: 'mollie', providerRef: `${providerRef(p)}:${kind}:${totalCents}`, confirmedBy: 'Mollie' });
+      return delta;
     } catch (err) {
-      if (isUniqueViolation(err)) return false;
+      if (isUniqueViolation(err)) return 0;
       throw err;
     }
   };
-  if (p.refundedCents > 0 && (await record('refund', p.refundedCents))) {
-    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.refund_recorded', message: `Erstattung über Mollie verbucht: „${row.name.de}“ (${row.ref}), ${formatAddonPrice(p.refundedCents, 'de')}` });
+  if (p.refundedCents > 0) {
+    const delta = await record('refund', p.refundedCents);
+    if (delta > 0) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.refund_recorded', message: `Erstattung über Mollie verbucht: „${row.name.de}“ (${row.ref}), ${formatAddonPrice(delta, 'de')}` });
   }
-  if (p.chargedBackCents > 0 && (await record('chargeback', p.chargedBackCents))) {
-    // Bezahlt war damit nichts: Extra beenden, Abo stoppen
+  if (p.chargedBackCents > 0) {
+    const delta = await record('chargeback', p.chargedBackCents);
+    // Bezahlt war damit nichts: Extra beenden (ohne den fairen Neustart, den ein regulär beendetes 24/7 bekommt), Abo
+    // stoppen. Unabhängig davon, ob die Rückbuchung gerade neu verbucht wurde – ein früherer Versuch kann hier
+    // abgebrochen sein.
     const [fresh] = await db.select().from(serverAddons).where(eq(serverAddons.id, row.id)).limit(1);
-    const ended = fresh && fresh.status !== 'ended' ? await endAddon(fresh, 'refunded', { silent: true, note: 'Zahlung von der Bank zurückgeholt (Rücklastschrift/Chargeback)' }) : false;
-    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.chargeback', message: `Zahlung zurückgeholt (Rücklastschrift/Chargeback): „${row.name.de}“ (${row.ref}), ${formatAddonPrice(p.chargedBackCents, 'de')}${ended ? ' – Extra beendet' : ''}` });
+    const ended = fresh && fresh.status !== 'ended' ? await endAddon(fresh, 'refunded', { silent: true, unfair: true, note: 'Zahlung von der Bank zurückgeholt (Rücklastschrift/Chargeback)' }) : false;
+    if (delta > 0 || ended) {
+      await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.chargeback', message: `Zahlung zurückgeholt (Rücklastschrift/Chargeback): „${row.name.de}“ (${row.ref}), ${formatAddonPrice(p.chargedBackCents, 'de')}${ended ? ' – Extra beendet' : ''}. Das Konto kann keine Extras mehr buchen, bis die Sperre unter Admin → Extras aufgehoben wird.` });
+    }
     if (ended) {
       await tell(row, {
         serverId: row.serverId,
@@ -666,13 +740,53 @@ async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void>
         title: L(`Extra beendet: ${row.name.de}`, `Extra ended: ${row.name.en || row.name.de}`),
         body: (l) =>
           l === 'en'
-            ? `The payment for “${row.name.en || row.name.de}” (${row.ref}) was reversed by your bank. The extra has therefore ended. If this was a mistake, please contact our team.`
-            : `Die Zahlung für „${row.name.de}“ (${row.ref}) wurde von deiner Bank zurückgeholt. Das Extra ist deshalb beendet. Falls das ein Versehen war, melde dich bitte bei unserem Team.`,
+            ? `The payment for “${row.name.en || row.name.de}” (${row.ref}) was reversed by your bank. The extra has therefore ended, and no further extras can be booked for now. If this was a mistake, please contact our team.`
+            : `Die Zahlung für „${row.name.de}“ (${row.ref}) wurde von deiner Bank zurückgeholt. Das Extra ist deshalb beendet, und vorerst lassen sich keine weiteren Extras buchen. Falls das ein Versehen war, melde dich bitte bei unserem Team.`,
         dedupeKey: `addon-chargeback:${p.id}`,
         email: true,
       });
     }
   }
+}
+
+/**
+ * Geld ist eingegangen, aber freischalten ließ sich nichts (Buchung beendet oder ersetzt, Server gelöscht, falscher
+ * Betrag): automatisch zurückzahlen. Klappt das nicht, bleibt es als Aufgabe für das Team im Protokoll.
+ */
+async function refundUndelivered(p: MolliePayment, row: ServerAddon, outcome: 'orphan' | 'stale' | 'mismatch'): Promise<void> {
+  const cents = p.amountCents - p.refundedCents - p.chargedBackCents;
+  if (cents <= 0) return;
+  let refunded = false;
+  try {
+    await refundMolliePayment(p.id, cents, `${row.ref} – nicht zuordenbar`, `refund:${p.id}`);
+    refunded = true;
+  } catch (err) {
+    console.warn('[addons] Automatische Erstattung fehlgeschlagen:', (err as Error).message);
+  }
+  await audit({
+    userId: row.userId,
+    serverId: row.serverId,
+    actor: 'system',
+    action: refunded ? 'addon.payment_refunded' : 'addon.refund_failed',
+    message: refunded
+      ? `Zahlung ${p.id} für „${row.name.de}“ (${row.ref}, ${formatAddonPrice(cents, 'de')}) ließ sich nicht freischalten und wurde automatisch erstattet`
+      : `Zahlung ${p.id} für „${row.name.de}“ (${row.ref}, ${formatAddonPrice(cents, 'de')}) ließ sich nicht freischalten – die automatische Erstattung hat NICHT geklappt, bitte im Mollie-Konto von Hand erstatten`,
+  });
+  await tell(row, {
+    serverId: row.serverId,
+    type: 'addon.payment_returned',
+    title: L(`Zahlung wird erstattet: ${row.name.de}`, `Payment is refunded: ${row.name.en || row.name.de}`),
+    body: (l) => {
+      const why = outcome === 'mismatch' ? (l === 'en' ? 'the amount did not match the current price of the order' : 'der Betrag passte nicht zum aktuellen Preis der Bestellung') : l === 'en' ? 'the order had already ended or been replaced' : 'die Bestellung war schon beendet bzw. ersetzt';
+      return l === 'en'
+        ? `We received your payment of ${formatAddonPrice(cents, l)} for “${row.name.en || row.name.de}” (${row.ref}), but could not activate anything with it because ${why}.
+${refunded ? 'We have refunded the amount; it will be back on your payment method within a few days.' : 'We will refund the amount – you do not need to do anything.'}`
+        : `Deine Zahlung über ${formatAddonPrice(cents, l)} für „${row.name.de}“ (${row.ref}) ist eingegangen, wir konnten damit aber nichts freischalten, weil ${why}.
+${refunded ? 'Wir haben den Betrag erstattet; er ist in wenigen Tagen wieder auf deinem Zahlungsmittel.' : 'Wir erstatten dir den Betrag – du musst nichts tun.'}`;
+    },
+    dedupeKey: `addon-payment-returned:${p.id}`,
+    email: true,
+  });
 }
 
 /** Stand einer Zahlung des Zahlungsdienstes auf die Buchung anwenden */
@@ -690,11 +804,18 @@ async function settlePayment(p: MolliePayment, row: ServerAddon): Promise<PaySta
       }
       return 'failed';
     }
+    const [booked] = await db.select({ id: addonPayments.id }).from(addonPayments).where(eq(addonPayments.providerRef, providerRef(p))).limit(1);
+    // Schon vollständig erstattet oder zurückgeholt, bevor wir sie je verbucht haben: nichts freischalten
+    if (!booked && p.refundedCents + p.chargedBackCents >= p.amountCents) {
+      if (linked) await unlink();
+      return 'failed';
+    }
     let mandateId = p.mandateId;
     const customerId = p.customerId ?? row.customerId;
     if (row.autoRenew && !row.mandateId && !mandateId && customerId) mandateId = await findMollieMandate(customerId).catch(() => null);
-    const outcome = await applyPayment(row.id, { provider: 'mollie', providerRef: providerRef(p.id), amountCents: p.amountCents, confirmedBy: 'Mollie', mandate: { customerId, mandateId } });
+    const outcome = await applyPayment(row.id, { provider: 'mollie', providerRef: providerRef(p), amountCents: p.amountCents, confirmedBy: 'Mollie', mandate: { customerId, mandateId } });
     if (outcome !== 'applied' && linked) await unlink();
+    if (outcome === 'orphan' || outcome === 'stale' || outcome === 'mismatch') await refundUndelivered(p, row, outcome);
     if (p.chargedBackCents > 0 || p.refundedCents > 0) await handleReversal(p, row);
     return 'paid';
   }
@@ -755,7 +876,10 @@ export async function handlePaymentWebhook(paymentId: string): Promise<boolean> 
   try {
     p = await getMolliePayment(paymentId);
   } catch (err) {
-    return err instanceof MollieError && err.status >= 400 && err.status < 500 && err.status !== 429;
+    // Unbekannte Zahlung: erledigt. Alles andere (nicht erreichbar, Schlüssel ungültig …): Mollie soll es erneut melden.
+    if (err instanceof MollieError && (err.status === 404 || err.status === 410)) return true;
+    console.error('[addons] Rückmeldung von Mollie ließ sich nicht prüfen:', (err as Error).message);
+    return false;
   }
   if (p.id !== paymentId) return true;
   const row = await rowForPayment(p);
@@ -772,7 +896,7 @@ export async function checkServerPayments(user: User, serverId: string, lang: Lo
     .where(and(eq(serverAddons.serverId, server.id), isNotNull(serverAddons.checkoutId), inArray(serverAddons.status, ['pending', 'active'])))
     .limit(5);
   for (const r of rows) await checkAddonPayment(r.id).catch(() => {});
-  return viewFor(server, lang);
+  return viewFor(server, lang, user);
 }
 
 /* ------------------------------------------------------------ Abo */
@@ -803,7 +927,7 @@ async function stopSubscription(row: ServerAddon, byCustomer: boolean): Promise<
 }
 
 /** Bestätigung der Kündigung an den Kunden (mit Zeitpunkt des Eingangs und Ende der Laufzeit) */
-async function confirmCancellation(row: ServerAddon, at: Date): Promise<void> {
+async function confirmCancellation(row: ServerAddon, at: Date, viaPage: boolean): Promise<void> {
   const [server] = await db.select({ name: servers.name }).from(servers).where(eq(servers.id, row.serverId)).limit(1);
   const inFlight = processing(row);
   await tell(row, {
@@ -812,10 +936,21 @@ async function confirmCancellation(row: ServerAddon, at: Date): Promise<void> {
     title: L(`Kündigung bestätigt: ${row.name.de}`, `Cancellation confirmed: ${row.name.en || row.name.de}`),
     body: (l) => {
       const name = row.name[l] || row.name.de;
-      const till = row.paidUntil ? when(row.paidUntil, l) : null;
-      return l === 'en'
-        ? `We received your cancellation of the subscription “${name}” (${row.ref}) for your server “${server?.name ?? ''}” on ${when(at, l)}.\nNothing more will be charged.${inFlight ? ' A charge that had already been started is still carried out and pays for one more term.' : ''}\n${till ? `The extra keeps running until ${till}${inFlight ? ' (or until the end of that further term)' : ''} and then ends by itself.` : ''}`
-        : `Deine Kündigung des Abos „${name}“ (${row.ref}) für deinen Server „${server?.name ?? ''}“ ist am ${when(at, l)} bei uns eingegangen.\nEs wird nichts mehr abgebucht.${inFlight ? ' Eine bereits angestoßene Abbuchung wird noch ausgeführt und bezahlt eine weitere Laufzeit.' : ''}\n${till ? `Das Extra läuft noch bis ${till}${inFlight ? ' (bzw. bis zum Ende dieser weiteren Laufzeit)' : ''} und endet dann von selbst.` : ''}`;
+      const en = l === 'en';
+      const head = en
+        ? `We received your cancellation of the subscription “${name}” (${row.ref}) for your server “${server?.name ?? ''}” on ${when(at, l)}.\nNothing more will be charged.`
+        : `Deine Kündigung des Abos „${name}“ (${row.ref}) für deinen Server „${server?.name ?? ''}“ ist am ${when(at, l)} bei uns eingegangen.\nEs wird nichts mehr abgebucht.`;
+      const flight = !inFlight ? '' : en ? ' A charge that had already been started is still carried out and pays for one more term.' : ' Eine bereits angestoßene Abbuchung wird noch ausgeführt und bezahlt eine weitere Laufzeit.';
+      const end =
+        row.status === 'active' && row.paidUntil
+          ? en
+            ? `\nThe extra keeps running until ${when(row.paidUntil, l)}${inFlight ? ' (or until the end of that further term)' : ''} and then ends by itself.`
+            : `\nDas Extra läuft noch bis ${when(row.paidUntil, l)}${inFlight ? ' (bzw. bis zum Ende dieser weiteren Laufzeit)' : ''} und endet dann von selbst.`
+          : en
+            ? '\nYour order is not paid yet. If you still pay it, it is a one-time booking that ends by itself.'
+            : '\nDeine Bestellung ist noch nicht bezahlt. Bezahlst du sie noch, ist es eine einmalige Buchung, die von selbst endet.';
+      const page = !viaPage ? '' : en ? '\nThis cancellation was submitted via the page “Cancel contracts here”. If it was not you, please contact us – you can choose a subscription again when you next renew.' : '\nDiese Kündigung kam über die Seite „Verträge hier kündigen“. Falls sie nicht von dir stammt, melde dich bitte bei uns – ein Abo kannst du beim nächsten Verlängern wieder wählen.';
+      return `${head}${flight}${end}${page}`;
     },
     dedupeKey: `addon-sub-canceled:${row.id}:${at.getTime()}`,
     email: true,
@@ -829,9 +964,9 @@ export async function cancelSubscription(user: User, serverId: string, rowId: st
   const at = new Date();
   if (await stopSubscription(row, true)) {
     await audit({ userId: user.id, serverId: server.id, actor: 'user', action: 'addon.subscription_canceled', message: `Abo „${row.name.de}“ (${row.ref}) gekündigt – läuft bis ${row.paidUntil ? when(row.paidUntil, 'de') : 'zur ersten Zahlung'}`, ip });
-    if (row.status === 'active') await confirmCancellation(row, at);
+    await confirmCancellation(row, at, false);
   }
-  return viewFor(server, lang);
+  return viewFor(server, lang, user);
 }
 
 /**
@@ -852,8 +987,9 @@ export async function requestCancellation(input: { email: string; ref?: string }
         .where(and(eq(serverAddons.userId, user.id), eq(serverAddons.autoRenew, true), inArray(serverAddons.status, ['pending', 'active'])))
         .limit(50)
     : [];
+  // Mit passendem Verwendungszweck genau dieses Abo – sonst alle Abos des Kontos (die Erklärung ist eindeutig: kündigen)
   const byRef = ref ? subs.filter((r) => r.ref === ref) : [];
-  const targets = byRef.length ? byRef : ref && subs.length > 1 ? [] : subs;
+  const targets = byRef.length ? byRef : subs;
   if (targets.length === 0) {
     await audit({ userId: user?.id ?? null, actor: 'user', action: 'addon.cancel_request_unmatched', message: `Kündigung über die Kündigungsseite eingegangen, aber keinem Abo zuzuordnen (E-Mail ${email.slice(0, 120)}${ref ? `, Verwendungszweck ${ref.slice(0, 20)}` : ''}) – bitte prüfen und beantworten`, ip });
     return;
@@ -861,7 +997,7 @@ export async function requestCancellation(input: { email: string; ref?: string }
   for (const row of targets) {
     if (!(await stopSubscription(row, true))) continue;
     await audit({ userId: row.userId, serverId: row.serverId, actor: 'user', action: 'addon.subscription_canceled', message: `Abo „${row.name.de}“ (${row.ref}) über die Kündigungsseite gekündigt – läuft bis ${row.paidUntil ? when(row.paidUntil, 'de') : 'zur ersten Zahlung'}`, ip });
-    if (row.status === 'active') await confirmCancellation(row, at);
+    await confirmCancellation(row, at, true);
   }
 }
 
@@ -886,20 +1022,64 @@ async function renewalFailed(row: ServerAddon): Promise<void> {
 
 /** Wie lange wir eine Abbuchung ohne Antwort mit derselben Kennung wiederholen (der Zahlungsdienst erkennt sie so lange als dieselbe) */
 const RENEW_RETRY_MS = 50 * 60_000;
+/** Vor der Abbuchung muss die Ankündigung mindestens so lange beim Kunden sein */
+const RENEW_NOTICE_MS = DAY_MS;
 
 /**
- * Abo verlängern: kurz vor dem Ende der Laufzeit über die Einzugsermächtigung abbuchen – ein Versuch je Laufzeit.
- * Vorher gelten dieselben Schranken wie beim Bestellen; passt etwas nicht (Extra nicht mehr im Angebot, Server
- * gesperrt, Konto gesperrt …), endet das Abo, statt Geld für etwas abzubuchen, das nicht geliefert wird.
+ * Ankündigung der nächsten Abbuchung eines Abos – einmal je Laufzeit.
+ * @returns wann sie verschickt wurde (null = es gibt das Konto nicht mehr)
+ */
+async function ensureRenewalNotice(row: ServerAddon, serverName: string, now: Date): Promise<Date | null> {
+  if (!row.paidUntil) return null;
+  const dedupeKey = `addon-renewal-notice:${row.id}:${row.paidUntil.getTime()}`;
+  const [sent] = await db.select({ at: notifications.createdAt }).from(notifications).where(and(eq(notifications.userId, row.userId), eq(notifications.dedupeKey, dedupeKey))).limit(1);
+  if (sent) return sent.at;
+  const charge = new Date(Math.max(row.paidUntil.getTime() - addonRenewLeadDays(row.periodDays) * DAY_MS, now.getTime() + RENEW_NOTICE_MS));
+  const created = await tell(row, {
+    serverId: row.serverId,
+    type: 'addon.renewal_notice',
+    title: L(`Dein Abo verlängert sich: ${row.name.de}`, `Your subscription renews: ${row.name.en || row.name.de}`),
+    body: (l) => {
+      const cancelUrl = `${baseUrl()}${l === 'de' ? '/de/kuendigen' : '/cancel-subscription'}`;
+      return l === 'en'
+        ? `Your subscription “${row.name.en || row.name.de}” (${row.ref}) for your server “${serverName}” renews automatically: around ${when(charge, l)} we charge ${formatAddonPrice(row.priceCents, l)} for another ${formatAddonPeriod(row.periodDays, l)} (following ${when(row.paidUntil!, l)}).\nIf you do not want that, cancel before then under “My servers” → Manage → Extras or at ${cancelUrl}.`
+        : `Dein Abo „${row.name.de}“ (${row.ref}) für deinen Server „${serverName}“ verlängert sich automatisch: Etwa am ${when(charge, l)} buchen wir ${formatAddonPrice(row.priceCents, l)} für weitere ${formatAddonPeriod(row.periodDays, l)} ab (im Anschluss an den ${when(row.paidUntil!, l)}).\nWenn du das nicht möchtest, kündige vorher unter „Meine Server“ → Verwalten → Extras oder auf ${cancelUrl}.`;
+    },
+    dedupeKey,
+    email: true,
+  });
+  return created ? now : null;
+}
+
+/**
+ * Abo verlängern: kurz vor dem Ende der Laufzeit über die Einzugsermächtigung abbuchen – ein Versuch je Laufzeit,
+ * frühestens einen Tag nach der Ankündigung. Vorher gelten dieselben Schranken wie beim Bestellen; passt etwas nicht
+ * (Extra nicht mehr im Angebot, Server gesperrt, Konto gesperrt …), endet das Abo, statt Geld für etwas abzubuchen,
+ * das nicht geliefert wird. Beendet wird das Abo nur bei einer eindeutigen Absage – nicht, wenn der Zahlungsdienst
+ * bloß nicht erreichbar ist.
  */
 async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date): Promise<'charged' | 'stopped' | 'skipped'> {
   if (!row.paidUntil || !row.customerId || !row.mandateId) return 'skipped';
   if (row.paidUntil.getTime() - now.getTime() > addonRenewLeadDays(row.periodDays) * DAY_MS) return 'skipped';
+  const link = async (payment: MolliePayment): Promise<'charged' | 'skipped'> => {
+    const linked = await db.update(serverAddons).set({ checkoutId: payment.id, checkoutUrl: null, checkoutAt: now }).where(and(eq(serverAddons.id, row.id), isNull(serverAddons.checkoutId)));
+    if (affectedRows(linked) !== 1) return 'skipped';
+    await settlePayment(payment, { ...row, checkoutId: payment.id, checkoutUrl: null });
+    return 'charged';
+  };
   const attempted = row.renewFor !== null && row.renewFor.getTime() === row.paidUntil.getTime();
   if (attempted && (!row.checkoutAt || now.getTime() - row.checkoutAt.getTime() > RENEW_RETRY_MS)) {
-    // Ein früherer Versuch blieb ohne Antwort und lässt sich nicht mehr gefahrlos wiederholen
-    await renewalFailed(row);
-    return 'stopped';
+    // Ein früherer Versuch blieb ohne Antwort, und der Zahlungsdienst erkennt eine Wiederholung nicht mehr als dieselbe
+    // Anfrage. Erst nachsehen, ob die Abbuchung doch angelegt wurde – nur wenn nicht, gibt es einen neuen Versuch.
+    let found: MolliePayment | undefined;
+    try {
+      found = (await listMollieCustomerPayments(row.customerId)).find((x) => x.metadata.booking === row.id && Number(x.metadata.attempt) === row.checkoutCount);
+    } catch {
+      return 'skipped';
+    }
+    if (found) return link(found);
+    await db.update(serverAddons).set({ renewFor: null, checkoutAt: null }).where(and(eq(serverAddons.id, row.id), isNull(serverAddons.checkoutId), eq(serverAddons.paidUntil, row.paidUntil)));
+    return 'skipped';
   }
   // Nummer des Versuchs: Teil der Kennung, unter der der Zahlungsdienst eine wiederholte Anfrage als dieselbe erkennt
   let attempt = row.checkoutCount;
@@ -911,6 +1091,7 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
     if (!server || server.status === 'deleted' || !owner) why = 'Server oder Konto gibt es nicht mehr';
     else if (!settings.addons.enabled || !addon || !addon.enabled || !addonFits(addon, server)) why = 'das Extra wird für diesen Server nicht mehr angeboten';
     else if (!orderable(server)) why = 'der Server ist gesperrt';
+    else if (await chargebackBlocked(row.userId, now)) why = 'eine frühere Zahlung wurde zurückgeholt';
     else if (row.effect === 'always_on') {
       const block = await renewalBlock(owner, server, now);
       if (block) why = BLOCK_AUDIT[block];
@@ -932,6 +1113,12 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
       }
       return 'stopped';
     }
+    // Server ruht gerade wegen des Zyklus (abgelaufen, noch nicht reaktiviert): jetzt nichts abbuchen. Läuft die
+    // bezahlte Zeit so aus, endet das Extra von selbst – ohne Abbuchung für einen Server, der vielleicht gelöscht wird.
+    if (server!.status !== 'active') return 'skipped';
+    // Erst ankündigen, dann – frühestens einen Tag später – abbuchen
+    const noticeAt = await ensureRenewalNotice(row, server!.name, now);
+    if (!noticeAt || now.getTime() - noticeAt.getTime() < RENEW_NOTICE_MS) return 'skipped';
     // Ein Versuch je Laufzeit – erst vormerken, dann abbuchen
     const marked = await db
       .update(serverAddons)
@@ -946,7 +1133,7 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
     payment = await createMolliePayment({
       amountCents: row.priceCents,
       description: `${row.name.de} (${row.ref}) – Verlängerung`,
-      metadata: { ref: row.ref, booking: row.id, renewal: 1 },
+      metadata: { ref: row.ref, booking: row.id, attempt },
       webhookUrl: paymentWebhookUrl(),
       sequenceType: 'recurring',
       customerId: row.customerId,
@@ -955,16 +1142,17 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
       idempotencyKey: `renew:${row.id}:${attempt}`,
     });
   } catch (err) {
-    // Nicht erreichbar oder überlastet: gleich noch einmal (mit derselben Kennung). Abgelehnt: Abo beenden.
-    if (err instanceof MollieError && (err.status === 0 || err.status >= 500 || err.status === 429)) return 'skipped';
-    console.warn('[addons] Abbuchung abgelehnt:', (err as Error).message);
-    await renewalFailed(row);
-    return 'stopped';
+    // Eindeutige Absage (z. B. Einzugsermächtigung ungültig): Abo beenden. Alles andere – nicht erreichbar, überlastet,
+    // Schlüssel ungültig, Antwort abgebrochen – ist nicht die Schuld des Kunden: später mit derselben Kennung noch einmal.
+    if (err instanceof MollieError && [400, 404, 410, 422].includes(err.status)) {
+      console.warn('[addons] Abbuchung abgelehnt:', err.message);
+      await renewalFailed(row);
+      return 'stopped';
+    }
+    console.error('[addons] Abbuchung ließ sich nicht anlegen – neuer Versuch im nächsten Lauf:', (err as Error).message);
+    return 'skipped';
   }
-  const linked = await db.update(serverAddons).set({ checkoutId: payment.id, checkoutUrl: null, checkoutAt: now }).where(and(eq(serverAddons.id, row.id), isNull(serverAddons.checkoutId)));
-  if (affectedRows(linked) !== 1) return 'skipped';
-  await settlePayment(payment, { ...row, checkoutId: payment.id, checkoutUrl: null });
-  return 'charged';
+  return link(payment);
 }
 
 /* ------------------------------------------------------------ Wirkung „24/7“ */
@@ -982,7 +1170,8 @@ export async function activateAlwaysOn(serverId: string, now = new Date()): Prom
   const cycleHeld = server.status === 'expiring' || (server.status === 'suspended' && server.suspensionReason === 'cycle_expired');
   if (cycleHeld) {
     const [owner] = await db.select().from(users).where(eq(users.id, server.userId)).limit(1);
-    const block = owner ? await renewalBlock(owner, server, now) : 'locked';
+    // Streng wie beim Reaktivieren: Lässt sich die Discord-Pflicht gerade nicht prüfen, bleibt die Sperre vorerst
+    const block = owner ? await renewalBlock(owner, server, now, { strict: true }) : 'locked';
     if (block) return block;
   }
   const fairUsePause = server.pauseReason === 'max_session' || server.pauseReason === 'weekly_offline';
@@ -1006,7 +1195,7 @@ export async function activateAlwaysOn(serverId: string, now = new Date()): Prom
  * Passt der Server nicht mehr in die Grenzen seines Besitzers (Boost-Belohnung beendet), gibt es keinen neuen Zyklus:
  * Er läuft sofort ab, wie er es ohne das Extra längst getan hätte.
  */
-export async function deactivateAlwaysOn(serverId: string, now = new Date()): Promise<void> {
+export async function deactivateAlwaysOn(serverId: string, now = new Date(), opts: { /** false = ohne fairen Neustart (Zahlung zurückgeholt) */ fair?: boolean } = {}): Promise<void> {
   const [other] = await db
     .select({ id: serverAddons.id })
     .from(serverAddons)
@@ -1017,14 +1206,21 @@ export async function deactivateAlwaysOn(serverId: string, now = new Date()): Pr
   if (!server?.alwaysOnSince) return;
   const [owner] = await db.select().from(users).where(eq(users.id, server.userId)).limit(1);
   const fits = owner ? await fitsServerLimits(owner, server).catch(() => true) : true;
+  const cycle =
+    opts.fair === false
+      ? // Zahlung zurückgeholt: kein Vorteil aus der unbezahlten Zeit – der Zyklus gilt als abgelaufen (normaler Ablauf mit Ruhezeit)
+        { cycleEndsAt: now }
+      : fits
+        ? // Fairer Neustart: frischer Zyklus, die Laufzeit aus der Zeit mit dem Extra zählt nicht gegen die Fair-Use-Regeln
+          { fairUseResetAt: now, cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle) }
+        : // Passt nicht mehr in die Grenzen (Boost-Belohnung beendet): kein neuer Zyklus – es gilt das Ende, das der
+          // Server ohne das Extra gehabt hätte (frühestens jetzt)
+          { fairUseResetAt: now, cycleEndsAt: new Date(Math.max(now.getTime(), cycleEndFor(server.kind, server.cycleStartedAt ?? now, freeHostingConfig.cycle).getTime())) };
   await db
     .update(servers)
     .set({
       alwaysOnSince: null,
-      fairUseResetAt: now,
-      cycleNumber: server.cycleNumber + 1,
-      cycleStartedAt: now,
-      cycleEndsAt: fits ? cycleEndFor(server.kind, now, freeHostingConfig.cycle) : now,
+      ...cycle,
       // Bots: Die Offline-Zeit zählt ab jetzt neu (Inaktivitäts-Regel)
       ...(server.kind === 'discord' ? { powerStateAt: now } : {}),
     })
@@ -1041,7 +1237,7 @@ type EndReason = NonNullable<ServerAddon['endReason']>;
  * Kunden. `ifPaidUntil`: nur beenden, wenn sich das Ende der Laufzeit seit dem Lesen nicht geändert hat (sonst würde
  * eine gerade bezahlte Verlängerung beendet).
  */
-export async function endAddon(row: ServerAddon, reason: EndReason, opts: { silent?: boolean; note?: string; ifPaidUntil?: Date } = {}): Promise<boolean> {
+export async function endAddon(row: ServerAddon, reason: EndReason, opts: { silent?: boolean; note?: string; ifPaidUntil?: Date; /** ohne fairen Neustart (Zahlung zurückgeholt) */ unfair?: boolean } = {}): Promise<boolean> {
   const now = new Date();
   const wasActive = row.status === 'active';
   const fulfilment = row.effect === 'manual' && wasActive && row.fulfilment === 'done' ? 'revoke' : 'none';
@@ -1051,7 +1247,7 @@ export async function endAddon(row: ServerAddon, reason: EndReason, opts: { sile
     .where(and(eq(serverAddons.id, row.id), eq(serverAddons.status, row.status), opts.ifPaidUntil ? eq(serverAddons.paidUntil, opts.ifPaidUntil) : undefined));
   if (affectedRows(res) !== 1) return false;
   await revokeMandate(row);
-  if (wasActive && row.effect === 'always_on') await deactivateAlwaysOn(row.serverId, now);
+  if (wasActive && row.effect === 'always_on') await deactivateAlwaysOn(row.serverId, now, { fair: !opts.unfair });
   if (opts.silent || !wasActive || reason === 'server_deleted') return true;
   const [server] = await db.select({ name: servers.name }).from(servers).where(eq(servers.id, row.serverId)).limit(1);
   await tell(row, {
@@ -1086,6 +1282,10 @@ export async function endAddon(row: ServerAddon, reason: EndReason, opts: { sile
 
 /* ------------------------------------------------------------ Job */
 
+/** Server, bei denen „24/7“ zuletzt nicht greifen durfte: Server-ID → Zeitpunkt des letzten Versuchs */
+const healTried = new Map<string, number>();
+const HEAL_RETRY_MS = 5 * 60_000;
+
 /** Regelmäßiger Lauf: aufräumen, erinnern, Zahlungen nachfragen, Abos verlängern, verwerfen, beenden, Wirkung abgleichen */
 export async function runAddons(now = new Date()): Promise<{ expired: number; unpaid: number; reminded: number; paid: number; renewed: number; healed: number }> {
   const stats = { expired: 0, unpaid: 0, reminded: 0, paid: 0, renewed: 0, healed: 0 };
@@ -1107,7 +1307,13 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     .leftJoin(users, eq(users.id, serverAddons.userId))
     .where(and(inArray(serverAddons.status, ['pending', 'active']), or(isNull(servers.id), eq(servers.status, 'deleted'), isNull(users.id))))
     .limit(200);
-  for (const { row } of gone) await endAddon(row, 'server_deleted', { silent: true });
+  for (const { row } of gone) {
+    if (!(await endAddon(row, 'server_deleted', { silent: true }))) continue;
+    // Bezahlte Restlaufzeit geht mit dem Server unter – sichtbar machen, falls das Team kulant erstatten möchte
+    if (row.status === 'active' && row.priceCents > 0 && row.paidUntil && row.paidUntil.getTime() - now.getTime() > DAY_MS) {
+      await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.ended_server_deleted', message: `Extra „${row.name.de}“ (${row.ref}) beendet, weil es Server oder Konto nicht mehr gibt – bezahlt war noch bis ${when(row.paidUntil, 'de')}` });
+    }
+  }
 
   // 2) Erinnern, bevor die Laufzeit endet – bei Abos: ankündigen, dass und wann abgebucht wird
   const horizon = new Date(now.getTime() + 14 * DAY_MS);
@@ -1116,26 +1322,16 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     .from(serverAddons)
     .innerJoin(servers, eq(servers.id, serverAddons.serverId))
     .where(and(eq(serverAddons.status, 'active'), isNotNull(serverAddons.paidUntil), gt(serverAddons.paidUntil, now), lte(serverAddons.paidUntil, horizon), isNull(serverAddons.renewalRequestedAt), isNull(serverAddons.checkoutId)))
+    .orderBy(asc(serverAddons.paidUntil))
     .limit(400);
   for (const { row, server } of soon) {
     const left = row.paidUntil!.getTime() - now.getTime();
     if (subscribed(row)) {
+      // Abo: Abbuchung rechtzeitig ankündigen (spätestens einen Tag vorher – ohne Ankündigung wird nicht abgebucht)
       const charge = nextCharge(row);
       if (!charge || charge.getTime() - now.getTime() > Math.min(3, addonRenewLeadDays(row.periodDays) + 1) * DAY_MS) continue;
-      const created = await tell(row, {
-        serverId: row.serverId,
-        type: 'addon.renewal_notice',
-        title: L(`Dein Abo verlängert sich: ${row.name.de}`, `Your subscription renews: ${row.name.en || row.name.de}`),
-        body: (l) => {
-          const cancelUrl = `${baseUrl()}${l === 'de' ? '/de/kuendigen' : '/cancel-subscription'}`;
-          return l === 'en'
-            ? `Your subscription “${row.name.en || row.name.de}” (${row.ref}) for your server “${server.name}” renews automatically: around ${when(charge, l)} we charge ${formatAddonPrice(row.priceCents, l)} for another ${formatAddonPeriod(row.periodDays, l)} (following ${when(row.paidUntil!, l)}).\nIf you do not want that, cancel before then under “My servers” → Manage → Extras or at ${cancelUrl}.`
-            : `Dein Abo „${row.name.de}“ (${row.ref}) für deinen Server „${server.name}“ verlängert sich automatisch: Etwa am ${when(charge, l)} buchen wir ${formatAddonPrice(row.priceCents, l)} für weitere ${formatAddonPeriod(row.periodDays, l)} ab (im Anschluss an den ${when(row.paidUntil!, l)}).\nWenn du das nicht möchtest, kündige vorher unter „Meine Server“ → Verwalten → Extras oder auf ${cancelUrl}.`;
-        },
-        dedupeKey: `addon-renewal-notice:${row.id}:${row.paidUntil!.getTime()}`,
-        email: true,
-      });
-      if (created) stats.reminded++;
+      const [had] = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.userId, row.userId), eq(notifications.dedupeKey, `addon-renewal-notice:${row.id}:${row.paidUntil!.getTime()}`))).limit(1);
+      if (!had && (await ensureRenewalNotice(row, server.name, now))) stats.reminded++;
       continue;
     }
     if (settings.addons.remindDaysBefore <= 0 || left > settings.addons.remindDaysBefore * DAY_MS) continue;
@@ -1180,6 +1376,26 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
           return 'skipped' as const;
         });
         if (result === 'charged') stats.renewed++;
+      }
+    }
+
+    // Testzahlungen zählen nur im Testbetrieb: Mit dem Live-Schlüssel enden Buchungen, die nur „zum Test“ bezahlt wurden
+    if (!mollieTestMode()) {
+      const tests = await db
+        .select()
+        .from(serverAddons)
+        .where(
+          and(
+            inArray(serverAddons.status, ['pending', 'active']),
+            sql`exists (select 1 from ${addonPayments} where ${addonPayments.serverAddonId} = ${serverAddons.id} and ${addonPayments.providerRef} like ${TEST_REF})`,
+            sql`not exists (select 1 from ${addonPayments} where ${addonPayments.serverAddonId} = ${serverAddons.id} and ${addonPayments.amountCents} >= 0 and (${addonPayments.providerRef} is null or ${addonPayments.providerRef} not like ${TEST_REF}))`,
+          ),
+        )
+        .limit(100);
+      for (const row of tests) {
+        if (await endAddon(row, 'admin', { silent: true, unfair: true, note: 'Testzahlung – mit dem Wechsel auf den Live-Schlüssel beendet' })) {
+          await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.test_ended', message: `Extra „${row.name.de}“ (${row.ref}) war nur mit einer Testzahlung bezahlt und wurde mit dem Live-Schlüssel beendet` });
+        }
       }
     }
 
@@ -1250,7 +1466,18 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     .innerJoin(serverAddons, eq(serverAddons.serverId, servers.id))
     .where(and(eq(serverAddons.effect, 'always_on'), eq(serverAddons.status, 'active'), ne(servers.status, 'deleted'), or(isNull(servers.alwaysOnSince), ne(servers.cycleEndsAt, NO_CYCLE_END))))
     .limit(100);
-  for (const s of missing) if ((await activateAlwaysOn(s.id, now)) === null) stats.healed++;
+  for (const s of missing) {
+    // Bleibt ein Server vorerst gesperrt (Auszeit, Discord-Pflicht …), nicht jede Minute neu prüfen
+    const tried = healTried.get(s.id);
+    if (tried && now.getTime() - tried < HEAL_RETRY_MS) continue;
+    if ((await activateAlwaysOn(s.id, now)) === null) {
+      healTried.delete(s.id);
+      stats.healed++;
+    } else {
+      if (healTried.size > 5000) healTried.clear();
+      healTried.set(s.id, now.getTime());
+    }
+  }
   return stats;
 }
 
@@ -1263,6 +1490,11 @@ function paging(page: number | undefined, total: number): PageInfo & { offset: n
 }
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** Echte Zahlungen (ohne Testzahlungen) – für Einnahmen und „bezahlt“-Summen */
+const realMoney = sql`(${addonPayments.providerRef} is null or ${addonPayments.providerRef} not like ${TEST_REF})`;
+/** Vorgänge, die das Team sehen soll (Admin → Extras → Hinweise) */
+const NOTICE_ACTIONS = ['addon.payment_orphan', 'addon.payment_mismatch', 'addon.payment_refunded', 'addon.refund_failed', 'addon.oversold', 'addon.chargeback', 'addon.cancel_request_unmatched', 'addon.ended_server_deleted', 'addon.renewal_failed', 'addon.test_ended', 'addon.always_on_waiting'];
 
 const countsSelect = {
   active: sql<number>`sum(case when ${serverAddons.status} = 'active' then 1 else 0 end)`,
@@ -1312,21 +1544,32 @@ export async function listAdminAddons(filter: { q?: string; status?: string; pag
     ? await db
         .select({ id: addonPayments.serverAddonId, cents: sql<number>`sum(${addonPayments.amountCents})`, n: sql<number>`sum(case when ${addonPayments.amountCents} >= 0 then 1 else 0 end)` })
         .from(addonPayments)
-        .where(inArray(addonPayments.serverAddonId, ids))
+        .where(and(inArray(addonPayments.serverAddonId, ids), realMoney))
         .groupBy(addonPayments.serverAddonId)
     : [];
   const paidBy = new Map(paid.map((p) => [p.id, p]));
   const rows: AdminAddonRowDTO[] = list.map(({ row, email, serverName, serverStatus, kind, planId }) => {
     const { payment: _payment, canRenew: _canRenew, canSubscribe: _canSubscribe, ...dto } = toDTO(row, settings, 'de', now, kind && planId ? { kind, planId } : null);
-    return { ...dto, userId: row.userId, userEmail: email ?? '', serverId: row.serverId, serverName: serverName ?? '', serverStatus: serverStatus ?? 'deleted', adminNote: row.adminNote, paidCents: Number(paidBy.get(row.id)?.cents ?? 0), payments: Number(paidBy.get(row.id)?.n ?? 0), checkoutPending: row.checkoutId !== null };
+    return { ...dto, userId: row.userId, userEmail: email ?? '', serverId: row.serverId, serverName: serverName ?? '', serverStatus: serverStatus ?? 'deleted', adminNote: row.adminNote, paidCents: Number(paidBy.get(row.id)?.cents ?? 0), payments: Number(paidBy.get(row.id)?.n ?? 0), checkoutPending: row.checkoutId !== null, chargebackBlocked: false };
   });
   const [a] = await db.select(countsSelect).from(serverAddons);
   const [rev] = await db
     .select({ cents: sql<number>`coalesce(sum(${addonPayments.amountCents}), 0)` })
     .from(addonPayments)
-    .where(gt(addonPayments.createdAt, new Date(now.getTime() - 30 * DAY_MS)));
+    .where(and(gt(addonPayments.createdAt, new Date(now.getTime() - 30 * DAY_MS)), realMoney));
+  // Was das Team wissen muss, steht sonst nur im Protokoll: nicht zuordenbare Zahlungen, Rückbuchungen, Kündigungen ohne Treffer …
+  const noticeRows = await db
+    .select({ at: auditLogs.createdAt, action: auditLogs.action, message: auditLogs.message })
+    .from(auditLogs)
+    .where(and(inArray(auditLogs.action, NOTICE_ACTIONS), gt(auditLogs.createdAt, new Date(now.getTime() - 14 * DAY_MS))))
+    .orderBy(desc(auditLogs.id))
+    .limit(15);
+  const blocked = new Set<string>();
+  for (const userId of new Set(list.map((l) => l.row.userId))) if (await chargebackBlocked(userId, now)) blocked.add(userId);
+  for (const r of rows) r.chargebackBlocked = blocked.has(r.userId);
   return {
     rows,
+    notices: noticeRows.map((n) => ({ at: n.at.toISOString(), action: n.action, message: n.message })),
     ...info,
     stats: { active: Number(a?.active ?? 0), awaitingPayment: Number(a?.awaiting ?? 0), tasks: Number(a?.tasks ?? 0), subscriptions: Number(a?.subscriptions ?? 0), revenue30dCents: Number(rev?.cents ?? 0), monthlyRunRateCents: Math.round(Number(a?.runRate ?? 0)) },
     payment: { online: online(), testMode: mollieTestMode(), webhookUrl: paymentWebhookUrl() },
@@ -1432,4 +1675,11 @@ export async function adminGrantAddon(admin: Pick<User, 'email'>, input: { serve
 export async function adminAddonNote(rowId: string, note: string): Promise<void> {
   const row = await adminRow(rowId);
   await db.update(serverAddons).set({ adminNote: note.trim().slice(0, 500) || null }).where(eq(serverAddons.id, row.id));
+}
+
+/** Sperre nach einer zurückgeholten Zahlung aufheben (z. B. nachdem der Kunde den Betrag nachgezahlt hat) */
+export async function adminClearChargeback(admin: Pick<User, 'email'>, userId: string, ip?: string): Promise<void> {
+  if (!(await chargebackBlocked(userId))) throw Errors.conflict('nothing_to_do', L('Für dieses Konto besteht keine Sperre.', 'There is no block for this account.'));
+  await db.insert(addonPayments).values({ id: uuid(), serverAddonId: '', ref: '', userId, serverId: '', addonId: '', addonName: 'Sperre nach Rücklastschrift aufgehoben', amountCents: 0, periodDays: 0, provider: 'admin', providerRef: `chargeback-cleared:${uuid()}`, confirmedBy: admin.email });
+  await audit({ userId, actor: 'admin', action: 'admin.addon_chargeback_cleared', message: `Sperre nach Rücklastschrift aufgehoben – das Konto kann wieder Extras buchen (durch ${admin.email})`, ip });
 }

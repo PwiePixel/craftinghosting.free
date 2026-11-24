@@ -35,6 +35,11 @@ export default async function ExtrasPage({ params }: Props) {
         <h1 className="h2 mt-3">{t.title}</h1>
         <p className="lead mt-4">{t.intro}</p>
 
+        {enabled && site.addons.testMode && (
+          <div className="mt-8">
+            <Alert>{t.setupSoon}</Alert>
+          </div>
+        )}
         {!enabled || items.length === 0 ? (
           <div className="mt-8">
             <Alert>{t.closed}</Alert>
