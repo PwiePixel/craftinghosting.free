@@ -15,7 +15,7 @@ import { pterodactyl } from '../pterodactyl';
 import type { PterodactylGateway } from '../pterodactyl/types';
 import { audit } from '../services/audit.service';
 import { panelServerUrl } from '../services/panel';
-import { computeRuntimeState, loadWeekSessions } from '../services/runtime';
+import { computeRuntimeState, loadWeekSessions, fairUseFor } from '../services/runtime';
 import { getSettings } from '../services/settings.service';
 import { discordRequest, type DiscordUser } from './rest';
 import { botRequest } from './service';
@@ -269,7 +269,7 @@ async function acceptEula(ctx: Ctx, discordUser: DiscordUser) {
 async function startBlocked(ctx: Ctx, state: Server['powerState']): Promise<boolean> {
   const now = new Date();
   const settings = await getSettings();
-  const runtime = computeRuntimeState({ ...ctx.server, powerState: state }, ctx.user, await loadWeekSessions(ctx.server.id, now), now, settings.products[ctx.server.kind].fairUse);
+  const runtime = computeRuntimeState({ ...ctx.server, powerState: state }, ctx.user, await loadWeekSessions(ctx.server.id, now), now, fairUseFor(ctx.server, settings));
   if (runtime.startGate.allowed || runtime.startGate.reason === 'already_online') return false;
   const why = startBlockMessages[runtime.startGate.reason ?? 'not_active'];
   const until = runtime.startGate.until;

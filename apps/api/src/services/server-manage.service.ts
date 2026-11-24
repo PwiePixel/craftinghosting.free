@@ -17,7 +17,7 @@ import { ApiError, Errors, L } from '../lib/errors';
 import { pterodactyl, PterodactylError } from '../pterodactyl';
 import { audit } from './audit.service';
 import { streamServerConsole } from './partner-console';
-import { computeRuntimeState, loadWeekSessions } from './runtime';
+import { computeRuntimeState, fairUseFor, loadWeekSessions } from './runtime';
 import { assertNoTimeout } from './sanction-gate';
 import { getOwnedServer, toServerDTO } from './server.service';
 import { getSettings } from './settings.service';
@@ -188,7 +188,7 @@ export async function serverPower(user: User, id: string, action: ServerPowerAct
     // Fair-Use: Pause, wöchentliche Offline-Zeit, Ablauf … (wie beim Start im Panel bzw. per Discord)
     const now = new Date();
     const settings = await getSettings();
-    const { startGate } = computeRuntimeState({ ...server, powerState: res.state }, user, await loadWeekSessions(server.id, now), now, settings.products[server.kind].fairUse);
+    const { startGate } = computeRuntimeState({ ...server, powerState: res.state }, user, await loadWeekSessions(server.id, now), now, fairUseFor(server, settings));
     if (!startGate.allowed && startGate.reason !== 'already_online') {
       const why = startBlockMessages[startGate.reason ?? 'not_active'];
       const tz = freeHostingConfig.fairUse.timezone;

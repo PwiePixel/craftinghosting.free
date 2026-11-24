@@ -29,6 +29,7 @@ import {
   getServerType,
   softwareTypes,
   websiteTypesOf,
+  publicAddonCatalog,
 } from '@chfree/shared';
 import { offeredVersionsCached } from './software-directory';
 import { installMethodOf } from '../config/pterodactyl.config';
@@ -385,6 +386,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
+    addons: publicAddonCatalog(s.addons),
     chat: s.chat.enabled
       ? {
           name: s.chat.name,

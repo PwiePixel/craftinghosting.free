@@ -40,6 +40,7 @@ export const fallbackSite: PublicSiteDTO = {
   software: websiteTypesOf('minecraft').map((t) => ({ id: t.id, kind: t.kind, name: t.name, description: t.description, versions: t.versions, defaultVersion: t.defaultVersion, ...(t.recommended ? { recommended: true } : {}), edition: t.edition ?? 'java' })),
   hardware: { ...defaults.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
   donate: { enabled: false, url: null },
+  addons: { enabled: false, priceNote: { de: '', en: '' }, items: [] },
   chat: null,
   discord: { available: false, required: false, autoJoin: true, signup: false, inviteUrl: null, note: { de: '', en: '' } },
   botFairUse: defaults.botFairUse,

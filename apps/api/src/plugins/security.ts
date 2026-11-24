@@ -26,6 +26,7 @@ declare module 'fastify' {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const isPartnerApi = (url: string) => /^\/api\/v1\/partner(\/|$|\?)/.test(url);
+export const isPaymentWebhook = (url: string) => /^\/api\/v1\/payments\/sumup\/webhook(\?|$)/.test(url);
 
 /**
  * CSRF-Schutz für zustandsändernde Anfragen:
@@ -43,6 +44,9 @@ export const securityPlugin = fp(async function securityPlugin(app: FastifyInsta
     if (SAFE_METHODS.has(request.method)) return;
     // Partner-API: Zugriff nur mit API-Key (kein Cookie) – der Schutz gegen untergeschobene Browser-Anfragen entfällt dort
     if (isPartnerApi(request.url)) return;
+    // Rückmeldung des Zahlungsanbieters: kommt ohne unseren Client-Header. Sie ändert nichts von sich aus – das System
+    // fragt den Stand der Zahlung danach selbst beim Anbieter ab.
+    if (isPaymentWebhook(request.url)) return;
     const origin = request.headers.origin;
     if (origin && !(await originAllowed(origin))) {
       throw Errors.forbidden(L('Ungültiger Ursprung der Anfrage.', 'Invalid request origin.'));

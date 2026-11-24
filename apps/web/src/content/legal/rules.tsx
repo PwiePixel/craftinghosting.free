@@ -108,6 +108,13 @@ export function RulesDe({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>5. Upgrade</h2>
         <p>Wer mehr Leistung und weniger Einschränkungen benötigt, kann jederzeit zu einem kostenpflichtigen Angebot von CraftingHosting wechseln.</p>
+        {site.addons.enabled && (
+          <p>
+            Für einzelne kostenlose Server lassen sich außerdem freiwillige, kostenpflichtige Extras buchen – zum Beispiel der Betrieb ohne Pausen („24/7“). Solange das
+            Extra „24/7“ für einen Server aktiv ist, gelten für ihn das Laufzeitlimit und die Offline-Zeiten aus Abschnitt 2 sowie der Zyklus aus Abschnitt 3 nicht; alle
+            übrigen Regeln gelten weiter. Einzelheiten stehen in den <Link href={localePath('de', 'extrasTerms')}>Bedingungen für Extras</Link>.
+          </p>
+        )}
       </section>
     </>
   );
@@ -214,6 +221,13 @@ export function RulesEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>5. Upgrade</h2>
         <p>Anyone who needs more performance and fewer restrictions can switch to a paid CraftingHosting plan at any time.</p>
+        {site.addons.enabled && (
+          <p>
+            In addition, optional paid extras can be booked for individual free servers – for example running without breaks (“24/7”). While the “24/7” extra is active
+            for a server, the runtime limit and offline periods from section 2 and the cycle from section 3 do not apply to it; all other rules continue to apply. Details
+            are in the <Link href={localePath('en', 'extrasTerms')}>terms for extras</Link>.
+          </p>
+        )}
       </section>
     </>
   );

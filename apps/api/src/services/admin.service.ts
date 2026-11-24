@@ -38,6 +38,7 @@ import { affectedRows, db } from '../db/client';
 import { auditLogs, jobRuns, notifications, servers, statusIncidents, users, type Server, type User } from '../db/schema';
 import { decryptField, uuid } from '../lib/crypto';
 import { getSettings, waitlistRank } from './settings.service';
+import { addonCounts } from './addons.service';
 import { toIncidentDTO } from './status.service';
 import { ApiError, Errors, L } from '../lib/errors';
 import { isAdmin } from '../plugins/auth';
@@ -48,6 +49,7 @@ import { installMethodOf, pterodactylConfig, suggestEggs } from '../config/ptero
 import { abuseReasonLabel } from './abuse-reasons';
 import { mapLimit } from '../jobs/types';
 import { audit } from './audit.service';
+import { cycleEndForServer } from './runtime';
 import { sendMail } from './mail/mailer';
 import { notificationMail } from './mail/templates';
 import { trySyncPanelDescription } from './panel';
@@ -159,6 +161,7 @@ export async function getOverview(): Promise<AdminOverviewDTO> {
       capacity: p.capacity,
     })),
     mails: { pending: Number(mailPending?.n ?? 0), failed: Number(mailFailed?.n ?? 0), lastError: lastMailError?.e ?? null },
+    addons: { enabled: settings.addons.enabled, ...(await addonCounts()) },
     jobs: await jobStatus(now),
     system: {
       pterodactylMode: pterodactyl().mode,
@@ -475,7 +478,7 @@ export async function serverAction(admin: User, id: string, action: ServerAction
           suspensionReason: null,
           suspendedAt: null,
           expiringSince: null,
-          ...(newCycle ? { cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle) } : {}),
+          ...(newCycle ? { cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndForServer(server, now, freeHostingConfig.cycle) } : {}),
         })
         .where(and(eq(servers.id, id), eq(servers.status, 'suspended')));
       if (affectedRows(res) !== 1) throw stateChanged();
@@ -529,7 +532,7 @@ export async function serverAction(admin: User, id: string, action: ServerAction
           expiringSince: null,
           cycleNumber: server.cycleNumber + 1,
           cycleStartedAt: now,
-          cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle),
+          cycleEndsAt: cycleEndForServer(server, now, freeHostingConfig.cycle),
           ...(wasSuspended ? { reactivationCount: server.reactivationCount + 1, lastReactivatedAt: now } : {}),
         })
         .where(and(eq(servers.id, id), eq(servers.status, server.status)));

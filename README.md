@@ -145,6 +145,26 @@ Chat-Symbol unten rechts auf der Website, mit einer Sprechblase, die einmal je B
 
 **Datenschutz:** Unterhaltungen werden gespeichert (IP-Adresse verschlüsselt) und nach der eingestellten Frist (Standard 30 Tage) gelöscht; die Datenschutzerklärung und die Cookie-Hinweise der Website nennen den Chat und den KI-Dienst automatisch, sobald er eingeschaltet ist. Code: `apps/api/src/chat/`, `apps/web/src/components/chat/`.
 
+### Kostenpflichtige Extras (Admin → *Extras*)
+
+Das Hosting bleibt kostenlos – wer mehr möchte, bucht je Server einzelne Extras dazu. Bezahlt wird **im Voraus für eine Laufzeit** (z. B. 30 Tage). Es gibt **kein Abo und keine automatische Verlängerung**: Läuft ein Extra aus, fällt der Server von selbst auf das kostenlose Angebot zurück. Alles ist ausgeschaltet, bis du es im Admin-Bereich einschaltest.
+
+| Baustein | Was er tut |
+| --- | --- |
+| **Katalog** | Beliebige Extras mit Name/Beschreibung (DE/EN), Preis, Laufzeit (0 = einmalig), Symbol, „nur für diese Pakete“, Höchstzahl gleichzeitig aktiver Buchungen (z. B. Anzahl freier IPv4-Adressen) und optional eigenem Zahlungslink. Drei Vorschläge sind angelegt, aber ausgeschaltet: 24/7, eigene IPv4-Adresse, Upgrade auf AMD EPYC. |
+| **Wirkung „24/7 – automatisch“** | Solange das Extra bezahlt ist, gelten für den Server weder Fair-Use-Pausen (Laufzeitlimit, Wochen-Offline-Zeit) noch der 30-Tage-Zyklus mit Ruhetag. Eine laufende Pause wird sofort aufgehoben. Nach dem Ende beginnt ein frischer Zyklus mit zurückgesetzter Laufzeit. Alles andere bleibt: Paket-Limits (RAM/CPU/Speicher), Server pro Person, Schutz vor CPU-Dauerlast, Sperren bei Verstößen. |
+| **Wirkung „Team richtet es ein“** | Nach der Zahlung erscheint eine Aufgabe unter Admin → *Extras* (und ein Hinweis in der Übersicht). Du richtest die Leistung im Panel ein (z. B. IP zuweisen, Server umziehen) und klickst „Eingerichtet“ – der Kunde wird benachrichtigt. Nach dem Ende erscheint die Aufgabe „Zurücknehmen“. |
+| **Bezahlung mit SumUp (automatisch)** | Mit `SUMUP_API_KEY` und `SUMUP_MERCHANT_CODE` in der `.env` bezahlen Kunden auf der SumUp-Bezahlseite; das Extra wird danach automatisch freigeschaltet. Die Rückmeldung von SumUp enthält nur eine Kennung – das System fragt **jede** Zahlung selbst bei SumUp ab und prüft Status, Betrag, Währung, Empfänger und Verwendungszweck. Jede Zahlung zählt genau einmal. Fällt eine Rückmeldung aus, fragt der Job `addons` offene Zahlungen nach. |
+| **Bezahlung von Hand** | Ohne SumUp-Zugang sieht der Kunde Betrag, Verwendungszweck (z. B. `CH-7K2M9QXA`) und den Zahlungslink des Extras; du bestätigst den Eingang unter Admin → *Extras* („Zahlung bestätigen“). |
+| **Für Kunden** | „Meine Server“ → *Verwalten* → Reiter **Extras**: buchen (mit Zusammenfassung, Zustimmung zu den Bedingungen und Schaltfläche „Zahlungspflichtig bestellen“), bezahlen, verlängern, offene Bestellung stornieren. Öffentliche Übersicht unter `/extras` (deutsch `/de/extras`), Bedingungen samt Widerrufsbelehrung unter `/extras-terms` (`/de/extras-bedingungen`). E-Mails: Zahlung eingegangen, eingerichtet, Erinnerung vor Ablauf, abgelaufen. |
+| **Für das Team** | Admin → *Extras*: Kennzahlen (aktiv, Zahlung offen, Aufgaben, Einnahmen 30 Tage, laufend pro Monat), Buchungen mit Suche/Filter, Zahlung bestätigen, Laufzeit ändern, beenden (auch „erstattet“), Notiz, Extra kostenlos vergeben. Alle Schritte stehen im Protokoll. |
+
+**Einrichten:** (1) SumUp-Schlüssel und Händlernummer in die `.env` eintragen und neu starten (optional, sonst Bezahlung von Hand). (2) Admin → *Extras*: Preise prüfen, „Hinweis zum Preis“ ausfüllen (Umsatzsteuer), gewünschte Extras auf „Buchbar“ stellen, „Extras auf der Website anbieten“ einschalten, speichern. (3) Mit einem Testserver einmal selbst bestellen.
+
+**Sicherheit:** Preis, Laufzeit und Wirkung kommen ausschließlich vom Server – was der Browser mitschickt, wird ignoriert. Ein Extra gilt nur für den Server, für den es bezahlt wurde; Partner-Server sind ausgenommen. Die Rückmelde-Adresse von SumUp schaltet nie selbst etwas frei.
+
+**Rechtliches – bitte vor dem Einschalten prüfen lassen:** Bezahlte Extras sind ein Verkauf an Verbraucher (oft Minderjährige). Die mitgelieferten „Bedingungen für Extras“ samt Widerrufsbelehrung (`apps/web/src/content/legal/extras-terms.tsx`), die Preisangabe/Umsatzsteuer, das Impressum und die Datenschutzerklärung sind sorgfältige Vorlagen, aber **keine Rechtsberatung**. Code: `apps/api/src/services/addons.service.ts`, `apps/api/src/payments/sumup.ts`, `packages/shared/src/addon-settings.ts`.
+
 ### Fair-Use-System für Discord-Bots
 
 | Regel | Standard | Was passiert |
@@ -202,6 +222,7 @@ Anmeldung wie gewohnt mit Code per E-Mail (`/login`), danach `/admin` aufrufen. 
   - *Verlauf nachtragen:* einen ganzen Zeitraum (von – bis) für eine oder alle Komponenten eintragen, z. B. die Zeit vor Beginn der Messung als „Betriebsbereit“ – wahlweise nur für Tage ohne Messdaten, damit gemessene Ausfälle erhalten bleiben
   - *Verlauf korrigieren:* einzelne Tage je Komponente von Hand festlegen (Fehlalarm ausbessern, Ausfall nachtragen)
 - **Pakete (unter Einstellungen):** je Paket Name, RAM, CPU, Speicher, Plätze – und die **Slots im Panel**: Backup-Slots (0–20), Datenbank-Slots (0–20) und Netzwerk-Slots/Ports (1–10). Neue Server bekommen die Werte sofort; mit „Slots auf bestehende Server übertragen“ gelten sie auch für alle vorhandenen Server des Pakets (RAM, CPU und Speicher bleiben dabei unverändert). Die Website zeigt Backups, Datenbanken und zusätzliche Ports in den Paketkarten. Zusätzliche Ports setzen im Panel „Automatic Allocation Creation“ voraus, Datenbanken einen Datenbank-Host.
+- **Extras:** kostenpflichtige Extras für kostenlose Server – Katalog mit Preisen, Buchungen, Zahlungen bestätigen, Aufgaben fürs Team, Einnahmen (siehe „Kostenpflichtige Extras“)
 - **Chat:** Support-Chat „Crafting AI“ ein/aus, API-Schlüssel für Claude (prüfen, löschen), Monatsbudget und Verbrauch, vorgefertigte Antworten, Zusatzwissen, Weitergabe an Mitarbeiter, die letzten Unterhaltungen mit Verlauf
 - **Server:** 50 pro Seite mit Blättern, Suche/Filter, Link ins Pterodactyl-Admin. Offene Anfragen zeigen, **worauf sie wirklich warten** (E-Mail-Bestätigung, Panel-Zugang, Discord-Verbindung, Discord-Beitritt) oder „Fehler: nicht erstellt“ – mit „Erneut versuchen“ prüft das System sofort noch einmal und erstellt den Server; zusätzlich holt ein Job offene Anfragen von Accounts mit Panel-Konto alle paar Minuten automatisch nach. Aktionen: +30 Tage, Pause aufheben, Sperren/Entsperren, Einrichtung erneut versuchen, Löschen
 - **Nutzer:** 50 pro Seite, Suche und Filter (E-Mail unbestätigt, ohne Server, auf der Warteliste, gesperrt, Admins), Panel-Konto, Sperren/Entsperren, Admin-Rechte und **Konten löschen**: einzeln, per Häkchen (Umschalt + Klick für ganze Bereiche, „alle auf dieser Seite“), **alle Treffer** von Suche/Filter über alle Seiten (Bestätigung mit „LÖSCHEN“, Fortschrittsanzeige) oder per eingefügter E-Mail-Liste. Gelöscht werden das Website-Konto und die kostenlosen Server; das Pterodactyl-Konto bleibt (dort können bezahlte Server liegen). Admins und das eigene Konto werden nie gelöscht.
@@ -328,6 +349,7 @@ Worker: `node dist/worker.js` (Produktion) bzw. `RUN_JOBS_IN_API=true` (Entwickl
 | `status-history` | 5 min | Status aller Komponenten speichern (Grundlage für die Tagesbalken und die Uptime der Statusseite) |
 | `discord-sync` | 2 min | Customer-Rolle auf dem Discord-Server abgleichen, Einladungslink stündlich prüfen |
 | `discord-join` | 5 min | Verknüpfte Discord-Konten automatisch dem Discord-Server hinzufügen: holt fehlgeschlagene Beitritte nach (Refresh-Token, verschlüsselt, nur bis zum Beitritt gespeichert; neuer Versuch alle 30 min) und markiert Konten ohne Erlaubnis als „muss einmal klicken“ |
+| `addons` | 60 s | Kostenpflichtige Extras: offene SumUp-Zahlungen nachfragen, unbezahlte Bestellungen verwerfen, vor Ablauf erinnern, abgelaufene Extras beenden (24/7 → frischer Zyklus), Buchungen gelöschter Server schließen |
 | `sync-panel` | 2 min | Status-Text in der Serverbeschreibung aktuell halten |
 | `provisioning-retry` | 2 min | fehlgeschlagene Anlagen mit Backoff wiederholen |
 | `notification-emails` | 30 s | E-Mail-Outbox mit Wiederholungen |

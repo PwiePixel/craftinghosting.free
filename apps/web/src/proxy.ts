@@ -12,7 +12,7 @@ const API = (process.env.API_INTERNAL_URL ?? 'http://localhost:4000').replace(/\
  * Status und Rechtstexte. Gesperrt ist nur das Registrieren bzw. Anfordern neuer Server (/start) –
  * Startseite und FAQ zeigen die Wartungsseite.
  */
-const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'account', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'donate', 'newsletter']);
+const OPEN_DURING_MAINTENANCE = new Set<RouteKey>(['login', 'verify', 'myServers', 'account', 'status', 'imprint', 'privacy', 'terms', 'rules', 'cookies', 'discordTerms', 'extrasTerms', 'donate', 'newsletter']);
 
 /* ------------------------------------------------------------ Wartungsmodus */
 

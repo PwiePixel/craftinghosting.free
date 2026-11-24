@@ -7,7 +7,7 @@ import { pageMetadata } from '@/lib/seo';
 import { getSite } from '@/lib/site-settings';
 import { operator } from './operator';
 
-type LegalKey = 'imprint' | 'privacy' | 'terms' | 'rules' | 'cookies' | 'discordTerms';
+type LegalKey = 'imprint' | 'privacy' | 'terms' | 'rules' | 'cookies' | 'discordTerms' | 'extrasTerms';
 type Props = { params: Promise<{ lang: string }> };
 /** Rechtstexte bekommen die aktuellen Einstellungen (z. B. Server pro Person) */
 export type LegalContent = ComponentType<{ site: PublicSiteDTO }>;

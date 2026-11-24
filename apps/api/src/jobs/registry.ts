@@ -5,6 +5,7 @@ import { discordSocialJob } from './discord-social.job';
 import { discordStatusFeedJob } from './discord-status-feed.job';
 import { discordSyncJob } from './discord-sync.job';
 import { discordJoinJob } from './discord-join.job';
+import { addonsJob } from './addons.job';
 import { enforceFairUseJob } from './enforce-fair-use.job';
 import { newsletterJob } from './newsletter.job';
 import { notificationEmailsJob } from './notification-emails.job';
@@ -39,6 +40,7 @@ export const allJobs: JobDefinition[] = [
   statusHistoryJob,
   discordSyncJob,
   discordJoinJob,
+  addonsJob,
   discordStatusFeedJob,
   discordRewardsJob,
   discordSocialJob,

@@ -81,7 +81,7 @@ export function ReactivateButton({ server }: { server: ServerDTO }) {
           }
         }}
       >
-        {server.cycle.unlimited ? t.reactivateBot : t.reactivate}
+        {server.kind === 'discord' ? t.reactivateBot : t.reactivate}
       </Button>
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>

@@ -48,7 +48,7 @@ import { notify } from './notification.service';
 import { panelServerUrl, trySyncPanelDescription } from './panel';
 import { closeOpenSession } from './power-state';
 import { provisionServer } from './provisioning.service';
-import { computeRuntimeState, loadWeekSessions } from './runtime';
+import { computeRuntimeState, cycleEndForServer, fairUseFor, loadWeekSessions } from './runtime';
 import { capacityState, getSettings, publicPlan, serverTypeAvailable, waitlistRank } from './settings.service';
 import { confirmWaitlist, hasWaitlistEntry } from './waitlist.service';
 
@@ -66,7 +66,7 @@ export interface ServerConfigInput {
 
 export async function toServerDTO(server: Server, user: User, now = new Date()): Promise<ServerDTO> {
   const settings = await getSettings();
-  const fairUseEnabled = settings.products[server.kind].fairUse;
+  const fairUseEnabled = fairUseFor(server, settings);
   const sessions = await loadWeekSessions(server.id, now);
   const state = computeRuntimeState(server, user, sessions, now, fairUseEnabled);
   const plan = findPlan(settings, server.planId);
@@ -76,6 +76,7 @@ export async function toServerDTO(server: Server, user: User, now = new Date()):
     name: server.name,
     kind: server.kind,
     fairUseEnabled,
+    alwaysOn: !!server.alwaysOnSince,
     planId: server.planId,
     planName: plan?.name ?? server.planId,
     serverType: server.serverType,
@@ -492,7 +493,7 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
       pausedAt: null,
       cycleNumber: server.cycleNumber + 1,
       cycleStartedAt: now,
-      cycleEndsAt: cycleEndFor(server.kind, now, cycleRules),
+      cycleEndsAt: cycleEndForServer(server, now, cycleRules),
       reactivationCount: server.reactivationCount + 1,
       lastReactivatedAt: now,
       // Die Offline-Zeit zählt ab jetzt neu – sonst würde ein inaktiver Bot sofort wieder freigegeben

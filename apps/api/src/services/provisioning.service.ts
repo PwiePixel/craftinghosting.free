@@ -25,7 +25,7 @@ import { getSettings } from './settings.service';
 import { directoryName, pendingSoftwareJob } from './software-directory';
 import { INSTALLER_VARIABLE, SETUP_STARTUP, installerStartup, resolveSoftware } from './partner-software.service';
 import { inTimeout } from './sanction-gate';
-import { computeRuntimeState, loadWeekSessions } from './runtime';
+import { computeRuntimeState, fairUseFor, loadWeekSessions } from './runtime';
 
 export const MAX_PROVISIONING_ATTEMPTS = 5;
 
@@ -270,7 +270,7 @@ export async function provisionServer(serverId: string, actor: 'user' | 'system'
 
     const ptero = pterodactyl();
     const externalId = `${pterodactylConfig.externalIdPrefix.server}${server.id}`;
-    const description = desiredPanelDescription({ ...server, status: 'active' }, new Date(), await getUserLocale(server.userId), settings.products[server.kind].fairUse);
+    const description = desiredPanelDescription({ ...server, status: 'active' }, new Date(), await getUserLocale(server.userId), fairUseFor(server, settings));
 
     let pServer = await ptero.findServerByExternalId(externalId);
     // Minecraft-EULA: nur mit Zustimmung beim Bestellen; Partner bestätigen sie beim Start über die API
@@ -411,7 +411,7 @@ async function autoStart(server: Server): Promise<boolean> {
   if (!user || user.status !== 'active' || inTimeout(user)) return false;
   const settings = await getSettings();
   const now = new Date();
-  const { startGate } = computeRuntimeState({ ...server, powerState: 'offline' }, user, await loadWeekSessions(server.id, now), now, settings.products[server.kind].fairUse);
+  const { startGate } = computeRuntimeState({ ...server, powerState: 'offline' }, user, await loadWeekSessions(server.id, now), now, fairUseFor(server, settings));
   if (!startGate.allowed) return false;
   try {
     const ptero = pterodactyl();

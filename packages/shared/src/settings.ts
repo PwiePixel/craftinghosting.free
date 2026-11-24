@@ -20,6 +20,7 @@ import type {
 } from './api-types';
 import { DIRECTORY_NOT_GAME_SERVERS, builtinServerTypes, freeHostingConfig, getServerType, productKinds, type PlanConfig, type ProductKind, type ServerTypeConfig, type SoftwareInstall } from './config/freehosting.config';
 import { defaultChatSettings, normalizeChatSettings } from './chat-settings';
+import { defaultAddonSettings, normalizeAddonSettings } from './addon-settings';
 import { defaultDiscordSettings, normalizeDiscordSettings } from './discord-settings';
 import type { Locale, Localized } from './i18n';
 import { defaultStatusSettings, normalizeStatusSettings } from './status-settings';
@@ -261,6 +262,7 @@ export function defaultSiteSettings(): SiteSettings {
     seo: { title: { de: '', en: '' }, description: { de: '', en: '' }, indexing: true, summary: { de: '', en: '' } },
     discord: defaultDiscordSettings(),
     chat: defaultChatSettings(),
+    addons: defaultAddonSettings(),
     branding: { logoMode: 'icon' },
     botFairUse: {
       enabled: true,
@@ -663,6 +665,7 @@ export function normalizeSiteSettings(input: unknown): SiteSettings {
     },
     discord: normalizeDiscordSettings(i.discord),
     chat: normalizeChatSettings(i.chat),
+    addons: normalizeAddonSettings(i.addons),
     branding: { logoMode: obj(i.branding).logoMode === 'full' ? 'full' : 'icon' },
     seo: {
       title: loose(seo.title, 90),

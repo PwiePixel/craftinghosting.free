@@ -17,7 +17,7 @@ import { pterodactyl } from '../pterodactyl';
 import { audit } from '../services/audit.service';
 import { notify } from '../services/notification.service';
 import { fmtDateTime, minutesText, sayOnce, trySyncPanelDescription, warningStep } from '../services/panel';
-import { computeRuntimeState, isOnline, loadWeekSessions } from '../services/runtime';
+import { computeRuntimeState, fairUseFor, isOnline, loadWeekSessions } from '../services/runtime';
 import { getSettings } from '../services/settings.service';
 import { mapLimit, type JobDefinition } from './types';
 
@@ -92,14 +92,14 @@ export const enforceFairUseJob: JobDefinition = {
       .where(and(eq(servers.status, 'active'), or(inArray(servers.powerState, ['starting', 'running', 'stopping']), isNotNull(servers.pausedUntil))));
     // Produkte ohne Fair-Use-System (z. B. Discord-Bots im Dauerbetrieb) werden übersprungen – offene Pausen laufen aber noch aus
     // Server der Partner-API haben eigene Laufzeit-Regeln (partner-sessions) und sind hier ausgenommen
-    const rows = all.filter(({ server }) => !server.partnerId && (settings.products[server.kind].fairUse || server.pausedUntil !== null));
+    const rows = all.filter(({ server }) => !server.partnerId && (fairUseFor(server, settings) || server.pausedUntil !== null));
 
     const stats = { checked: 0, sessionLimit: 0, weeklyOffline: 0, pauseViolations: 0, warnings: 0, chat: 0, pausesCleared: 0 };
 
     await mapLimit(rows, 5, async ({ server, user }) => {
       stats.checked++;
       const sessions = await loadWeekSessions(server.id, now);
-      const { fairUse, openSession } = computeRuntimeState(server, user, sessions, now, settings.products[server.kind].fairUse);
+      const { fairUse, openSession } = computeRuntimeState(server, user, sessions, now, fairUseFor(server, settings));
 
       // Abgelaufene Pause aufräumen (+ Panel-Beschreibung zurücksetzen)
       if (server.pausedUntil && server.pausedUntil <= now) {

@@ -36,7 +36,7 @@ function statusInfo(s: ServerDTO, t: Dictionary['my']['status']): { tone: 'green
     case 'expiring':
       return { tone: 'amber', label: t.expiring };
     case 'suspended':
-      return { tone: 'red', label: s.suspensionReason === 'warning' ? t.lockedWarning : s.suspensionReason === 'ban' ? t.lockedBan : s.suspensionReason !== 'cycle_expired' ? t.locked : s.cycle.unlimited ? t.released : t.expired };
+      return { tone: 'red', label: s.suspensionReason === 'warning' ? t.lockedWarning : s.suspensionReason === 'ban' ? t.lockedBan : s.suspensionReason !== 'cycle_expired' ? t.locked : s.kind === 'discord' ? t.released : t.expired };
     default:
       if (s.powerState === 'installing') return { tone: 'blue', label: t.installing };
       if (s.fairUse.isPaused) return { tone: 'amber', label: t.paused };
@@ -78,9 +78,10 @@ function ServerBanner({ kind, tone, label }: { kind: ServerDTO['kind']; tone: 'g
   );
 }
 
-function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null }) {
+function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl, extras }: { s: ServerDTO; lang: Locale; twoTiers: boolean; cpus: string; waitingForDiscord: boolean; discordUrl: string | null; /** Extras werden angeboten */ extras: boolean }) {
   const d = getDict(lang);
   const t = d.my;
+  const x = d.extras;
   const fmt = formatters(lang);
   // Panel-Zugang ist da, aber die Discord-Mitgliedschaft fehlt noch
   const discordWait = waitingForDiscord && s.status === 'pending';
@@ -132,6 +133,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
         <p className="mt-1 text-[13px] text-subtle">
           {s.serverTypeName}
           {s.kind === 'minecraft' && <> {s.version === 'latest' ? d.common.latestShort : s.version}</>} · {s.planName}
+          {s.alwaysOn && <span className="ml-2 rounded bg-emerald-500 px-1.5 py-0.5 text-[11px] font-medium tracking-[0.06em] text-white">{x.badge247}</span>}
         </p>
         {s.address && (
           <div className="mt-2">
@@ -161,7 +163,7 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
         {s.status === 'suspended' && s.suspensionReason === 'cycle_expired' ? (
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="max-w-md text-sm leading-relaxed text-muted">
-              {s.cycle.unlimited ? t.releasedText : t.expiredText}
+              {s.kind === 'discord' ? t.releasedText : t.expiredText}
               {s.reactivation.reason === 'cooldown' && s.reactivation.until && (
                 <>
                   {' '}
@@ -211,8 +213,8 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
               {s.cycle.unlimited ? (
                 <>
                   {/* Discord-Bots: kein 30-Tage-Zyklus, kein Ruhetag */}
-                  <p className="mt-0.5 text-sm text-gray-100">{t.noEnd}</p>
-                  <p className="mt-0.5 text-[13px] text-subtle">{t.noEndHint}</p>
+                  <p className="mt-0.5 text-sm text-gray-100">{s.alwaysOn ? x.alwaysOnRuntime : t.noEnd}</p>
+                  <p className="mt-0.5 text-[13px] text-subtle">{s.alwaysOn ? x.alwaysOnRuntimeHint : t.noEndHint}</p>
                 </>
               ) : (
                 <>
@@ -233,6 +235,8 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
                   ? f.pauseReason === 'cpu_overload'
                     ? t.cpuPause(fmt.dateTime(f.pausedUntil))
                     : t.pausedUntil(fmt.dateTime(f.pausedUntil))
+                  : s.alwaysOn
+                    ? x.alwaysOnFairUse
                   : !s.fairUseEnabled
                     ? t.alwaysOn
                   : f.online && f.autoStopAt
@@ -241,7 +245,16 @@ function ServerCard({ s, lang, twoTiers, cpus, waitingForDiscord, discordUrl }: 
                       ? t.weeklyDone
                       : t.weeklyLeft(fmt.duration(f.weeklyOfflineRemainingSeconds, { maxUnits: 1 }))}
               </p>
-              <p className="mt-0.5 text-[13px] text-subtle">{s.fairUseEnabled ? t.rulesShort : t.alwaysOnHint}</p>
+              <p className="mt-0.5 text-[13px] text-subtle">{s.alwaysOn ? x.alwaysOnFairUseHint : s.fairUseEnabled ? t.rulesShort : t.alwaysOnHint}</p>
+              {/* Im Moment der Pause: Hinweis auf das Extra „24/7“ (nur wenn es angeboten wird) */}
+              {extras && manageable && s.fairUseEnabled && f.isPaused && f.pauseReason !== 'cpu_overload' && (
+                <p className="mt-2 text-[13px] text-blue-300">
+                  {x.upsellPaused}{' '}
+                  <Link prefetch={false} href={`${serverPagePath(lang, s.id)}#extras`} className="underline underline-offset-4 hover:text-white">
+                    {x.upsellLink}
+                  </Link>
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -415,7 +428,7 @@ export default async function MyServersPage({ params, searchParams }: Props) {
           {servers.length > 0 && (
             <div className="grid auto-rows-fr gap-5 md:grid-cols-2 2xl:grid-cols-3">
               {servers.map((s) => (
-                <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} />
+                <ServerCard key={s.id} s={s} lang={lang} twoTiers={x.twoTiers} cpus={x.cpus} waitingForDiscord={user.panelLinked && !!discordMe?.blocked} discordUrl={settings.discord.inviteUrl ?? settings.brand.discordUrl ?? null} extras={settings.addons.enabled} />
               ))}
             </div>
           )}

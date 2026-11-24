@@ -223,6 +223,13 @@ export const servers = sqliteTable(
     nodeTier: text('node_tier', { enum: ['epyc', 'xeon'] }),
     /** Zuletzt im Panel gesetzte Server-Beschreibung (Status-Anzeige in Pterodactyl) */
     panelDescription: text('panel_description'),
+    /**
+     * Extra „24/7“ aktiv (seit wann): keine Fair-Use-Pausen, kein 30-Tage-Zyklus. Gesetzt und geleert ausschließlich
+     * von der Buchungs-Logik (services/addons.service.ts) – zusammen mit cycleEndsAt = NO_CYCLE_END.
+     */
+    alwaysOnSince: ts('always_on_since'),
+    /** Fair-Use zählt erst ab hier (fairer Neustart nach dem Ende von „24/7“: Laufzeit davor zählt nicht mit) */
+    fairUseResetAt: ts('fair_use_reset_at'),
 
     createdAt: ts('created_at').notNull().$defaultFn(now),
     updatedAt: ts('updated_at').notNull().$defaultFn(now).$onUpdateFn(now),
@@ -425,6 +432,87 @@ export const dedupeMarks = sqliteTable('dedupe_marks', {
 });
 
 /* ------------------------------------------------------------------- jobs */
+
+/* ---------------------------------------------------------------- Extras (kostenpflichtige Add-ons) */
+
+/**
+ * Gebuchte Extras je Server. Bezahlt wird im Voraus für eine Laufzeit; „paidUntil“ sagt, bis wann. Eine Zeile bleibt
+ * über Verlängerungen hinweg dieselbe – die einzelnen Zahlungen stehen in addon_payments.
+ */
+export const serverAddons = sqliteTable(
+  'server_addons',
+  {
+    id: text('id').primaryKey(),
+    /** Kurzer Verwendungszweck für Zahlungen, z. B. CH-7KQ2M9 */
+    ref: text('ref').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    /** ID im Katalog (Einstellungen) – Name, Wirkung, Preis und Laufzeit sind hier als Stand der Buchung festgehalten */
+    addonId: text('addon_id').notNull(),
+    name: text('name', { mode: 'json' }).$type<{ de: string; en: string }>().notNull(),
+    icon: text('icon').notNull().default('plus'),
+    effect: text('effect', { enum: ['always_on', 'manual'] }).notNull(),
+    priceCents: integer('price_cents').notNull(),
+    periodDays: integer('period_days').notNull(),
+    /** pending = bestellt, noch nicht bezahlt · active = läuft · ended = abgelaufen, beendet oder verworfen */
+    status: text('status', { enum: ['pending', 'active', 'ended'] }).notNull().default('pending'),
+    /** Bezahlt bis (null = unbefristet bzw. noch nicht bezahlt) */
+    paidUntil: ts('paid_until'),
+    /** Kunde möchte verlängern (Zahlung angekündigt) */
+    renewalRequestedAt: ts('renewal_requested_at'),
+    /** Laufende Zahlung über SumUp: ID und Adresse der Bezahlseite, Zähler für eindeutige Referenzen */
+    checkoutId: text('checkout_id'),
+    checkoutUrl: text('checkout_url'),
+    checkoutAt: ts('checkout_at'),
+    checkoutCount: integer('checkout_count').notNull().default(0),
+    /** Aufgabe für das Team bei Extras, die von Hand eingerichtet werden: todo → done; nach dem Ende: revoke → none */
+    fulfilment: text('fulfilment', { enum: ['none', 'todo', 'done', 'revoke'] }).notNull().default('none'),
+    /** Zustimmung zu den Bedingungen und zum Beginn vor Ablauf der Widerrufsfrist */
+    consentAt: ts('consent_at'),
+    endReason: text('end_reason', { enum: ['expired', 'unpaid', 'canceled', 'admin', 'server_deleted', 'refunded'] }),
+    adminNote: text('admin_note'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+    activatedAt: ts('activated_at'),
+    endedAt: ts('ended_at'),
+  },
+  (t) => [
+    uniqueIndex('server_addons_ref_uq').on(t.ref),
+    uniqueIndex('server_addons_checkout_uq').on(t.checkoutId),
+    index('server_addons_server_idx').on(t.serverId, t.status),
+    index('server_addons_status_idx').on(t.status, t.paidUntil),
+    index('server_addons_user_idx').on(t.userId),
+  ],
+);
+
+/**
+ * Eingegangene Zahlungen für Extras (Buchhaltung). Bewusst ohne Fremdschlüssel: Die Einträge bleiben erhalten, auch
+ * wenn Konto oder Server gelöscht werden (Aufbewahrungspflichten) – deshalb ohne E-Mail-Adresse.
+ */
+export const addonPayments = sqliteTable(
+  'addon_payments',
+  {
+    id: text('id').primaryKey(),
+    serverAddonId: text('server_addon_id').notNull(),
+    ref: text('ref').notNull(),
+    userId: text('user_id').notNull(),
+    serverId: text('server_id').notNull(),
+    addonId: text('addon_id').notNull(),
+    addonName: text('addon_name').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    periodDays: integer('period_days').notNull(),
+    /** manual = vom Team bestätigt · sumup = automatisch bestätigt · admin = kostenlos vom Team vergeben (0 €) */
+    provider: text('provider', { enum: ['manual', 'sumup', 'admin'] }).notNull(),
+    /** ID der Zahlung beim Anbieter (SumUp-Checkout) – jede Zahlung zählt nur einmal */
+    providerRef: text('provider_ref'),
+    confirmedBy: text('confirmed_by'),
+    createdAt: ts('created_at').notNull().$defaultFn(now),
+  },
+  (t) => [uniqueIndex('addon_payments_provider_ref_uq').on(t.providerRef), index('addon_payments_addon_idx').on(t.serverAddonId), index('addon_payments_created_idx').on(t.createdAt)],
+);
 
 /** Verwarnungen eines Nutzers (Verwarnungs-System) */
 export const userWarnings = sqliteTable(
@@ -687,6 +775,7 @@ export const statusChecks = sqliteTable(
 export type User = typeof users.$inferSelect;
 export type UserWarning = typeof userWarnings.$inferSelect;
 export type Server = typeof servers.$inferSelect;
+export type ServerAddon = typeof serverAddons.$inferSelect;
 export type ServerSession = typeof serverSessions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type InviteReward = typeof inviteRewards.$inferSelect;

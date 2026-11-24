@@ -6,6 +6,7 @@ import { localePath, serverPagePath, type ServerDetailDTO } from '@chfree/shared
 import { CopyText } from '@/components/my/client-bits';
 import { ServerManager } from '@/components/my/server-manage';
 import { Alert } from '@/components/ui/primitives';
+import { getSite } from '@/lib/site-settings';
 import { getDict, resolveLang } from '@/i18n';
 import { apiServer, requireUser } from '@/lib/api/server';
 import { pageMetadata } from '@/lib/seo';
@@ -27,6 +28,8 @@ export default async function ServerPage({ params }: Props) {
   const d = getDict(lang);
   await requireUser(lang, 'myServers', serverPagePath(lang, id));
   const res = await apiServer<ServerDetailDTO>(`/servers/${id}`, lang);
+  // Extras-Reiter: wenn Extras angeboten werden – oder für diesen Server noch eines läuft
+  const extras = (await getSite()).addons.enabled;
   if (!res.ok && res.status === 404) notFound();
 
   return (
@@ -53,7 +56,7 @@ export default async function ServerPage({ params }: Props) {
                 </div>
               )}
             </div>
-            <ServerManager initial={res.data} />
+            <ServerManager initial={res.data} extras={extras || res.data.server.alwaysOn} />
           </>
         )}
       </div>

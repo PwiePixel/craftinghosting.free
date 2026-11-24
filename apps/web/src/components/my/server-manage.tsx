@@ -27,6 +27,7 @@ import {
   Trash2,
   Eraser,
   Plus,
+  Sparkles,
 } from 'lucide-react';
 import { formatDateTime, formatDuration, formatMb, freeHostingConfig, type ServerDetailDTO, type ServerLiveDTO, type ServerPowerAction } from '@chfree/shared';
 import { Button } from '@/components/ui/button';
@@ -35,9 +36,10 @@ import { useDict, useLang } from '@/i18n/client';
 import { api, ApiClientError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import { AreaChart, Meter, type Sample } from './usage';
+import { ServerAddons } from './server-addons';
 
 type Live = ServerLiveDTO;
-type View = 'dashboard' | 'console' | 'ports';
+type View = 'dashboard' | 'console' | 'ports' | 'extras';
 const MAX_LINES = 600;
 const HISTORY = 60; // 5 Minuten bei 5 Sekunden Abstand
 const LIVE_EVERY_MS = 5000;
@@ -81,7 +83,7 @@ function useVisibleInterval(fn: () => void, ms: number, enabled = true) {
   }, [ms, enabled]);
 }
 
-export function ServerManager({ initial }: { initial: ServerDetailDTO }) {
+export function ServerManager({ initial, extras = false }: { initial: ServerDetailDTO; /** Extras (kostenpflichtige Add-ons) sind eingeschaltet */ extras?: boolean }) {
   const dict = useDict();
   const t = dict.manage;
   const lang = useLang();
@@ -104,7 +106,7 @@ export function ServerManager({ initial }: { initial: ServerDetailDTO }) {
   useEffect(() => {
     const fromHash = () => {
       const h = window.location.hash.replace('#', '');
-      setView(h === 'ports' ? 'ports' : h === 'dashboard' ? 'dashboard' : 'console');
+      setView(h === 'ports' ? 'ports' : h === 'dashboard' ? 'dashboard' : h === 'extras' ? 'extras' : 'console');
     };
     fromHash();
     window.addEventListener('hashchange', fromHash);
@@ -167,7 +169,10 @@ export function ServerManager({ initial }: { initial: ServerDetailDTO }) {
     { key: 'dashboard', label: t.tabs.dashboard, icon: <LayoutDashboard className="size-4" aria-hidden /> },
     { key: 'console', label: t.tabs.console, icon: <SquareTerminal className="size-4" aria-hidden /> },
   ];
-  const manageNav: { key: View; label: string; icon: ReactNode }[] = [{ key: 'ports', label: t.tabs.ports, icon: <Cable className="size-4" aria-hidden /> }];
+  const manageNav: { key: View; label: string; icon: ReactNode }[] = [
+    { key: 'ports', label: t.tabs.ports, icon: <Cable className="size-4" aria-hidden /> },
+    ...(extras ? [{ key: 'extras' as const, label: t.tabs.extras, icon: <Sparkles className="size-4" aria-hidden /> }] : []),
+  ];
   const panelLinks = s.panelUrl
     ? [
         { href: `${s.panelUrl.replace(/\/$/, '')}/files`, label: t.files, icon: <FolderOpen className="size-4" aria-hidden /> },
@@ -275,6 +280,8 @@ export function ServerManager({ initial }: { initial: ServerDetailDTO }) {
         {active && view === 'dashboard' && <Dashboard detail={detail} live={live} cpu={cpu} mem={mem} />}
         {active && view === 'console' && !installing && <Console key={`${id}-${installing}`} id={id} online={online} />}
         {active && view === 'ports' && <Ports id={id} />}
+        {/* Extras gibt es auch, wenn der Server gerade ruht – „24/7“ holt ihn zurück */}
+        {extras && view === 'extras' && <ServerAddons id={id} serverName={s.name} />}
       </div>
     </div>
   );
@@ -310,8 +317,8 @@ function Dashboard({ detail, live, cpu, mem }: { detail: ServerDetailDTO; live: 
     [t.infoAddress, s.address ?? '–'],
     [t.infoSoftware, `${s.serverTypeName}${s.kind === 'minecraft' ? ` ${s.version === 'latest' ? dict.common.latestShort : s.version}` : ''}`],
     [t.infoPlan, s.planName],
-    [t.infoRuntime, s.cycle.unlimited ? my.noEnd : my.activeUntil(formatDateTime(s.cycle.endsAt, tz, lang), s.cycle.secondsRemaining < 2 * 86400 ? formatDuration(s.cycle.secondsRemaining, {}, lang) : my.days(s.cycle.daysRemaining))],
-    [t.infoFairUse, !s.fairUseEnabled ? my.alwaysOn : f.pausedUntil ? my.pausedUntil(formatDateTime(f.pausedUntil, tz, lang)) : f.online && f.autoStopAt ? my.autoStop(formatDateTime(f.autoStopAt, tz, lang)) : my.rulesShort],
+    [t.infoRuntime, s.alwaysOn ? dict.extras.alwaysOnRuntime : s.cycle.unlimited ? my.noEnd : my.activeUntil(formatDateTime(s.cycle.endsAt, tz, lang), s.cycle.secondsRemaining < 2 * 86400 ? formatDuration(s.cycle.secondsRemaining, {}, lang) : my.days(s.cycle.daysRemaining))],
+    [t.infoFairUse, s.alwaysOn ? dict.extras.alwaysOnFairUse : !s.fairUseEnabled ? my.alwaysOn : f.pausedUntil ? my.pausedUntil(formatDateTime(f.pausedUntil, tz, lang)) : f.online && f.autoStopAt ? my.autoStop(formatDateTime(f.autoStopAt, tz, lang)) : my.rulesShort],
   ];
   return (
     <div className="space-y-5">

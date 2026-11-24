@@ -38,6 +38,7 @@ import { NewsletterManager } from '@/components/admin/admin-newsletter';
 import { PanelManager } from '@/components/admin/admin-panel';
 import { PRODUCT_LABEL, PRODUCT_SHORT } from '@/components/admin/admin-labels';
 import { MaintenanceQuickToggle, SettingsForm } from '@/components/admin/admin-settings';
+import { AddonsAdmin } from '@/components/admin/admin-addons';
 import { ChatAdmin } from '@/components/admin/admin-chat';
 import { AbuseManager, AdminMessageForm, DiscordJoinReminder, DiscordReminder, PanelReminder } from '@/components/admin/admin-mails';
 import { site } from '@/lib/site';
@@ -79,6 +80,7 @@ const TABS = [
   { id: 'domains', label: 'Domains' },
   { id: 'discord', label: 'Discord' },
   { id: 'chat', label: 'Chat' },
+  { id: 'extras', label: 'Extras' },
   { id: 'newsletter', label: 'Newsletter' },
   { id: 'waitlist', label: 'Warteliste' },
   { id: 'status', label: 'Statusseite' },
@@ -387,6 +389,23 @@ function OverviewTab({ o, settings, fmt, panel }: { o: AdminOverviewDTO; setting
             <Stat label={o.system.adminEmailsConfigured ? `Admins (+${o.system.adminEmailsConfigured} per .env)` : 'Admins'} value={o.users.admins} />
           </div>
         </Card>
+        {(o.addons.enabled || o.addons.active > 0 || o.addons.awaitingPayment > 0 || o.addons.tasks > 0) && (
+          <Card title="Extras">
+            <div className="grid grid-cols-3 gap-4">
+              <Stat label="aktiv" value={o.addons.active} />
+              <Stat label="Zahlung offen" value={o.addons.awaitingPayment} />
+              <Stat label="Aufgaben" value={o.addons.tasks} tone={o.addons.tasks ? 'amber' : undefined} />
+            </div>
+            {o.addons.tasks > 0 && (
+              <p className="mt-4 text-sm text-amber-200">
+                Bezahlte Extras warten auf die Einrichtung.{' '}
+                <Link prefetch={false} href={`${base}?tab=extras`} className="underline underline-offset-4 hover:text-white">
+                  Zu den Extras
+                </Link>
+              </p>
+            )}
+          </Card>
+        )}
         <Card title="Server">
           <div className="grid grid-cols-3 gap-4">
             <Stat label="aktiv" value={s.active ?? 0} />
@@ -855,7 +874,7 @@ export default async function AdminPage({ params, searchParams }: Props) {
 
   let content: React.ReactNode = null;
   let failed = overview ? !overview.ok : false;
-  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist' || tab === 'newsletter' || tab === 'discord' || tab === 'chat';
+  const needsSettings = tab === 'overview' || tab === 'settings' || tab === 'status' || tab === 'waitlist' || tab === 'newsletter' || tab === 'discord' || tab === 'chat' || tab === 'extras';
   const settingsRes = needsSettings ? await apiServer<{ settings: SiteSettings }>('/admin/settings', lang) : null;
   const settings = settingsRes?.ok ? settingsRes.data.settings : null;
 
@@ -879,6 +898,10 @@ export default async function AdminPage({ params, searchParams }: Props) {
     const res = await apiServer<{ chat: AdminChatDTO }>('/admin/chat', lang);
     failed = !res.ok || !settings;
     if (res.ok && settings) content = <ChatAdmin settings={settings} status={res.data.chat} />;
+  }
+  if (tab === 'extras') {
+    failed = !settings;
+    if (settings) content = <AddonsAdmin settings={settings} />;
   }
   if (tab === 'newsletter') content = <NewsletterManager enabled={settings?.newsletter.enabled ?? true} />;
   if (tab === 'waitlist') {

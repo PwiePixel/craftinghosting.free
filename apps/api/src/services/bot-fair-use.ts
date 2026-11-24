@@ -159,6 +159,8 @@ async function checkCpuLoad(server: Server, res: PteroResources, now: Date, rule
 
 async function checkInactivity(server: Server, now: Date, rules: BotFairUseSettings): Promise<boolean> {
   if (rules.inactiveDays <= 0 || server.powerState !== 'offline' || !server.powerStateAt) return false;
+  // Mit dem Extra „24/7“ wird ein Bot nicht wegen Inaktivität freigegeben
+  if (server.alwaysOnSince) return false;
   // Während einer Fair-Use-Pause kann der Bot nicht laufen – das zählt nicht als Inaktivität
   if (server.pausedUntil && server.pausedUntil > now) return false;
   const offlineMs = now.getTime() - server.powerStateAt.getTime();

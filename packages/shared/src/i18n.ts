@@ -67,6 +67,9 @@ export const routes = {
   /** Nutzungsbedingungen für das Discord-Bot-Hosting */
   discordTerms: { en: '/discord-bot/terms-of-use', de: '/de/discord-bot/nutzungsbedingungen', internal: 'discord-bot/nutzungsbedingungen' },
   donate: { en: '/donate', de: '/de/spenden', internal: 'spenden' },
+  /** Kostenpflichtige Extras: Übersicht und Bedingungen samt Widerrufsbelehrung */
+  extras: { en: '/extras', de: '/de/extras', internal: 'extras' },
+  extrasTerms: { en: '/extras-terms', de: '/de/extras-bedingungen', internal: 'extras-bedingungen' },
   newsletter: { en: '/newsletter', de: '/de/newsletter', internal: 'newsletter' },
   /** Beta-Programm: Bestätigungsseite auf der Hauptseite (nur für freigeschaltete Nutzer) */
   beta: { en: '/beta', de: '/de/beta', internal: 'beta' },

@@ -173,6 +173,19 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
           Abwicklung der Spende, für die Buchführung und für Erstattungen (Art. 6 Abs. 1 lit. b und f DSGVO) und bewahren sie im Rahmen der gesetzlichen Aufbewahrungsfristen
           auf.
         </p>
+        {site.addons.enabled && (
+          <>
+            <h3>Kostenpflichtige Extras</h3>
+            <p>
+              Buchst du ein kostenpflichtiges Extra für einen Server, speichern wir die Bestellung: welches Extra, für welchen Server, Preis, Laufzeit, Zeitpunkt, deine
+              Zustimmung zu den Bedingungen und den Verwendungszweck. Bezahlt wird über SumUp (Anschrift siehe oben); du gibst deine Zahlungsdaten ausschließlich dort
+              ein. SumUp verarbeitet sie als eigenständiger Verantwortlicher. Wir erhalten von SumUp nur die Kennung der Zahlung, ihren Status, den Betrag und die
+              Währung – keine Kartendaten. Diese Daten brauchen wir, um den Vertrag zu erfüllen (Art. 6 Abs. 1 lit. b DSGVO). Zahlungsbelege (Betrag, Datum, Extra,
+              Kennung der Zahlung) bewahren wir so lange auf, wie es die handels- und steuerrechtlichen Aufbewahrungsfristen verlangen (Art. 6 Abs. 1 lit. c DSGVO) –
+              auch dann, wenn du dein Konto vorher löschst.
+            </p>
+          </>
+        )}
       </section>
 
       <section>
@@ -196,7 +209,7 @@ export function PrivacyDe({ site }: { site: PublicSiteDTO }) {
         <h2>10. Empfänger, Drittländer und automatisierte Entscheidungen</h2>
         <p>
           Wir geben deine Daten nicht an Dritte weiter, außer wir sind gesetzlich dazu verpflichtet. Eine Übermittlung in Länder außerhalb der EU findet nicht statt. Bei
-          Spenden verarbeitet SumUp deine Zahlungsdaten in eigener Verantwortung (Abschnitt 7). Das
+          Spenden{site.addons.enabled ? ' und kostenpflichtigen Extras' : ''} verarbeitet SumUp deine Zahlungsdaten in eigener Verantwortung (Abschnitt 7). Das
           Fair-Use-System stoppt Server automatisch nach festen, für alle gleichen Regeln; eine automatisierte Entscheidung mit rechtlicher Wirkung im Sinne von Art. 22 DSGVO
           findet nicht statt.
         </p>
@@ -356,6 +369,18 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
           amount and the payer’s name as provided by SumUp – no card data. We use this information to process the donation, for bookkeeping and for refunds (Art. 6 (1) (b)
           and (f) GDPR) and keep it for the statutory retention periods.
         </p>
+        {site.addons.enabled && (
+          <>
+            <h3>Paid extras</h3>
+            <p>
+              If you book a paid extra for a server, we store the order: which extra, for which server, price, term, time, your consent to the terms and the payment
+              reference. Payment is made via SumUp (address above); you enter your payment details only there. SumUp processes them as an independent controller. We
+              receive from SumUp only the identifier of the payment, its status, the amount and the currency – no card data. We need this data to perform the contract
+              (Art. 6 (1) (b) GDPR). We keep payment records (amount, date, extra, payment identifier) for as long as required by commercial and tax retention periods
+              (Art. 6 (1) (c) GDPR) – even if you delete your account before then.
+            </p>
+          </>
+        )}
       </section>
 
       <section>
@@ -378,7 +403,7 @@ export function PrivacyEn({ site }: { site: PublicSiteDTO }) {
       <section>
         <h2>10. Recipients, third countries and automated decisions</h2>
         <p>
-          We do not pass on your data to third parties unless we are legally obliged to do so. There is no transfer to countries outside the EU. For donations, SumUp
+          We do not pass on your data to third parties unless we are legally obliged to do so. There is no transfer to countries outside the EU. For donations{site.addons.enabled ? ' and paid extras' : ''}, SumUp
           processes your payment data under its own responsibility (section 7). The fair-use system stops
           servers automatically according to fixed rules that are the same for everyone; there is no automated decision with legal effect within the meaning of Art. 22 GDPR.
         </p>

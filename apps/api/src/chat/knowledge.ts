@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describeServerLimits, formatMb, freeHostingConfig, localePath, productKinds, serverTypesOf, websiteTypesOf, type SiteSettings } from '@chfree/shared';
+import { describeServerLimits, formatAddonPeriod, formatAddonPrice, formatMb, freeHostingConfig, localePath, productKinds, serverTypesOf, websiteTypesOf, type SiteSettings } from '@chfree/shared';
 import { env, panelPublicUrl } from '../env';
 import { getDiscordState } from '../discord/store';
 import { resolveBrand } from '../services/settings.service';
@@ -63,6 +63,12 @@ export async function currentFacts(s: SiteSettings): Promise<string> {
       `- Discord-Bot Fair-Use: über ${b.cpuThresholdPercent} % des CPU-Limits für ${b.cpuWindowMinutes} Minuten am Stück → Stopp und ${b.cooldownMinutes} Minuten Pause${b.maxStrikes > 0 ? `; ${b.maxStrikes} Stopps in ${b.strikeWindowDays} Tagen → Sperre` : ''}.${b.inactiveDays > 0 ? ` ${b.inactiveDays} Tage am Stück offline → Platz wird freigegeben (sofort reaktivierbar).` : ''}`,
     );
   }
+  const extras = s.addons.enabled ? s.addons.items.filter((a) => a.enabled && a.priceCents > 0) : [];
+  lines.push(
+    extras.length
+      ? `- Kostenpflichtige Extras (freiwillig, je Server unter „Meine Server“ → Verwalten → Extras; Vorauszahlung für eine Laufzeit, kein Abo, keine automatische Verlängerung): ${extras.map((a) => `${a.name.de} – ${formatAddonPrice(a.priceCents, 'de')}${a.periodDays > 0 ? ` für ${formatAddonPeriod(a.periodDays, 'de')}` : ' einmalig'}`).join('; ')}. Übersicht: ${url('extras')}`
+      : '- Kostenpflichtige Extras: werden derzeit nicht angeboten. Das Hosting ist kostenlos.',
+  );
   lines.push(`- Hardware: ${s.hardware.cpus.join(', ')}, ${freeHostingConfig.hardware.storage}; Standorte: ${s.hardware.locations.map((l) => l.name.de || l.code).join(', ')}.`);
   const invite = s.discord.enabled ? (await getDiscordState().catch(() => null))?.inviteCode : null;
   lines.push(

@@ -11,7 +11,7 @@ import { dedupeMarks, servers, type Server } from '../db/schema';
 import { resolveText, type LText } from '../lib/text';
 import { pterodactyl } from '../pterodactyl';
 import { getUserLocale } from './locale.service';
-import { isOnline } from './runtime';
+import { fairUseFor, isOnline } from './runtime';
 import { getSettings } from './settings.service';
 
 const { fairUse, brand } = { fairUse: freeHostingConfig.fairUse, brand: freeHostingConfig.brand };
@@ -110,7 +110,7 @@ export function desiredPanelDescription(server: Server, now: Date, l: Locale = '
 export async function syncPanelDescription(server: Server, now = new Date()): Promise<boolean> {
   if (!server.pteroServerId) return false;
   const locale = await getUserLocale(server.userId);
-  const fairUseEnabled = (await getSettings()).products[server.kind].fairUse;
+  const fairUseEnabled = fairUseFor(server, await getSettings());
   const desired = desiredPanelDescription(server, now, locale, fairUseEnabled).slice(0, 255);
   if (desired === server.panelDescription) return false;
   await pterodactyl().updateServerDescription(server.pteroServerId, desired);

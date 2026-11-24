@@ -16,6 +16,13 @@ export function TermsDe({ site }: { site: PublicSiteDTO }) {
           Minecraft-Server die <Link href={localePath('de', 'rules')}>Nutzungsbedingungen & Fair-Use</Link> und für Discord-Bots die{' '}
           <Link href={localePath('de', 'discordTerms')}>Nutzungsbedingungen für Discord-Bot-Hosting</Link> (zusammen „Nutzungsbedingungen“). Kostenpflichtige Angebote von
           CraftingHosting unterliegen gesonderten Bedingungen.
+          {site.addons.enabled && (
+            <>
+              {' '}
+              Für freiwillige, kostenpflichtige Extras zu kostenlosen Servern gelten ergänzend die{' '}
+              <Link href={localePath('de', 'extrasTerms')}>Bedingungen für Extras</Link>.
+            </>
+          )}
         </p>
       </section>
 
@@ -146,6 +153,12 @@ export function TermsEn({ site }: { site: PublicSiteDTO }) {
           <Link href={localePath('en', 'rules')}>terms of use & fair use</Link> apply to Minecraft servers and the{' '}
           <Link href={localePath('en', 'discordTerms')}>terms of use for Discord bot hosting</Link> apply to Discord bots (together “terms of use”). Paid CraftingHosting plans
           are subject to separate terms.
+          {site.addons.enabled && (
+            <>
+              {' '}
+              Optional paid extras for free servers are additionally subject to the <Link href={localePath('en', 'extrasTerms')}>terms for extras</Link>.
+            </>
+          )}
         </p>
       </section>
 

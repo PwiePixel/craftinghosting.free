@@ -3,6 +3,7 @@
  */
 import type { PlanConfig, ProductKind, ServerTypeConfig, SoftwareInstall } from './config/freehosting.config';
 import type { ChatSettings } from './chat-settings';
+import type { AddonEffect, AddonIcon, AddonSettings, PublicAddon } from './addon-settings';
 import type { DiscordSettings } from './discord-settings';
 import type { ServerLimits } from './server-limits';
 import type { Localized } from './i18n';
@@ -98,6 +99,8 @@ export interface ServerDTO {
   kind: ProductKind;
   /** Gilt das Fair-Use-System (max. Laufzeit am Stück, Wochen-Offline-Zeit) für diesen Server? */
   fairUseEnabled: boolean;
+  /** Extra „24/7“ aktiv: keine Pausen, kein 30-Tage-Zyklus */
+  alwaysOn: boolean;
   planId: string;
   planName: string;
   serverType: string;
@@ -304,6 +307,8 @@ export interface AdminOverviewDTO {
   servers: { byStatus: Record<string, number>; online: number; paused: number; total: number };
   plans: { id: string; kind: ProductKind; name: string; count: number; reserved: number; capacity: number | null }[];
   mails: { pending: number; failed: number; lastError: string | null };
+  /** Kostenpflichtige Extras: laufende Buchungen, offene Zahlungen, Aufgaben fürs Team */
+  addons: { enabled: boolean; active: number; awaitingPayment: number; tasks: number };
   jobs: AdminJobDTO[];
   system: {
     pterodactylMode: 'live' | 'mock';
@@ -597,6 +602,8 @@ export interface SiteSettings {
   discord: DiscordSettings;
   /** Support-Chat „Crafting AI“ */
   chat: ChatSettings;
+  /** Kostenpflichtige Extras für kostenlose Server */
+  addons: AddonSettings;
   /** Eigenes Logo (die Bilddatei selbst liegt getrennt in der Datenbank – Upload im Admin-Bereich) */
   branding: {
     /** icon = Bild ersetzt den Würfel, der Schriftzug bleibt · full = Bild ersetzt Würfel und Schriftzug */
@@ -890,6 +897,8 @@ export interface PublicSiteDTO {
   software: PublicSoftwareDTO[];
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
+  /** Kostenpflichtige Extras (nur eingeschaltete Einträge, ohne interne Angaben) */
+  addons: { enabled: boolean; priceNote: Localized; items: PublicAddonDTO[] };
   /** Support-Chat: Anzeige auf der Website (null = ausgeschaltet) */
   chat: { name: string; teaser: Localized; welcome: Localized; quick: { id: string; question: Localized }[]; ai: boolean; handoff: boolean; retentionDays: number } | null;
   /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
@@ -1303,3 +1312,96 @@ export interface ServerDetailDTO {
 }
 
 export type ServerPowerAction = 'start' | 'stop' | 'restart' | 'kill';
+
+/* ---------------------------------------------------------------- Extras (kostenpflichtige Add-ons) */
+
+/** Extra im Katalog, wie es Besucher sehen */
+export type PublicAddonDTO = PublicAddon;
+
+/** Extra für einen bestimmten Server: buchbar oder warum nicht */
+export interface AddonOfferDTO extends PublicAddonDTO {
+  available: boolean;
+  /** booked = läuft schon bzw. ist bestellt · sold_out = alle Plätze vergeben */
+  unavailable: 'booked' | 'sold_out' | null;
+}
+
+export type ServerAddonStatus = 'pending' | 'active' | 'ended';
+export type AddonFulfilment = 'none' | 'todo' | 'done' | 'revoke';
+
+/** So wird bezahlt (bei offener Bestellung bzw. angefragter Verlängerung) */
+export interface AddonPaymentDTO {
+  /** checkout = Bezahlseite des Zahlungsanbieters (automatische Freischaltung) · link = Zahlungslink bzw. Hinweis, das Team schaltet frei */
+  mode: 'checkout' | 'link';
+  url: string | null;
+  /** Verwendungszweck */
+  reference: string;
+  amountCents: number;
+  note: string;
+}
+
+/** Gebuchtes Extra eines Servers */
+export interface ServerAddonDTO {
+  id: string;
+  ref: string;
+  addonId: string;
+  name: string;
+  icon: AddonIcon;
+  effect: AddonEffect;
+  priceCents: number;
+  periodDays: number;
+  status: ServerAddonStatus;
+  paidUntil: string | null;
+  createdAt: string;
+  activatedAt: string | null;
+  endedAt: string | null;
+  endReason: string | null;
+  /** Einrichtung durch das Team: steht noch aus (todo) oder ist erledigt (done) */
+  fulfilment: AddonFulfilment;
+  /** Verlängerung angefragt (Zahlung angekündigt) */
+  renewalRequested: boolean;
+  /** Verlängern möglich (läuft, hat ein Ende, Extra ist noch im Angebot) */
+  canRenew: boolean;
+  payment: AddonPaymentDTO | null;
+}
+
+export interface ServerAddonsDTO {
+  enabled: boolean;
+  priceNote: string;
+  requireAdultConfirm: boolean;
+  offers: AddonOfferDTO[];
+  booked: ServerAddonDTO[];
+}
+
+/** Zeile der Buchungsliste im Admin-Bereich */
+export interface AdminAddonRowDTO extends Omit<ServerAddonDTO, 'payment' | 'canRenew'> {
+  userId: string;
+  userEmail: string;
+  serverId: string;
+  serverName: string;
+  serverStatus: string;
+  adminNote: string | null;
+  /** Summe aller bestätigten Zahlungen */
+  paidCents: number;
+  payments: number;
+  checkoutPending: boolean;
+}
+
+export interface AdminAddonsDTO extends PageInfo {
+  rows: AdminAddonRowDTO[];
+  stats: {
+    active: number;
+    /** Bestellt, Zahlung offen (inklusive angefragter Verlängerungen) */
+    awaitingPayment: number;
+    /** Aufgaben für das Team: einrichten bzw. zurücknehmen */
+    tasks: number;
+    /** Einnahmen der letzten 30 Tage in Cent */
+    revenue30dCents: number;
+    /** Laufende Buchungen auf 30 Tage umgerechnet (Cent) */
+    monthlyRunRateCents: number;
+  };
+  payment: {
+    /** Automatische Bestätigung über SumUp eingerichtet */
+    sumup: boolean;
+    webhookUrl: string;
+  };
+}
