@@ -5,7 +5,7 @@ import { Errors, L } from '../lib/errors';
 import { notInBeta } from '../services/beta.service';
 
 /** Auf der Beta-Instanz ohne Anmeldung erreichbar (nichts davon verrät Daten) */
-const OPEN = new Set(['/health', '/site', '/status', '/beta/session', '/brand/logo', '/internal/tls-check', '/consent', '/auth/logout', '/auth/me', '/payments/sumup/webhook', '/payments/return']);
+const OPEN = new Set(['/health', '/site', '/status', '/beta/session', '/brand/logo', '/internal/tls-check', '/consent', '/auth/logout', '/auth/me', '/payments/mollie/webhook', '/payments/cancel-subscription', '/payments/return']);
 /** Anmelden und Registrieren gibt es auf der Beta-Instanz nicht – der Zugang läuft nur über die Hauptseite */
 const NO_LOGIN = new Set(['/start', '/auth/login-link', '/auth/verify', '/newsletter/subscribe']);
 

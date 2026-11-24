@@ -211,6 +211,13 @@
       "when": 1795487535562,
       "tag": "0029_addons",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1795490781114,
+      "tag": "0030_addons_mollie",
+      "breakpoints": true
     }
   ]
 }

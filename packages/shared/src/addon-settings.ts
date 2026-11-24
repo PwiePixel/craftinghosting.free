@@ -2,8 +2,9 @@
  * Kostenpflichtige Extras („Add-ons“) für kostenlose Server (Admin → Extras).
  *
  * Das Gratis-Angebot bleibt, wie es ist – Extras sind freiwillig und werden je Server gebucht. Bezahlt wird immer im
- * Voraus für eine Laufzeit (z. B. 30 Tage); es gibt keine automatische Verlängerung und damit kein Abo, das gekündigt
- * werden müsste. Wer nicht verlängert, fällt automatisch auf das kostenlose Angebot zurück.
+ * Voraus für eine Laufzeit (z. B. 30 Tage). Standard ist die einmalige Buchung: Sie endet von selbst, zu kündigen gibt
+ * es nichts. Wahlweise (je Extra einstellbar, nur mit Online-Zahlung) als Abo: Es verlängert sich automatisch um eine
+ * Laufzeit, bis der Kunde kündigt. Wer nicht verlängert, fällt automatisch auf das kostenlose Angebot zurück.
  */
 import { productKinds, type ProductKind } from './config/freehosting.config';
 import type { Localized } from './i18n';
@@ -39,10 +40,12 @@ export interface AddonSetting {
   planIds: string[];
   /** Höchstzahl gleichzeitig aktiver Buchungen (null = unbegrenzt) – z. B. so viele freie IPv4-Adressen es gibt */
   maxActive: number | null;
-  /** Eigener Zahlungslink für dieses Extra (z. B. SumUp-/PayPal-Link mit festem Betrag) – für Zahlungen ohne Automatik */
+  /** Eigener Zahlungslink für dieses Extra (z. B. ein Zahlungslink mit festem Betrag) – für Zahlungen ohne Mollie */
   paymentUrl: string;
   /** Auf der Website hervorheben („Beliebt“) */
   highlighted: boolean;
+  /** Auch als Abo anbieten: verlängert sich automatisch um eine Laufzeit (nur mit Online-Zahlung und Laufzeit > 0) */
+  subscription: boolean;
 }
 
 export interface AddonSettings {
@@ -62,6 +65,8 @@ export interface AddonSettings {
 }
 
 export const MAX_ADDONS = 30;
+/** Kürzeste Laufzeit, für die es ein Abo geben kann */
+export const MIN_SUBSCRIPTION_DAYS = 7;
 export const ADDON_ID_RE = /^[a-z0-9][a-z0-9-]{1,31}$/;
 
 const preset = (id: string, icon: AddonIcon, effect: AddonEffect, priceCents: number, name: Localized, description: Localized, extra: Partial<AddonSetting> = {}): AddonSetting => ({
@@ -78,6 +83,7 @@ const preset = (id: string, icon: AddonIcon, effect: AddonEffect, priceCents: nu
   maxActive: null,
   paymentUrl: '',
   highlighted: false,
+  subscription: false,
   ...extra,
 });
 
@@ -94,7 +100,7 @@ export function defaultAddons(): AddonSetting[] {
         de: 'Dein Server läuft durchgehend: keine Fair-Use-Pausen, kein Ruhetag und kein Verlängern alle 30 Tage, solange das Extra aktiv ist.',
         en: 'Your server runs around the clock: no fair-use breaks, no rest day and no renewing every 30 days while the extra is active.',
       },
-      { highlighted: true },
+      { highlighted: true, subscription: true },
     ),
     preset(
       'ipv4',
@@ -178,6 +184,8 @@ function normalizeAddon(raw: unknown, used: Set<string>): AddonSetting | null {
     maxActive: i.maxActive === null || i.maxActive === undefined || (i.maxActive as unknown) === '' ? null : int(i.maxActive, 0, 100_000, 0),
     paymentUrl: httpsUrl(i.paymentUrl),
     highlighted: i.highlighted === true,
+    // Abos erst ab einer Woche Laufzeit – darunter ließe sich die Abbuchung nicht rechtzeitig ankündigen
+    subscription: i.subscription === true && int(i.periodDays, 0, 366, 30) >= MIN_SUBSCRIPTION_DAYS,
   };
 }
 
@@ -231,13 +239,36 @@ export interface PublicAddon {
   kinds: ProductKind[];
   planIds: string[];
   highlighted: boolean;
+  /** Auch als Abo buchbar (nur wenn online bezahlt werden kann) */
+  subscription: boolean;
 }
 
-export function publicAddon(a: AddonSetting): PublicAddon {
-  return { id: a.id, name: a.name, description: a.description, icon: a.icon, effect: a.effect, priceCents: a.priceCents, periodDays: a.periodDays, kinds: a.kinds, planIds: a.planIds, highlighted: a.highlighted };
+/** `online` = Online-Zahlung ist eingerichtet (nur dann gibt es Abos) */
+export function publicAddon(a: AddonSetting, online = false): PublicAddon {
+  return { id: a.id, name: a.name, description: a.description, icon: a.icon, effect: a.effect, priceCents: a.priceCents, periodDays: a.periodDays, kinds: a.kinds, planIds: a.planIds, highlighted: a.highlighted, subscription: online && a.subscription && a.periodDays >= MIN_SUBSCRIPTION_DAYS };
+}
+
+export interface PublicAddonCatalog {
+  enabled: boolean;
+  priceNote: Localized;
+  items: PublicAddon[];
+  /** Unbezahlte Bestellungen verfallen nach so vielen Tagen */
+  pendingDays: number;
+  /** So viele Tage vor dem Ende gibt es eine Erinnerung (0 = keine) */
+  remindDaysBefore: number;
+  /** Online-Zahlung eingerichtet (sonst Zahlungslink und Bestätigung durch das Team) */
+  online: boolean;
+  /** Mindestens ein Extra gibt es auch als Abo */
+  subscriptions: boolean;
 }
 
 /** Katalog für die öffentliche Website: nur eingeschaltete Extras mit Preis */
-export function publicAddonCatalog(s: AddonSettings): { enabled: boolean; priceNote: Localized; items: PublicAddon[] } {
-  return { enabled: s.enabled, priceNote: s.priceNote, items: s.enabled ? s.items.filter((a) => a.enabled && a.priceCents > 0).map(publicAddon) : [] };
+export function publicAddonCatalog(s: AddonSettings, online = false): PublicAddonCatalog {
+  const items = s.enabled ? s.items.filter((a) => a.enabled && a.priceCents > 0).map((a) => publicAddon(a, online)) : [];
+  return { enabled: s.enabled, priceNote: s.priceNote, items, pendingDays: s.pendingDays, remindDaysBefore: s.remindDaysBefore, online, subscriptions: items.some((a) => a.subscription) };
+}
+
+/** Abo: so viele Tage vor dem Ende der Laufzeit wird abgebucht (Lastschriften brauchen ein paar Tage) */
+export function addonRenewLeadDays(periodDays: number): number {
+  return Math.max(1, Math.min(3, Math.floor(periodDays / 3)));
 }

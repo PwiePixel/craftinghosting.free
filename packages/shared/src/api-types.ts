@@ -3,7 +3,7 @@
  */
 import type { PlanConfig, ProductKind, ServerTypeConfig, SoftwareInstall } from './config/freehosting.config';
 import type { ChatSettings } from './chat-settings';
-import type { AddonEffect, AddonIcon, AddonSettings, PublicAddon } from './addon-settings';
+import type { AddonEffect, AddonIcon, AddonSettings, PublicAddon, PublicAddonCatalog } from './addon-settings';
 import type { DiscordSettings } from './discord-settings';
 import type { ServerLimits } from './server-limits';
 import type { Localized } from './i18n';
@@ -898,7 +898,7 @@ export interface PublicSiteDTO {
   hardware: { locations: HardwareLocation[]; cpus: string[]; storage: string; network: string };
   donate: { enabled: boolean; url: string | null };
   /** Kostenpflichtige Extras (nur eingeschaltete Einträge, ohne interne Angaben) */
-  addons: { enabled: boolean; priceNote: Localized; items: PublicAddonDTO[] };
+  addons: PublicAddonCatalog;
   /** Support-Chat: Anzeige auf der Website (null = ausgeschaltet) */
   chat: { name: string; teaser: Localized; welcome: Localized; quick: { id: string; question: Localized }[]; ai: boolean; handoff: boolean; retentionDays: number } | null;
   /** Discord: verfügbar = vollständig eingerichtet · required = Mitgliedschaft ist Pflicht für kostenlose Server */
@@ -1337,6 +1337,10 @@ export interface AddonPaymentDTO {
   reference: string;
   amountCents: number;
   note: string;
+  /** Die Zahlung ist angestoßen und wird gerade von der Bank verarbeitet (z. B. Lastschrift) */
+  processing: boolean;
+  /** Bis dahin muss bezahlt sein, sonst verfällt die Bestellung (nur bei offenen Bestellungen) */
+  deadline: string | null;
 }
 
 /** Gebuchtes Extra eines Servers */
@@ -1361,6 +1365,14 @@ export interface ServerAddonDTO {
   renewalRequested: boolean;
   /** Verlängern möglich (läuft, hat ein Ende, Extra ist noch im Angebot) */
   canRenew: boolean;
+  /** Beim Verlängern lässt sich ein Abo abschließen */
+  canSubscribe: boolean;
+  /** Abo: verlängert sich automatisch um eine Laufzeit */
+  autoRenew: boolean;
+  /** Abo: nächste Abbuchung (null = kein Abo bzw. schon angestoßen) */
+  nextChargeAt: string | null;
+  /** Abo: vom Kunden gekündigt am */
+  subscriptionCanceledAt: string | null;
   payment: AddonPaymentDTO | null;
 }
 
@@ -1373,7 +1385,7 @@ export interface ServerAddonsDTO {
 }
 
 /** Zeile der Buchungsliste im Admin-Bereich */
-export interface AdminAddonRowDTO extends Omit<ServerAddonDTO, 'payment' | 'canRenew'> {
+export interface AdminAddonRowDTO extends Omit<ServerAddonDTO, 'payment' | 'canRenew' | 'canSubscribe'> {
   userId: string;
   userEmail: string;
   serverId: string;
@@ -1394,14 +1406,18 @@ export interface AdminAddonsDTO extends PageInfo {
     awaitingPayment: number;
     /** Aufgaben für das Team: einrichten bzw. zurücknehmen */
     tasks: number;
-    /** Einnahmen der letzten 30 Tage in Cent */
+    /** Laufende Abos (verlängern sich automatisch) */
+    subscriptions: number;
+    /** Einnahmen der letzten 30 Tage in Cent (Erstattungen und Rücklastschriften abgezogen) */
     revenue30dCents: number;
     /** Laufende Buchungen auf 30 Tage umgerechnet (Cent) */
     monthlyRunRateCents: number;
   };
   payment: {
-    /** Automatische Bestätigung über SumUp eingerichtet */
-    sumup: boolean;
+    /** Online-Zahlung über Mollie eingerichtet (automatische Freischaltung, Abos) */
+    online: boolean;
+    /** Mollie läuft mit einem Test-Schlüssel – es fließt kein echtes Geld */
+    testMode: boolean;
     webhookUrl: string;
   };
 }

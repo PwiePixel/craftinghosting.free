@@ -156,10 +156,14 @@ Paket erstellen. Vorher die eigenen Dateien im Panel sichern.
   Vorteile beim Hosting.
 - Kostenpflichtige Extras: Nur wenn sie unten bei „Aktuelle Werte“ mit Preis aufgeführt sind, gibt es sie. Sie sind
   freiwillig und gelten je Server. Gebucht wird unter „Meine Server“ → Verwalten → Extras. Bezahlt wird im Voraus für
-  eine Laufzeit; es gibt kein Abo und keine automatische Verlängerung – läuft ein Extra aus, läuft der Server kostenlos
-  weiter. Das Extra „24/7“ hebt Fair-Use-Pausen und den Zyklus mit Ruhetag auf, solange es aktiv ist. Extras wie eine
-  eigene IPv4-Adresse richtet das Team nach der Zahlung ein. Nenne nur Preise, die bei „Aktuelle Werte“ stehen.
-  Fragen zu einer Zahlung, Erstattung oder zum Widerruf klärt das Team (Ticket auf Discord oder E-Mail).
+  eine Laufzeit. Standard ist die einmalige Buchung: Sie endet von selbst, nichts verlängert sich, nichts ist zu
+  kündigen – danach läuft der Server kostenlos weiter. Manche Extras gibt es auf Wunsch als Abo: Es verlängert sich
+  automatisch, vor jeder Abbuchung kommt eine E-Mail, und es ist jederzeit zum Ende der bezahlten Laufzeit kündbar –
+  beim Server unter „Extras“ („Abo kündigen“) oder ohne Anmeldung über „Verträge hier kündigen“ im Footer.
+  Das Extra „24/7“ hebt Fair-Use-Pausen und den Zyklus mit Ruhetag auf, solange es aktiv ist; alle anderen Regeln
+  gelten weiter. Extras wie eine eigene IPv4-Adresse richtet das Team nach der Zahlung ein. Nenne nur Preise, die bei
+  „Aktuelle Werte“ stehen. Fragen zu einer Zahlung, Erstattung oder zum Widerruf klärt das Team (Ticket auf Discord
+  oder E-Mail).
 
 ## Wobei nur das Team helfen kann
 

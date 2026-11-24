@@ -5,7 +5,7 @@ import { NewsletterForm } from '@/components/newsletter/newsletter-form';
 import { getDict } from '@/i18n';
 import { site } from '@/lib/site';
 
-export function SiteFooter({ lang, donate = false, newsletter = false, extras = false, logo }: { lang: Locale; donate?: boolean; newsletter?: boolean; /** Kostenpflichtige Extras werden angeboten */ extras?: boolean; logo?: CustomLogo }) {
+export function SiteFooter({ lang, donate = false, newsletter = false, extras = false, cancel = false, logo }: { lang: Locale; donate?: boolean; newsletter?: boolean; /** Kostenpflichtige Extras werden angeboten */ extras?: boolean; /** Abos sind möglich: Kündigungsweg ohne Anmeldung verlinken */ cancel?: boolean; logo?: CustomLogo }) {
   const t = getDict(lang);
   const links = [
     { href: localePath(lang, 'docs'), label: t.nav.docs },
@@ -24,6 +24,8 @@ export function SiteFooter({ lang, donate = false, newsletter = false, extras = 
     { href: localePath(lang, 'discordTerms'), label: t.footer.discordTerms },
     { href: localePath(lang, 'cookies'), label: t.footer.cookies },
     ...(extras ? [{ href: localePath(lang, 'extrasTerms'), label: t.footer.extrasTerms }] : []),
+    // Gesetzlich vorgeschrieben, sobald Abos online abgeschlossen werden können: gut sichtbar und ohne Anmeldung
+    ...(cancel ? [{ href: localePath(lang, 'cancelSubscription'), label: t.footer.cancelSubscription }] : []),
     ...(newsletter ? [{ href: localePath(lang, 'newsletter'), label: t.footer.newsletter }] : []),
   ];
 

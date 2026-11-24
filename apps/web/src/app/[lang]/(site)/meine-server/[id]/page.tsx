@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
-import { localePath, serverPagePath, type ServerDetailDTO } from '@chfree/shared';
+import { localePath, serverPagePath, type ServerAddonsDTO, type ServerDetailDTO } from '@chfree/shared';
 import { CopyText } from '@/components/my/client-bits';
 import { ServerManager } from '@/components/my/server-manage';
 import { Alert } from '@/components/ui/primitives';
@@ -28,8 +28,13 @@ export default async function ServerPage({ params }: Props) {
   const d = getDict(lang);
   await requireUser(lang, 'myServers', serverPagePath(lang, id));
   const res = await apiServer<ServerDetailDTO>(`/servers/${id}`, lang);
-  // Extras-Reiter: wenn Extras angeboten werden – oder für diesen Server noch eines läuft
-  const extras = (await getSite()).addons.enabled;
+  // Extras-Reiter: wenn Extras angeboten werden – oder für diesen Server noch eines bestellt ist bzw. läuft
+  // (auch nach dem Ausschalten müssen Kunden ihre Buchung sehen, bezahlen und ein Abo kündigen können)
+  let extras = (await getSite()).addons.enabled;
+  if (!extras && res.ok) {
+    const booked = await apiServer<{ addons: ServerAddonsDTO }>(`/servers/${id}/addons`, lang);
+    extras = booked.ok && booked.data.addons.booked.some((b) => b.status !== 'ended');
+  }
   if (!res.ok && res.status === 404) notFound();
 
   return (

@@ -130,14 +130,17 @@ const schema = z
     /** Verzeichnis der Server-Software (Fabric, Forge, NeoForge …) für den Typ-/Versionswechsel der Partner-API */
     MCJARS_API_URL: z.string().url().default('https://mcjars.app/api/v2'),
     /**
-     * Extras (kostenpflichtige Add-ons): automatische Zahlungsbestätigung über SumUp (gehostete Bezahlseite).
-     * Ohne diese Angaben läuft die Zahlung über Zahlungslinks, und das Team bestätigt den Eingang im Admin-Bereich.
-     * SUMUP_API_KEY = geheimer API-Key (SumUp → Einstellungen → Entwickler), SUMUP_MERCHANT_CODE = Händlercode.
+     * Extras (kostenpflichtige Add-ons): Online-Zahlung über Mollie (Bezahlseite, automatische Freischaltung, Abos).
+     * Ohne diese Angabe läuft die Zahlung über Zahlungslinks, und das Team bestätigt den Eingang im Admin-Bereich.
+     * MOLLIE_API_KEY = geheimer API-Key (Mollie → Entwickler → API-Schlüssel): test_… zum Ausprobieren, live_… im Betrieb.
      */
-    SUMUP_API_KEY: z.string().optional(),
-    SUMUP_MERCHANT_CODE: z.string().optional(),
-    /** Adresse der SumUp-Schnittstelle. Nur für Tests ändern. */
-    SUMUP_API_URL: z.string().url().default('https://api.sumup.com'),
+    MOLLIE_API_KEY: z
+      .string()
+      .regex(/^(test|live)_[A-Za-z0-9]{10,}$/, 'MOLLIE_API_KEY muss mit test_ oder live_ beginnen')
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    /** Adresse der Mollie-Schnittstelle. Nur für Tests ändern. */
+    MOLLIE_API_URL: z.string().url().default('https://api.mollie.com'),
     /** Adresse von TikTok (Profilseiten für den Social Ping). Nur für Tests ändern. */
     TIKTOK_BASE_URL: z.string().url().default('https://www.tiktok.com'),
     /** Nur für Tests: Feeds auch von lokalen Adressen abrufen */

@@ -55,6 +55,7 @@ export default async function ExtrasPage({ params }: Props) {
                     <span className="text-sm text-muted">{a.periodDays > 0 ? t.perPeriod(formatAddonPeriod(a.periodDays, lang)) : t.once}</span>
                   </p>
                   {note && <p className="mt-1 text-[12px] text-subtle">{note}</p>}
+                  {a.subscription && <p className="mt-1 text-[12px] text-subtle">{t.subAlso}</p>}
                 </li>
               );
             })}

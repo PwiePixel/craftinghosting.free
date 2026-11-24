@@ -445,12 +445,12 @@ export const serverAddons = sqliteTable(
     id: text('id').primaryKey(),
     /** Kurzer Verwendungszweck für Zahlungen, z. B. CH-7KQ2M9 */
     ref: text('ref').notNull(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    serverId: text('server_id')
-      .notNull()
-      .references(() => servers.id, { onDelete: 'cascade' }),
+    /**
+     * Konto und Server – bewusst ohne Fremdschlüssel: Wird ein Konto gelöscht, bleibt die Buchung stehen, bis der Job sie
+     * beendet. So entsteht die Aufgabe „zurücknehmen“ fürs Team, und eine verspätete Zahlung lässt sich noch zuordnen.
+     */
+    userId: text('user_id').notNull(),
+    serverId: text('server_id').notNull(),
     /** ID im Katalog (Einstellungen) – Name, Wirkung, Preis und Laufzeit sind hier als Stand der Buchung festgehalten */
     addonId: text('addon_id').notNull(),
     name: text('name', { mode: 'json' }).$type<{ de: string; en: string }>().notNull(),
@@ -464,11 +464,20 @@ export const serverAddons = sqliteTable(
     paidUntil: ts('paid_until'),
     /** Kunde möchte verlängern (Zahlung angekündigt) */
     renewalRequestedAt: ts('renewal_requested_at'),
-    /** Laufende Zahlung über SumUp: ID und Adresse der Bezahlseite, Zähler für eindeutige Referenzen */
+    /** Laufende Zahlung beim Zahlungsdienst (Mollie): ID der Zahlung, Adresse der Bezahlseite, Zähler der Versuche */
     checkoutId: text('checkout_id'),
     checkoutUrl: text('checkout_url'),
     checkoutAt: ts('checkout_at'),
     checkoutCount: integer('checkout_count').notNull().default(0),
+    /** Abo: verlängert sich automatisch um eine Laufzeit, bis der Kunde kündigt oder eine Abbuchung scheitert */
+    autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(false),
+    /** Abo: Kunde und Einzugsermächtigung beim Zahlungsdienst (ohne Namen und E-Mail-Adresse angelegt) */
+    customerId: text('customer_id'),
+    mandateId: text('mandate_id'),
+    /** Abo: Für dieses Laufzeit-Ende wurde die automatische Verlängerung schon angestoßen (ein Versuch je Laufzeit) */
+    renewFor: ts('renew_for'),
+    /** Abo: Zeitpunkt der Kündigung durch den Kunden */
+    subscriptionCanceledAt: ts('subscription_canceled_at'),
     /** Aufgabe für das Team bei Extras, die von Hand eingerichtet werden: todo → done; nach dem Ende: revoke → none */
     fulfilment: text('fulfilment', { enum: ['none', 'todo', 'done', 'revoke'] }).notNull().default('none'),
     /** Zustimmung zu den Bedingungen und zum Beginn vor Ablauf der Widerrufsfrist */
@@ -504,9 +513,9 @@ export const addonPayments = sqliteTable(
     addonName: text('addon_name').notNull(),
     amountCents: integer('amount_cents').notNull(),
     periodDays: integer('period_days').notNull(),
-    /** manual = vom Team bestätigt · sumup = automatisch bestätigt · admin = kostenlos vom Team vergeben (0 €) */
-    provider: text('provider', { enum: ['manual', 'sumup', 'admin'] }).notNull(),
-    /** ID der Zahlung beim Anbieter (SumUp-Checkout) – jede Zahlung zählt nur einmal */
+    /** manual = vom Team bestätigt · mollie = online bezahlt und automatisch bestätigt · admin = kostenlos vom Team vergeben (0 €). Negative Beträge = Erstattung bzw. Rücklastschrift */
+    provider: text('provider', { enum: ['manual', 'mollie', 'admin'] }).notNull(),
+    /** ID der Zahlung beim Zahlungsdienst (mollie:tr_…) – jede Zahlung zählt nur einmal */
     providerRef: text('provider_ref'),
     confirmedBy: text('confirmed_by'),
     createdAt: ts('created_at').notNull().$defaultFn(now),

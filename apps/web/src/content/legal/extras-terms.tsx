@@ -30,6 +30,7 @@ function Address() {
 
 export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
   const priceNote = site.addons.priceNote.de;
+  const { pendingDays, remindDaysBefore, subscriptions } = site.addons;
   return (
     <>
       <section>
@@ -54,7 +55,7 @@ export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
         </p>
         <p>
           Der Vertrag kommt zustande, sobald wir das Extra freischalten oder dir den Zahlungseingang per E-Mail bestätigen – je nachdem, was zuerst geschieht. Geht innerhalb
-          der auf der Bestellseite genannten Frist keine Zahlung ein, verfällt die Bestellung, ohne dass dir Kosten entstehen. Eine offene, noch nicht bezahlte Bestellung
+          von {pendingDays} Tagen nach der Bestellung keine Zahlung ein, verfällt die Bestellung, ohne dass dir Kosten entstehen. Eine offene, noch nicht bezahlte Bestellung
           kannst du jederzeit selbst stornieren.
         </p>
         <p>
@@ -67,18 +68,44 @@ export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
         <h2>§ 3 Preise und Bezahlung</h2>
         <p>
           Es gilt der Preis, der bei der Bestellung angezeigt wird. Alle Preise sind Endpreise in Euro.{priceNote ? ` ${priceNote}` : ''} Bezahlt wird im Voraus über unseren
-          Zahlungsdienstleister SumUp (SumUp Limited, Block 8, Harcourt Centre, Charlotte Way, Dublin 2, Irland) oder über den auf der Bestellseite genannten Zahlungsweg.
-          Deine Zahlungsdaten (z. B. Kartennummer) gibst du ausschließlich beim Zahlungsdienstleister ein; wir erhalten sie nicht.
+          Zahlungsdienstleister Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Niederlande) oder über den auf der Bestellseite genannten Zahlungsweg.
+          Deine Zahlungsdaten (z. B. Kartennummer, Bankverbindung) gibst du ausschließlich beim Zahlungsdienstleister ein; wir erhalten sie nicht. Wird eine Zahlung
+          von deiner Bank zurückgeholt (Rücklastschrift, Rückbuchung), endet das Extra; dadurch entstehende Bankgebühren trägst du, soweit du die Rückbuchung zu
+          vertreten hast.
         </p>
       </section>
 
       <section>
-        <h2>§ 4 Laufzeit – kein Abo, keine automatische Verlängerung</h2>
+        <h2>§ 4 Laufzeit – einmalig oder als Abo</h2>
+        <h3>Einmalige Buchung</h3>
         <p>
-          Jedes Extra wird für die bei der Bestellung genannte Laufzeit gebucht (zum Beispiel 30 Tage). Die Laufzeit beginnt mit der Freischaltung. Sie endet von selbst –
-          eine Kündigung ist nicht nötig, und es wird nichts automatisch verlängert oder abgebucht. Vor dem Ende erinnern wir dich per E-Mail. Möchtest du das Extra
-          weiter nutzen, buchst du in deinem Konto eine weitere Laufzeit; sie schließt an die laufende an. Zum Zeitpunkt der Verlängerung gilt der dann angezeigte Preis.
+          Jedes Extra wird für die bei der Bestellung genannte Laufzeit gebucht (zum Beispiel 30 Tage). Die Laufzeit beginnt mit der Freischaltung. Bei der einmaligen
+          Buchung endet sie von selbst – eine Kündigung ist nicht nötig, und es wird nichts automatisch verlängert oder abgebucht.
+          {remindDaysBefore > 0 ? ' Vor dem Ende erinnern wir dich in der Regel per E-Mail.' : ''} Möchtest du das Extra weiter nutzen, buchst du in deinem Konto eine
+          weitere Laufzeit; sie schließt an die laufende an. Zum Zeitpunkt der Verlängerung gilt der dann angezeigte Preis.
         </p>
+        {subscriptions && (
+          <>
+            <h3>Abo</h3>
+            <p>
+              Einige Extras lassen sich auf Wunsch als Abo buchen. Das wählst du bei der Bestellung ausdrücklich aus. Ein Abo läuft auf unbestimmte Zeit: Es verlängert
+              sich jeweils um die bei der Bestellung genannte Laufzeit, und der dafür genannte Preis wird wenige Tage vor dem Ende der bezahlten Laufzeit über das von
+              dir bei der ersten Zahlung genutzte Zahlungsmittel abgebucht (z. B. Kreditkarte oder SEPA-Lastschrift). Vor jeder Abbuchung kündigen wir sie dir per E-Mail
+              an; du bist einverstanden, dass diese Ankündigung auch kurzfristig – mindestens einen Tag vorher – erfolgen kann.
+            </p>
+            <p>
+              <strong>Kündigung:</strong> Du kannst ein Abo jederzeit ohne Frist zum Ende der bereits bezahlten Laufzeit kündigen – in deinem Konto bei dem jeweiligen
+              Server („Abo kündigen“) oder ohne Anmeldung über <Link href={localePath('de', 'cancelSubscription')}>„Verträge hier kündigen“</Link>. Wir bestätigen dir
+              die Kündigung per E-Mail. Danach wird nichts mehr abgebucht; das Extra läuft bis zum Ende der bezahlten Laufzeit weiter.
+            </p>
+            <p>
+              Für ein laufendes Abo gilt der Preis, zu dem du es abgeschlossen hast. Eine Preiserhöhung kündigen wir dir mindestens 30 Tage vorher per E-Mail an; sie
+              gilt erst für Laufzeiten, die danach beginnen, und du kannst vorher kündigen. Schlägt eine Abbuchung fehl, können wir ein Extra für diesen Server nicht
+              mehr bereitstellen oder stellen wir es ein, endet das Abo, ohne dass weitere Kosten entstehen; das Extra läuft bis zum Ende der bezahlten Laufzeit. Wir
+              können ein Abo unsererseits mit einer Frist von 14 Tagen zum Ende einer Laufzeit kündigen.
+            </p>
+          </>
+        )}
         <p>
           Extras, die als „einmalig“ ausgewiesen sind, gelten, solange es den Server gibt, für den sie gebucht wurden.
         </p>
@@ -210,6 +237,7 @@ export function ExtrasTermsDe({ site }: { site: PublicSiteDTO }) {
 
 export function ExtrasTermsEn({ site }: { site: PublicSiteDTO }) {
   const priceNote = site.addons.priceNote.en;
+  const { pendingDays, remindDaysBefore, subscriptions } = site.addons;
   return (
     <>
       <section>
@@ -232,7 +260,7 @@ export function ExtrasTermsEn({ site }: { site: PublicSiteDTO }) {
         </p>
         <p>
           The contract is concluded as soon as we activate the extra or confirm receipt of your payment by email – whichever happens first. If no payment arrives within
-          the period shown on the order page, the order lapses at no cost to you. You can cancel an open, unpaid order yourself at any time.
+          {pendingDays} days of ordering, the order lapses at no cost to you. You can cancel an open, unpaid order yourself at any time.
         </p>
         <p>
           The contract language is German. We store the order (extra, server, price, term, time); you can find it in your account with the respective server at any time.
@@ -243,18 +271,42 @@ export function ExtrasTermsEn({ site }: { site: PublicSiteDTO }) {
         <h2>§ 3 Prices and payment</h2>
         <p>
           The price shown when ordering applies. All prices are final prices in euros.{priceNote ? ` ${priceNote}` : ''} Payment is made in advance via our payment
-          provider SumUp (SumUp Limited, Block 8, Harcourt Centre, Charlotte Way, Dublin 2, Ireland) or via the payment method named on the order page. You enter your
-          payment details (e.g. card number) only with the payment provider; we do not receive them.
+          provider Mollie (Mollie B.V., Keizersgracht 126, 1015 CW Amsterdam, Netherlands) or via the payment method named on the order page. You enter your payment
+          details (e.g. card number, bank account) only with the payment provider; we do not receive them. If a payment is reversed by your bank (returned direct
+          debit, chargeback), the extra ends; you bear any resulting bank fees to the extent that you are responsible for the reversal.
         </p>
       </section>
 
       <section>
-        <h2>§ 4 Term – no subscription, no automatic renewal</h2>
+        <h2>§ 4 Term – one-time or as a subscription</h2>
+        <h3>One-time booking</h3>
         <p>
-          Each extra is booked for the term stated when ordering (for example 30 days). The term starts with activation. It ends by itself – you do not need to cancel,
-          and nothing is renewed or charged automatically. We remind you by email before it ends. If you want to keep the extra, you book another term in your account; it
-          follows on from the current one. The price shown at the time of renewal applies.
+          Each extra is booked for the term stated when ordering (for example 30 days). The term starts with activation. With a one-time booking it ends by itself – you
+          do not need to cancel, and nothing is renewed or charged automatically.{remindDaysBefore > 0 ? ' We usually remind you by email before it ends.' : ''} If you
+          want to keep the extra, you book another term in your account; it follows on from the current one. The price shown at the time of renewal applies.
         </p>
+        {subscriptions && (
+          <>
+            <h3>Subscription</h3>
+            <p>
+              Some extras can be booked as a subscription if you wish. You choose this explicitly when ordering. A subscription runs for an indefinite period: it renews
+              by the term stated when ordering, and the price stated for it is charged a few days before the end of the paid term to the payment method you used for the
+              first payment (e.g. credit card or SEPA direct debit). We announce each charge by email beforehand; you agree that this announcement may be made at short
+              notice – at least one day in advance.
+            </p>
+            <p>
+              <strong>Cancellation:</strong> you can cancel a subscription at any time without notice to the end of the term already paid for – in your account with the
+              respective server (“Cancel subscription”) or without signing in via <Link href={localePath('en', 'cancelSubscription')}>“Cancel contracts here”</Link>. We
+              confirm the cancellation by email. After that nothing more is charged; the extra keeps running until the end of the paid term.
+            </p>
+            <p>
+              A running subscription keeps the price at which you concluded it. We announce a price increase by email at least 30 days in advance; it only applies to
+              terms that begin after that, and you can cancel beforehand. If a charge fails, if we can no longer provide an extra for this server or if we discontinue
+              it, the subscription ends without any further cost; the extra runs until the end of the paid term. We may cancel a subscription ourselves with 14 days’
+              notice to the end of a term.
+            </p>
+          </>
+        )}
         <p>Extras marked as “one-time” apply for as long as the server they were booked for exists.</p>
         <p>When an extra ends, your server simply continues under the conditions of the free offer.</p>
       </section>

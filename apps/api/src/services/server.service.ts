@@ -436,6 +436,33 @@ export async function createServerForUser(user: User, input: ServerConfigInput, 
 
 /* ------------------------------------------------------------ Reaktivierung */
 
+/**
+ * Passt dieser Server (noch) in die Grenzen seines Besitzers? Server aus einer Boost-Belohnung lassen sich nur
+ * verlängern, solange sie in die geltenden Grenzen passen (also solange der Boost läuft). Accounts ohne
+ * Boost-Belohnungen sind davon nicht betroffen. Vom Team aufgewertete Server sind ausgenommen – das Upgrade soll nicht
+ * an einer Boost-Grenze scheitern. Gilt beim Reaktivieren genauso wie für das Extra „24/7“ (das den Zyklus aufhebt).
+ */
+export async function fitsServerLimits(user: Pick<User, 'id' | 'discordId' | 'limitOverrides'>, server: Pick<Server, 'id' | 'kind' | 'planId' | 'upgradedAt'>): Promise<boolean> {
+  const ctx = await limitContextFor(user);
+  if (server.upgradedAt || Object.hasOwn(ctx.extra, server.planId) || !(await hadBoostRewards(user.discordId))) return true;
+  const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
+  return serverLimitBlock(ctx.limits, others, server.kind, server.planId, ctx.bonus, ctx.extra) === null;
+}
+
+/**
+ * Was einer Verlängerung im Weg steht – dieselben Schranken wie beim kostenlosen Reaktivieren, damit sich mit einem
+ * bezahlten Extra keine davon umgehen lässt: gesperrtes Konto, laufende Auszeit, Discord-Pflicht, Boost-Grenze.
+ * Ist Discord gerade nicht erreichbar, blockiert das nicht (geprüft wird bei jeder Laufzeit erneut).
+ */
+export async function renewalBlock(user: User, server: Server, now = new Date()): Promise<'locked' | 'timeout' | 'discord' | 'limit' | null> {
+  if (user.status !== 'active' || user.bannedAt) return 'locked';
+  if (inTimeout(user, now)) return 'timeout';
+  const gate = await discordGate(user);
+  if (!gate.ok && gate.reason !== 'unavailable') return 'discord';
+  if (!(await fitsServerLimits(user, server))) return 'limit';
+  return null;
+}
+
 export async function reactivateServer(user: User, id: string, ip?: string): Promise<ServerDTO> {
   const server = await getOwnedServer(user, id);
   const now = new Date();
@@ -449,21 +476,14 @@ export async function reactivateServer(user: User, id: string, ip?: string): Pro
         : L('Zum Reaktivieren musst du dein Discord-Konto verknüpfen und Mitglied auf unserem Discord-Server sein.', 'To reactivate, you need to link your Discord account and be a member of our Discord server.'),
     );
   }
-  // Server aus einer Boost-Belohnung lassen sich nur verlängern, solange sie in die geltenden Grenzen passen
-  // (also solange der Boost läuft). Accounts ohne Boost-Belohnungen sind davon nicht betroffen.
-  // Vom Team aufgewertete Server sind ausgenommen – das Upgrade soll nicht an einer Boost-Grenze scheitern.
-  const reCtx = await limitContextFor(user);
-  if (!server.upgradedAt && !Object.hasOwn(reCtx.extra, server.planId) && (await hadBoostRewards(user.discordId))) {
-    const others = (await db.select({ kind: servers.kind, planId: servers.planId }).from(servers).where(and(eq(servers.userId, user.id), ne(servers.id, server.id), inArray(servers.status, [...OWNED_STATUSES])))) as OwnedServerRef[];
-    if (serverLimitBlock(reCtx.limits, others, server.kind, server.planId, reCtx.bonus, reCtx.extra) !== null) {
-      throw Errors.conflict(
-        'boost_reward_ended',
-        L(
-          'Dieser Server gehörte zu einer Boost-Belohnung, die nicht mehr aktiv ist. Verlängern kannst du ihn, sobald du unseren Discord-Server wieder boostest.',
-          'This server was part of a boost reward that is no longer active. You can renew it as soon as you boost our Discord server again.',
-        ),
-      );
-    }
+  if (!(await fitsServerLimits(user, server))) {
+    throw Errors.conflict(
+      'boost_reward_ended',
+      L(
+        'Dieser Server gehörte zu einer Boost-Belohnung, die nicht mehr aktiv ist. Verlängern kannst du ihn, sobald du unseren Discord-Server wieder boostest.',
+        'This server was part of a boost reward that is no longer active. You can renew it as soon as you boost our Discord server again.',
+      ),
+    );
   }
   const state = computeRuntimeState(server, user, [], now);
   if (!state.reactivation.allowed) {

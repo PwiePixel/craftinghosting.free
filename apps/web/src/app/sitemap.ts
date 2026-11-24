@@ -22,6 +22,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ['cookies', 0.1, 'yearly'],
     ['extras', 0.5, 'monthly'],
     ['extrasTerms', 0.2, 'yearly'],
+    ['cancelSubscription', 0.1, 'yearly'],
   ];
   return pages.flatMap(([key, priority, changeFrequency]) =>
     locales.map((lang) => ({

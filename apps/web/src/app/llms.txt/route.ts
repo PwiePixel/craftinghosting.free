@@ -41,7 +41,7 @@ export async function GET() {
     '',
     `- Name: CraftingHosting.free (domain: ${site.domain}). It is the free offer of the hosting company Crafting Hosting (${site.parentUrl}).`,
     `- Price: free of charge (€0 per month). No payment details, no trial period, no ads. Voluntary donations are possible${s.donate.enabled ? ` (${url('donate')})` : ''}.`,
-    ...(s.addons.enabled && s.addons.items.length ? [`- Optional paid extras per server (prepaid for a term, no subscription, no automatic renewal): ${s.addons.items.map((a) => `${a.name.en} (${formatAddonPrice(a.priceCents, 'en')}${a.periodDays > 0 ? ` per ${formatAddonPeriod(a.periodDays, 'en')}` : ', one-time'})`).join('; ')}. Details: ${url('extras')}.`] : []),
+    ...(s.addons.enabled && s.addons.items.length ? [`- Optional paid extras per server (prepaid for a term; one-time bookings end by themselves, some extras can optionally be booked as a cancellable subscription): ${s.addons.items.map((a) => `${a.name.en} (${formatAddonPrice(a.priceCents, 'en')}${a.periodDays > 0 ? ` per ${formatAddonPeriod(a.periodDays, 'en')}` : ', one-time'})`).join('; ')}. Details: ${url('extras')}.`] : []),
     `- Products: ${[mcOn && 'free Minecraft servers', botOn && 'free Discord bot hosting (Python or Node.js)'].filter(Boolean).join(' and ')}.`,
     `- Management: servers are created on the website and managed in the Pterodactyl panel (${site.panelUrl}).`,
     `- Location: ${x.locationNames}. Hardware: ${x.cpus}, ${s.hardware.storage}, ${s.hardware.network}.`,

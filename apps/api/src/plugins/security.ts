@@ -26,7 +26,7 @@ declare module 'fastify' {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const isPartnerApi = (url: string) => /^\/api\/v1\/partner(\/|$|\?)/.test(url);
-export const isPaymentWebhook = (url: string) => /^\/api\/v1\/payments\/sumup\/webhook(\?|$)/.test(url);
+export const isPaymentWebhook = (url: string) => /^\/api\/v1\/payments\/mollie\/webhook(\?|$)/.test(url);
 
 /**
  * CSRF-Schutz für zustandsändernde Anfragen:

@@ -35,6 +35,7 @@ import { offeredVersionsCached } from './software-directory';
 import { installMethodOf } from '../config/pterodactyl.config';
 import { assets } from '../db/schema';
 import { env } from '../env';
+import { mollieConfigured } from '../payments/mollie';
 import { db } from '../db/client';
 import { getChatApiKey } from '../chat/store';
 import { getDiscordSecrets, getDiscordState } from '../discord/store';
@@ -76,12 +77,14 @@ export async function getSettings(): Promise<SiteSettings> {
 }
 
 /** Speichert Einstellungen. Wird die Wartung beendet, merkt sich das System den Zeitpunkt (Schutzfrist für Löschungen). */
-export async function saveSettings(next: unknown, opts: { blocks?: WaitlistBlock[] } = {}): Promise<SiteSettings> {
+export async function saveSettings(next: unknown, opts: { blocks?: WaitlistBlock[]; /** Der Aufrufer ändert die Extras (Admin → Extras) */ addons?: boolean } = {}): Promise<SiteSettings> {
   const before = await getSettings();
   // Vormerkungs-Blöcke ändern sich nur über adjustExternalSpots – ein Formular mit altem Stand überschreibt sie nicht
   const blocks = opts.blocks ?? before.waitlist.blocks;
   const input = next && typeof next === 'object' ? (next as Record<string, unknown>) : {};
-  const value = normalizeSiteSettings({ ...input, waitlist: { ...((input.waitlist as object) ?? {}), blocks } });
+  // Dasselbe für die Extras (Preise, Zahlungslinks): Nur der Reiter „Extras“ ändert sie – ein anderes Formular mit
+  // altem Stand kann weder alte Preise zurückholen noch den Katalog leeren
+  const value = normalizeSiteSettings({ ...input, ...(opts.addons ? {} : { addons: before.addons }), waitlist: { ...((input.waitlist as object) ?? {}), blocks } });
   if (before.maintenance.enabled && !value.maintenance.enabled) value.maintenance.endedAt = new Date().toISOString();
   else value.maintenance.endedAt = before.maintenance.endedAt;
   await db.insert(settingsTable).values({ key: KEY, value }).onConflictDoUpdate({ target: settingsTable.key, set: { value, updatedAt: new Date() } });
@@ -386,7 +389,7 @@ export async function getPublicSite(): Promise<PublicSiteDTO> {
     ) as PublicSiteDTO['products'],
     hardware: { ...s.hardware, storage: freeHostingConfig.hardware.storage, network: freeHostingConfig.hardware.network },
     donate: { enabled: s.donate.enabled, url: s.donate.enabled ? s.donate.url : null },
-    addons: publicAddonCatalog(s.addons),
+    addons: publicAddonCatalog(s.addons, mollieConfigured()),
     chat: s.chat.enabled
       ? {
           name: s.chat.name,

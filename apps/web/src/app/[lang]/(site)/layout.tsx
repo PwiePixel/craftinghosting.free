@@ -51,7 +51,7 @@ export default async function SiteLayout({ children, params }: { children: React
         }}
       />
       <main id="inhalt">{children}</main>
-      <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} extras={site.addons.enabled} logo={site.logo} />
+      <SiteFooter lang={lang} donate={site.donate.enabled} newsletter={site.newsletter.footerForm} extras={site.addons.enabled} cancel={site.addons.online} logo={site.logo} />
       {site.chat && <ChatWidget chat={site.chat} logo={site.logo} adminPath={adminPath()} />}
       <CookieBanner />
     </RuntimeConfig>

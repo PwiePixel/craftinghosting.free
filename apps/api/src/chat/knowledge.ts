@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeServerLimits, formatAddonPeriod, formatAddonPrice, formatMb, freeHostingConfig, localePath, productKinds, serverTypesOf, websiteTypesOf, type SiteSettings } from '@chfree/shared';
 import { env, panelPublicUrl } from '../env';
+import { mollieConfigured } from '../payments/mollie';
 import { getDiscordState } from '../discord/store';
 import { resolveBrand } from '../services/settings.service';
 
@@ -66,7 +67,7 @@ export async function currentFacts(s: SiteSettings): Promise<string> {
   const extras = s.addons.enabled ? s.addons.items.filter((a) => a.enabled && a.priceCents > 0) : [];
   lines.push(
     extras.length
-      ? `- Kostenpflichtige Extras (freiwillig, je Server unter „Meine Server“ → Verwalten → Extras; Vorauszahlung für eine Laufzeit, kein Abo, keine automatische Verlängerung): ${extras.map((a) => `${a.name.de} – ${formatAddonPrice(a.priceCents, 'de')}${a.periodDays > 0 ? ` für ${formatAddonPeriod(a.periodDays, 'de')}` : ' einmalig'}`).join('; ')}. Übersicht: ${url('extras')}`
+      ? `- Kostenpflichtige Extras (freiwillig, je Server unter „Meine Server“ → Verwalten → Extras; Vorauszahlung für eine Laufzeit, einmalige Buchungen enden von selbst): ${extras.map((a) => `${a.name.de} – ${formatAddonPrice(a.priceCents, 'de')}${a.periodDays > 0 ? ` für ${formatAddonPeriod(a.periodDays, 'de')}` : ' einmalig'}${a.subscription && mollieConfigured() ? ' (auch als Abo)' : ''}`).join('; ')}. Übersicht: ${url('extras')}`
       : '- Kostenpflichtige Extras: werden derzeit nicht angeboten. Das Hosting ist kostenlos.',
   );
   lines.push(`- Hardware: ${s.hardware.cpus.join(', ')}, ${freeHostingConfig.hardware.storage}; Standorte: ${s.hardware.locations.map((l) => l.name.de || l.code).join(', ')}.`);

@@ -37,8 +37,11 @@ function CopyValue({ value }: { value: string }) {
   );
 }
 
-/** Die drei Bestätigungen vor dem Kauf (Bedingungen + Widerruf, sofortiger Beginn, Volljährigkeit) */
-function Consents({ adult, value, onChange, errors }: { adult: boolean; value: { terms: boolean; early: boolean; adult: boolean }; onChange: (v: { terms: boolean; early: boolean; adult: boolean }) => void; errors: Record<string, string> }) {
+type Consent = { terms: boolean; early: boolean; adult: boolean; recurring: boolean };
+const NO_CONSENT: Consent = { terms: false, early: false, adult: false, recurring: false };
+
+/** Die Bestätigungen vor dem Kauf (Bedingungen + Widerruf, sofortiger Beginn, Volljährigkeit – beim Abo: wiederkehrende Abbuchung) */
+function Consents({ adult, recurring, value, onChange, errors }: { adult: boolean; /** Text der Zustimmung zur Abbuchung (nur beim Abo) */ recurring: string | null; value: Consent; onChange: (v: Consent) => void; errors: Record<string, string> }) {
   const t = useDict().extras;
   const lang = useLang();
   const box = 'mt-1 size-4 shrink-0 accent-blue-600';
@@ -67,6 +70,15 @@ function Consents({ adult, value, onChange, errors }: { adult: boolean; value: {
         <span>{t.acceptEarly}</span>
       </label>
       {errors.acceptEarlyStart && <p className="text-sm text-red-400">{errors.acceptEarlyStart}</p>}
+      {recurring && (
+        <>
+          <label className={label}>
+            <input type="checkbox" className={box} checked={value.recurring} onChange={(e) => onChange({ ...value, recurring: e.target.checked })} />
+            <span>{recurring}</span>
+          </label>
+          {errors.acceptRecurring && <p className="text-sm text-red-400">{errors.acceptRecurring}</p>}
+        </>
+      )}
       {adult && (
         <>
           <label className={label}>
@@ -90,8 +102,12 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   /** Offenes Bestellformular: neues Extra (Katalog-ID) oder Verlängerung (Buchung) */
   const [form, setForm] = useState<{ kind: 'order'; addonId: string } | { kind: 'renew'; rowId: string } | null>(null);
-  const [consent, setConsent] = useState({ terms: false, early: false, adult: false });
+  const [consent, setConsent] = useState<Consent>(NO_CONSENT);
+  /** Im Bestellformular gewählt: als Abo (verlängert sich automatisch) statt einmalig */
+  const [subscribe, setSubscribe] = useState(false);
   const [paid, setPaid] = useState<'checking' | 'done' | 'open' | null>(null);
+  /** Buchungen, für die bei der Rückkehr von der Bezahlseite eine Zahlung offen war: ID → Laufzeit-Ende davor */
+  const [awaited, setAwaited] = useState<Record<string, string | null> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,13 +123,23 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
     const returned = new URLSearchParams(window.location.search).get('paid') === '1';
     if (returned) {
       setPaid('checking');
-      api<{ addons: ServerAddonsDTO }>(`/servers/${id}/addons/check`, { body: {} })
-        .then((d) => {
-          if (off) return;
-          setData(d.addons);
-          setPaid(d.addons.booked.some((b) => b.status === 'pending' || b.renewalRequested) ? 'open' : 'done');
+      // Erst den Stand vor der Prüfung merken – „bezahlt“ heißt: eine dieser Buchungen ist danach aktiv bzw. verlängert
+      api<{ addons: ServerAddonsDTO }>(`/servers/${id}/addons`)
+        .then((before) => {
+          const due = Object.fromEntries(before.addons.booked.filter((b) => b.status === 'pending' || b.renewalRequested).map((b) => [b.id, b.paidUntil]));
+          return api<{ addons: ServerAddonsDTO }>(`/servers/${id}/addons/check`, { body: {} }).then((d) => {
+            if (off) return;
+            setData(d.addons);
+            setAwaited(due);
+            // Nichts war offen: Die Zahlung ist schon verbucht (die Rückmeldung des Zahlungsdienstes war schneller)
+            setPaid(Object.keys(due).length === 0 ? 'done' : 'open');
+          });
         })
-        .catch(() => !off && void load());
+        .catch(() => {
+          if (off) return;
+          setPaid(null);
+          void load();
+        });
       const url = new URL(window.location.href);
       url.searchParams.delete('paid');
       window.history.replaceState(null, '', url.toString());
@@ -123,8 +149,8 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
     };
   }, [id, load]);
 
-  // Solange eine Zahlung offen ist, regelmäßig nachsehen (Freischaltung erscheint dann von selbst)
-  const waiting = !!data?.booked.some((b) => b.status === 'pending' || b.renewalRequested);
+  // Solange eine Zahlung offen ist oder verarbeitet wird, regelmäßig nachsehen (Freischaltung erscheint dann von selbst)
+  const waiting = !!data?.booked.some((b) => b.status === 'pending' || b.renewalRequested || b.payment?.processing);
   useEffect(() => {
     if (!waiting) return;
     const timer = setInterval(() => {
@@ -133,8 +159,13 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
     return () => clearInterval(timer);
   }, [waiting, load]);
   useEffect(() => {
-    if (paid === 'open' && data && !waiting) setPaid('done');
-  }, [paid, data, waiting]);
+    if (paid !== 'open' || !data || !awaited) return;
+    const rows = data.booked.filter((b) => b.id in awaited);
+    // Bezahlt: aktiv ohne offene Verlängerung – bei einer Verlängerung mit späterem Ende als vorher
+    if (rows.some((b) => b.status === 'active' && !b.renewalRequested && (awaited[b.id] === null || b.paidUntil !== awaited[b.id]))) setPaid('done');
+    // Nichts mehr offen und nichts bezahlt (storniert, verworfen): keine Erfolgsmeldung
+    else if (!rows.some((b) => b.status === 'pending' || b.renewalRequested || b.payment?.processing)) setPaid(null);
+  }, [paid, data, awaited]);
 
   async function run(key: string, path: string, body: unknown): Promise<Result | null> {
     setBusy(key);
@@ -155,12 +186,32 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
 
   async function submit() {
     if (!form) return;
-    const body = { acceptTerms: consent.terms, acceptEarlyStart: consent.early, adult: consent.adult };
+    // Preis und Laufzeit, wie sie in der Zusammenfassung stehen – der Server lehnt ab, wenn sie sich inzwischen geändert haben
+    const offer = data?.offers.find((o) => o.id === (form.kind === 'order' ? form.addonId : data.booked.find((b) => b.id === form.rowId)?.addonId));
+    const body = { acceptTerms: consent.terms, acceptEarlyStart: consent.early, adult: consent.adult, acceptRecurring: consent.recurring, subscribe, ...(offer ? { priceCents: offer.priceCents, periodDays: offer.periodDays } : {}) };
     const res = form.kind === 'order' ? await run('submit', `/servers/${id}/addons`, { addonId: form.addonId, ...body }) : await run('submit', `/servers/${id}/addons/${form.rowId}/renew`, body);
-    if (!res) return;
-    setForm(null);
-    setConsent({ terms: false, early: false, adult: false });
+    if (!res) {
+      // Preis geändert o. Ä.: Angebote neu laden, das Formular bleibt offen
+      void load();
+      return;
+    }
+    closeForm();
     if (res.checkoutUrl) window.location.assign(res.checkoutUrl);
+  }
+
+  function openForm(next: NonNullable<typeof form>) {
+    setError(null);
+    setFieldErrors({});
+    setConsent(NO_CONSENT);
+    setSubscribe(false);
+    setForm(next);
+  }
+  function closeForm() {
+    setForm(null);
+    setError(null);
+    setFieldErrors({});
+    setConsent(NO_CONSENT);
+    setSubscribe(false);
   }
 
   async function pay(row: ServerAddonDTO) {
@@ -183,41 +234,54 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
   const formOffer = form?.kind === 'order' ? data.offers.find((o) => o.id === form.addonId) : null;
   const formRow = form?.kind === 'renew' ? data.booked.find((b) => b.id === form.rowId) : null;
 
-  const checkout = (title: string, cents: number, days: number) => (
-    <div className="mt-4 rounded-xl border border-blue-400/30 bg-blue-400/[0.05] p-4">
-      <p className="text-[12px] font-semibold tracking-[0.08em] text-subtle uppercase">{t.summary}</p>
-      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-sm text-gray-100">
-          <span className="font-medium text-white">{title}</span> {t.forServer(serverName)}
-        </p>
-        {price(cents, days)}
-      </div>
-      {data.priceNote && <p className="mt-1 text-[12px] text-subtle">{data.priceNote}</p>}
-      <div className="mt-4">
-        <Consents adult={data.requireAdultConfirm} value={consent} onChange={setConsent} errors={fieldErrors} />
-      </div>
-      {error && (
-        <div className="mt-3">
-          <Alert tone="error">{error}</Alert>
+  const checkout = (title: string, cents: number, days: number, canSubscribe: boolean) => {
+    const priceText = formatAddonPrice(cents, lang);
+    const periodText = formatAddonPeriod(days, lang);
+    const asSub = canSubscribe && subscribe;
+    const mode = (sub: boolean, name: string, hint: string) => (
+      <label className={cn('flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm', subscribe === sub ? 'border-blue-500/60 bg-blue-500/[0.07]' : 'border-line')}>
+        <input type="radio" name="addon-mode" className="mt-1 size-4 shrink-0 accent-blue-600" checked={subscribe === sub} onChange={() => setSubscribe(sub)} />
+        <span>
+          <span className="font-medium text-white">{name}</span>
+          <span className="mt-0.5 block leading-relaxed text-muted">{hint}</span>
+        </span>
+      </label>
+    );
+    return (
+      <div className="mt-4 rounded-xl border border-blue-400/30 bg-blue-400/[0.05] p-4">
+        <p className="text-[12px] font-semibold tracking-[0.08em] text-subtle uppercase">{t.summary}</p>
+        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="text-sm text-gray-100">
+            <span className="font-medium text-white">{title}</span> {t.forServer(serverName)}
+          </p>
+          {price(cents, days)}
         </div>
-      )}
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button loading={busy === 'submit'} onClick={() => void submit()}>
-          {t.orderNow}
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setForm(null);
-            setError(null);
-            setFieldErrors({});
-          }}
-        >
-          {t.back}
-        </Button>
+        {data.priceNote && <p className="mt-1 text-[12px] text-subtle">{data.priceNote}</p>}
+        {canSubscribe && (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {mode(false, t.modeOnce, t.modeOnceHint(periodText))}
+            {mode(true, t.modeSub, t.modeSubHint(priceText, periodText))}
+          </div>
+        )}
+        <div className="mt-4">
+          <Consents adult={data.requireAdultConfirm} recurring={asSub ? t.acceptRecurring(priceText, periodText) : null} value={consent} onChange={setConsent} errors={fieldErrors} />
+        </div>
+        {error && (
+          <div className="mt-3">
+            <Alert tone="error">{error}</Alert>
+          </div>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button loading={busy === 'submit'} onClick={() => void submit()}>
+            {t.orderNow}
+          </Button>
+          <Button variant="ghost" onClick={closeForm}>
+            {t.back}
+          </Button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const offerCard = (o: AddonOfferDTO) => (
     <li key={o.id} className={cn('flex flex-col rounded-xl border bg-surface p-5', o.highlighted ? 'border-blue-500/50' : 'border-line')}>
@@ -235,16 +299,13 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
         <div>
           {price(o.priceCents, o.periodDays)}
           {data.priceNote && <p className="text-[12px] text-subtle">{data.priceNote}</p>}
+          {o.subscription && <p className="text-[12px] text-subtle">{t.subAlso}</p>}
         </div>
         {o.available ? (
           <Button
             size="sm"
             variant={form?.kind === 'order' && form.addonId === o.id ? 'secondary' : 'primary'}
-            onClick={() => {
-              setError(null);
-              setFieldErrors({});
-              setForm({ kind: 'order', addonId: o.id });
-            }}
+            onClick={() => openForm({ kind: 'order', addonId: o.id })}
           >
             {t.book}
           </Button>
@@ -252,19 +313,24 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
           <span className="text-[13px] text-subtle">{o.unavailable === 'booked' ? t.booked : o.unavailable === 'sold_out' ? t.soldOut : t.notEligible}</span>
         )}
       </div>
-      {formOffer?.id === o.id && checkout(o.name[lang] || o.name.de, o.priceCents, o.periodDays)}
+      {formOffer?.id === o.id && checkout(o.name[lang] || o.name.de, o.priceCents, o.periodDays, o.subscription)}
     </li>
   );
 
   const bookedRow = (b: ServerAddonDTO) => {
     const due = b.status === 'pending' || b.renewalRequested;
+    const inFlight = !!b.payment?.processing;
+    const offer = data.offers.find((o) => o.id === b.addonId);
     return (
       <li key={b.id} className="px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', b.status === 'active' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-subtle')}>{addonIcons[b.icon]}</span>
             <div className="min-w-0">
-              <p className="font-medium text-white">{b.name}</p>
+              <p className="flex flex-wrap items-center gap-2 font-medium text-white">
+                {b.name}
+                {b.autoRenew && <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[11px] font-medium tracking-[0.06em] text-blue-200 uppercase">{t.subBadge}</span>}
+              </p>
               <p className="mt-0.5 text-[13px] text-muted">
                 {b.status === 'active' ? (
                   <>
@@ -281,7 +347,10 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
               </p>
               {b.status === 'active' && b.fulfilment === 'todo' && <p className="mt-1 text-[13px] text-amber-200">{t.setupTodo}</p>}
               {b.status === 'active' && b.fulfilment === 'done' && <p className="mt-1 text-[13px] text-subtle">{t.setupDone}</p>}
-              {b.status === 'active' && b.renewalRequested && <p className="mt-1 text-[13px] text-amber-200">{t.renewalOpen}</p>}
+              {b.status === 'active' && b.renewalRequested && !inFlight && <p className="mt-1 text-[13px] text-amber-200">{t.renewalOpen}</p>}
+              {b.status === 'active' && b.autoRenew && b.nextChargeAt && <p className="mt-1 text-[13px] text-subtle">{t.subNext(formatDateTime(b.nextChargeAt, tz, lang))}</p>}
+              {b.status === 'active' && b.autoRenew && inFlight && !b.renewalRequested && <p className="mt-1 text-[13px] text-subtle">{t.subRenewing}</p>}
+              {b.status === 'active' && !b.autoRenew && b.subscriptionCanceledAt && <p className="mt-1 text-[13px] text-subtle">{t.subCanceled}</p>}
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -289,21 +358,30 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => {
-                  setError(null);
-                  setFieldErrors({});
-                  setForm({ kind: 'renew', rowId: b.id });
-                }}
+                onClick={() => openForm({ kind: 'renew', rowId: b.id })}
               >
                 {t.renew}
               </Button>
             )}
-            {due && b.payment?.mode === 'checkout' && (
+            {b.status === 'active' && b.autoRenew && !b.renewalRequested && (
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={busy === `unsub:${b.id}`}
+                onClick={() => {
+                  if (!window.confirm(t.subCancelConfirm(b.paidUntil ? formatDateTime(b.paidUntil, tz, lang) : ''))) return;
+                  void run(`unsub:${b.id}`, `/servers/${id}/addons/${b.id}/unsubscribe`, {});
+                }}
+              >
+                {t.subCancel}
+              </Button>
+            )}
+            {due && !inFlight && b.payment?.mode === 'checkout' && (
               <Button size="sm" loading={busy === `pay:${b.id}`} onClick={() => void pay(b)}>
                 {t.payNow}
               </Button>
             )}
-            {due && (
+            {due && !inFlight && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -318,9 +396,11 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
             )}
           </div>
         </div>
-        {due && b.payment && (
+        {due && inFlight && <p className="mt-3 rounded-lg border border-line bg-white/[0.03] p-4 text-sm leading-relaxed text-muted">{t.processingNote}</p>}
+        {due && !inFlight && b.payment && (
           <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/[0.05] p-4 text-sm">
             <p className="font-medium text-white">{t.payTitle}</p>
+            {b.payment.deadline && <p className="mt-1 text-[13px] text-amber-200">{t.payDeadline(formatDateTime(b.payment.deadline, tz, lang))}</p>}
             {b.payment.mode === 'checkout' ? (
               <p className="mt-1 leading-relaxed text-muted">{t.checkoutNote}</p>
             ) : (
@@ -348,7 +428,7 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
             )}
           </div>
         )}
-        {formRow?.id === b.id && checkout(b.name, data.offers.find((o) => o.id === b.addonId)?.priceCents ?? b.priceCents, data.offers.find((o) => o.id === b.addonId)?.periodDays ?? b.periodDays)}
+        {formRow?.id === b.id && checkout(b.name, offer?.priceCents ?? b.priceCents, offer?.periodDays ?? b.periodDays, b.canSubscribe)}
       </li>
     );
   };
@@ -382,6 +462,15 @@ export function ServerAddons({ id, serverName }: { id: string; serverName: strin
           <Link href={localePath(lang, 'extrasTerms')} className="underline underline-offset-4 hover:text-white">
             {t.termsLink}
           </Link>
+          {data.booked.some((b) => b.autoRenew || b.subscriptionCanceledAt) && (
+            <>
+              {' · '}
+              {t.cancelLink}{' '}
+              <Link href={localePath(lang, 'cancelSubscription')} className="underline underline-offset-4 hover:text-white">
+                {t.cancelPage.title}
+              </Link>
+            </>
+          )}
         </p>
       </section>
 

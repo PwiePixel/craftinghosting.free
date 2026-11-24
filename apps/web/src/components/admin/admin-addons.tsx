@@ -10,7 +10,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, Plus, Save, Search, Trash2, XCircle } from 'lucide-react';
-import { ADDON_ICONS, ADDON_ID_RE, MAX_ADDONS, formatAddonPeriod, formatAddonPrice, productKinds, type AddonEffect, type AddonIcon, type AddonSetting, type AddonSettings, type AdminAddonRowDTO, type AdminAddonsDTO, type Localized, type ProductKind, type SiteSettings } from '@chfree/shared';
+import { ADDON_ICONS, ADDON_ID_RE, MAX_ADDONS, MIN_SUBSCRIPTION_DAYS, formatAddonPeriod, formatAddonPrice, productKinds, type AddonEffect, type AddonIcon, type AddonSetting, type AddonSettings, type AdminAddonRowDTO, type AdminAddonsDTO, type Localized, type ProductKind, type SiteSettings } from '@chfree/shared';
 import { Labeled, NumberInput, Section, Toggle } from '@/components/admin/admin-settings';
 import { Button } from '@/components/ui/button';
 import { api, ApiClientError } from '@/lib/api/client';
@@ -28,6 +28,7 @@ const FILTERS = [
   { id: 'tasks', label: 'Aufgaben' },
   { id: 'pending', label: 'Zahlung offen' },
   { id: 'active', label: 'Aktiv' },
+  { id: 'subscriptions', label: 'Abos' },
   { id: 'ended', label: 'Beendet' },
 ] as const;
 const END_REASON: Record<string, string> = { expired: 'abgelaufen', unpaid: 'nicht bezahlt', canceled: 'storniert', admin: 'vom Team beendet', refunded: 'erstattet', server_deleted: 'Server gelöscht' };
@@ -91,7 +92,7 @@ function statusBadge(r: AdminAddonRowDTO): { label: string; cls: string } {
   if (r.fulfilment === 'revoke') return { label: 'Zurücknehmen', cls: 'bg-amber-400/15 text-amber-200' };
   if (r.status === 'pending') return { label: 'Zahlung offen', cls: 'bg-blue-500/15 text-blue-200' };
   if (r.status === 'active' && r.renewalRequested) return { label: 'Verlängerung offen', cls: 'bg-blue-500/15 text-blue-200' };
-  if (r.status === 'active') return { label: 'Aktiv', cls: 'bg-emerald-500/15 text-emerald-300' };
+  if (r.status === 'active') return { label: r.autoRenew ? 'Aktiv · Abo' : 'Aktiv', cls: 'bg-emerald-500/15 text-emerald-300' };
   return { label: `Beendet${r.endReason ? ` (${END_REASON[r.endReason] ?? r.endReason})` : ''}`, cls: 'bg-white/[0.06] text-muted' };
 }
 
@@ -138,8 +139,8 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
   function confirmPayment(r: AdminAddonRowDTO) {
     const answer = window.prompt(`Zahlung für „${r.name}“ (${r.ref}) bestätigen?\n\nErhaltener Betrag in Euro – das Extra wird sofort ${r.status === 'active' ? 'verlängert' : 'freigeschaltet'}:`, (r.priceCents / 100).toFixed(2).replace('.', ','));
     if (answer === null) return;
-    const n = Number(answer.replace(',', '.'));
-    if (!Number.isFinite(n) || n < 0) return setMessage({ ok: false, text: 'Bitte einen Betrag wie 2,50 eingeben.' });
+    const n = Number(answer.trim().replace(',', '.'));
+    if (answer.trim() === '' || !Number.isFinite(n) || n < 0) return setMessage({ ok: false, text: 'Bitte einen Betrag wie 2,50 eingeben.' });
     void act(r.id, `/admin/addons/${r.id}/confirm`, { amountCents: Math.round(n * 100) }, 'Zahlung bestätigt – das Extra ist aktiv.');
   }
   function extend(r: AdminAddonRowDTO) {
@@ -150,9 +151,25 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
     void act(r.id, `/admin/addons/${r.id}/extend`, { days }, 'Laufzeit angepasst.');
   }
   function end(r: AdminAddonRowDTO, refunded: boolean) {
-    const note = window.prompt(refunded ? `„${r.name}“ (${r.ref}) beenden und als erstattet vermerken?\n\nDie Erstattung selbst machst du bei SumUp bzw. deinem Zahlungsweg. Notiz (optional):` : `„${r.name}“ (${r.ref}) jetzt beenden?\n\nNotiz (optional):`, '');
+    let refundCents = 0;
+    if (refunded && !data?.payment.online) {
+      // Ohne Online-Zahlung weiß das System nichts von der Erstattung – den Betrag für die Buchhaltung festhalten
+      const amount = window.prompt(`„${r.name}“ (${r.ref}) beenden und als erstattet vermerken.\n\nWie viel hast du erstattet (in Euro)? Die Erstattung selbst machst du über deinen Zahlungsweg.`, (r.paidCents / 100).toFixed(2).replace('.', ','));
+      if (amount === null) return;
+      const n = Number(amount.trim().replace(',', '.'));
+      if (amount.trim() === '' || !Number.isFinite(n) || n < 0) return setMessage({ ok: false, text: 'Bitte einen Betrag wie 2,50 eingeben.' });
+      refundCents = Math.round(n * 100);
+    }
+    const note = window.prompt(
+      refunded
+        ? data?.payment.online
+          ? `„${r.name}“ (${r.ref}) beenden und als erstattet vermerken?\n\nDie Erstattung löst du im Mollie-Konto aus – sie wird hier automatisch verbucht. Notiz (optional):`
+          : 'Notiz zur Erstattung (optional):'
+        : `„${r.name}“ (${r.ref}) jetzt beenden?${r.autoRenew ? ' Das Abo endet damit, es wird nichts mehr abgebucht.' : ''}\n\nNotiz (optional):`,
+      '',
+    );
     if (note === null) return;
-    void act(r.id, `/admin/addons/${r.id}/end`, { refunded, note: note.slice(0, 500) }, refunded ? 'Beendet und als erstattet vermerkt.' : 'Beendet.');
+    void act(r.id, `/admin/addons/${r.id}/end`, { refunded, note: note.slice(0, 500), refundCents }, refunded ? 'Beendet und als erstattet vermerkt.' : 'Beendet.');
   }
   function editNote(r: AdminAddonRowDTO) {
     const note = window.prompt('Interne Notiz (nur für das Team sichtbar):', r.adminNote ?? '');
@@ -164,38 +181,41 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Aktive Extras" value={s ? String(s.active) : '–'} tone="emerald" />
+        <Stat label="Aktive Extras" value={s ? String(s.active) : '–'} hint={s ? `davon ${s.subscriptions} im Abo` : undefined} tone="emerald" />
         <Stat label="Zahlung offen" value={s ? String(s.awaitingPayment) : '–'} hint="bestellt, noch nicht bezahlt" />
         <Stat label="Aufgaben" value={s ? String(s.tasks) : '–'} hint="einrichten oder zurücknehmen" tone={s && s.tasks > 0 ? 'amber' : undefined} />
-        <Stat label="Einnahmen (30 Tage)" value={s ? eur(s.revenue30dCents) : '–'} />
+        <Stat label="Einnahmen (30 Tage)" value={s ? eur(s.revenue30dCents) : '–'} hint="Erstattungen abgezogen, vor Gebühren" />
         <Stat label="Laufend pro Monat" value={s ? eur(s.monthlyRunRateCents) : '–'} hint="aktive Buchungen auf 30 Tage gerechnet" />
       </div>
 
       <Section
         title="Bezahlung"
         description={
-          data?.payment.sumup
-            ? 'SumUp ist eingerichtet: Kunden bezahlen online, das Extra wird automatisch freigeschaltet. Jede Zahlung wird direkt bei SumUp geprüft (Betrag, Währung, Empfänger).'
-            : 'SumUp ist noch nicht eingerichtet. Bis dahin sehen Kunden nach der Bestellung den Zahlungslink des Extras samt Verwendungszweck, und du bestätigst jede Zahlung hier von Hand.'
+          data?.payment.online
+            ? 'Mollie ist eingerichtet: Kunden bezahlen online, das Extra wird automatisch freigeschaltet. Jede Zahlung wird direkt bei Mollie geprüft. Abos bucht das System kurz vor dem Ende der Laufzeit selbst ab; wird eine Zahlung von der Bank zurückgeholt, endet das Extra.'
+            : 'Mollie ist noch nicht eingerichtet. Bis dahin sehen Kunden nach der Bestellung den Zahlungslink des Extras samt Verwendungszweck, und du bestätigst jede Zahlung hier von Hand. Abos gibt es nur mit Mollie.'
         }
       >
         <div className="flex items-start gap-2 text-sm">
-          {data?.payment.sumup ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" aria-hidden /> : <XCircle className="mt-0.5 size-4 shrink-0 text-amber-300" aria-hidden />}
+          {data?.payment.online ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" aria-hidden /> : <XCircle className="mt-0.5 size-4 shrink-0 text-amber-300" aria-hidden />}
           <div className="space-y-1.5 text-muted">
-            <p>
-              {data?.payment.sumup ? 'Automatische Freischaltung aktiv.' : 'Für die Automatik in der Datei .env auf dem Server eintragen und neu starten:'}{' '}
-              {!data?.payment.sumup && (
-                <>
-                  <code className="font-mono text-[13px] text-gray-200">SUMUP_API_KEY</code> und <code className="font-mono text-[13px] text-gray-200">SUMUP_MERCHANT_CODE</code>.
-                </>
-              )}
-            </p>
+            {data?.payment.online ? (
+              <p>
+                Automatische Freischaltung aktiv.{' '}
+                {data.payment.testMode && <span className="rounded bg-amber-400/15 px-1.5 py-0.5 text-[12px] text-amber-200">Testmodus – es fließt kein echtes Geld (Schlüssel beginnt mit test_)</span>}
+              </p>
+            ) : (
+              <p>
+                Für die Online-Zahlung in der Datei .env auf dem Server eintragen und neu starten: <code className="font-mono text-[13px] text-gray-200">MOLLIE_API_KEY</code> (Mollie → Entwickler → API-Schlüssel; zum Ausprobieren der Test-Schlüssel).
+              </p>
+            )}
             {data && (
               <p>
-                Rückmeldung von SumUp geht an: <code className="font-mono text-[13px] break-all text-gray-200">{data.payment.webhookUrl}</code> – die Adresse muss aus dem Internet erreichbar sein. Fällt eine Rückmeldung aus, fragt das System
+                Rückmeldung von Mollie geht an: <code className="font-mono text-[13px] break-all text-gray-200">{data.payment.webhookUrl}</code> – die Adresse muss aus dem Internet erreichbar sein. Fällt eine Rückmeldung aus, fragt das System
                 offene Zahlungen von selbst nach.
               </p>
             )}
+            {data?.payment.online && <p>Für Abos müssen im Mollie-Konto Kreditkarte und/oder SEPA-Lastschrift eingeschaltet sein. Welche Zahlungsarten Kunden sehen, legst du im Mollie-Konto fest.</p>}
           </div>
         </div>
       </Section>
@@ -244,14 +264,16 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
                       <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-white">
                         {r.name}
                         <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium', badge.cls)}>{badge.label}</span>
-                        {r.checkoutPending && <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-muted">SumUp-Zahlung läuft</span>}
+                        {r.checkoutPending && <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-muted">Online-Zahlung läuft</span>}
                       </p>
                       <p className="mt-1 text-[13px] text-muted">
-                        <span className="font-mono text-gray-200">{r.ref}</span> · {r.serverName} <span className="font-mono text-[11px] text-subtle">{r.serverId.slice(0, 8)}</span> · {r.userEmail}
+                        <span className="font-mono text-gray-200">{r.ref}</span> · {r.serverName || '(Server gelöscht)'} <span className="font-mono text-[11px] text-subtle">{r.serverId.slice(0, 8)}</span> · {r.userEmail || '(Konto gelöscht)'}
                       </p>
                       <p className="mt-1 text-[13px] text-subtle">
                         {eur(r.priceCents)} {r.periodDays > 0 ? `für ${formatAddonPeriod(r.periodDays, 'de')}` : 'einmalig'} · bestellt {date(r.createdAt)}
                         {r.status === 'active' && <> · {r.paidUntil ? `läuft bis ${date(r.paidUntil)}` : 'ohne Enddatum'}</>}
+                        {r.status === 'active' && r.autoRenew && r.nextChargeAt && <> · nächste Abbuchung {date(r.nextChargeAt)}</>}
+                        {r.status === 'active' && !r.autoRenew && r.subscriptionCanceledAt && <> · Abo gekündigt {date(r.subscriptionCanceledAt)}</>}
                         {r.status === 'ended' && <> · beendet {date(r.endedAt)}</>} · bezahlt: {eur(r.paidCents)} ({r.payments}×)
                       </p>
                       {r.fulfilment === 'todo' && <p className="mt-1 text-[13px] text-amber-200">Bezahlt – bitte einrichten und danach „Eingerichtet“ klicken. Der Kunde bekommt dann eine Nachricht.</p>}
@@ -396,7 +418,8 @@ function AddonEditor({ a, plans, onChange, onRemove }: { a: AddonSetting; plans:
                       checked={a.kinds.includes(k)}
                       onChange={(e) => {
                         const kinds = e.target.checked ? [...new Set([...a.kinds, k])] : a.kinds.filter((x) => x !== k);
-                        if (kinds.length) onChange({ kinds });
+                        // Pakete eines abgewählten Angebots mit entfernen – sonst bliebe eine unsichtbare Einschränkung zurück
+                        if (kinds.length) onChange({ kinds, planIds: a.planIds.filter((id) => plans.some((p) => p.id === id && kinds.includes(p.kind))) });
                       }}
                     />
                     {KIND_LABEL[k]}
@@ -421,10 +444,20 @@ function AddonEditor({ a, plans, onChange, onRemove }: { a: AddonSetting; plans:
             <Labeled label="Höchstens gleichzeitig aktiv" hint="Leer = unbegrenzt. Zum Beispiel so viele freie IPv4-Adressen oder Plätze auf der schnellen Hardware du hast – danach steht „Ausgebucht“.">
               <input type="number" className="input max-w-[200px]" min={0} max={100000} value={a.maxActive ?? ''} onChange={(e) => onChange({ maxActive: e.target.value === '' ? null : Math.max(0, Math.round(Number(e.target.value)) || 0) })} />
             </Labeled>
-            <Labeled label="Eigener Zahlungslink" hint="Nur ohne SumUp-Automatik: z. B. ein SumUp- oder PayPal-Link mit genau diesem Betrag (https://…).">
+            <Labeled label="Eigener Zahlungslink" hint="Nur ohne Mollie: z. B. ein Zahlungslink mit genau diesem Betrag (https://…). Du bestätigst den Eingang dann von Hand.">
               <input type="url" className="input" value={a.paymentUrl} maxLength={300} placeholder="https://" onChange={(e) => onChange({ paymentUrl: e.target.value })} />
             </Labeled>
           </div>
+          <Toggle
+            checked={a.subscription && a.periodDays >= MIN_SUBSCRIPTION_DAYS}
+            onChange={(v) => onChange({ subscription: v })}
+            label="Auch als Abo anbieten"
+            hint={
+              a.periodDays < MIN_SUBSCRIPTION_DAYS
+                ? `Abos gibt es erst ab ${MIN_SUBSCRIPTION_DAYS} Tagen Laufzeit.`
+                : 'Kunden wählen beim Bestellen: einmalig oder Abo. Ein Abo verlängert sich automatisch um eine Laufzeit, bis der Kunde kündigt – nur mit Mollie. Bestehende Abos laufen zu dem Preis weiter, zu dem sie abgeschlossen wurden.'
+            }
+          />
           <div className="flex flex-wrap items-center justify-between gap-4">
             <Toggle checked={a.highlighted} onChange={(v) => onChange({ highlighted: v })} label="Hervorheben („Beliebt“)" />
             <div className="flex items-center gap-3">
@@ -457,17 +490,18 @@ export function AddonsAdmin({ settings }: { settings: SiteSettings }) {
 
   function add() {
     if (!idOk || c.items.length >= MAX_ADDONS) return;
-    set({ items: [...c.items, { id: newId, enabled: false, name: { de: '', en: '' }, description: { de: '', en: '' }, icon: 'plus', effect: 'manual', priceCents: 0, periodDays: 30, kinds: ['minecraft'], planIds: [], maxActive: null, paymentUrl: '', highlighted: false }] });
+    set({ items: [...c.items, { id: newId, enabled: false, name: { de: '', en: '' }, description: { de: '', en: '' }, icon: 'plus', effect: 'manual', priceCents: 0, periodDays: 30, kinds: ['minecraft'], planIds: [], maxActive: null, paymentUrl: '', highlighted: false, subscription: false }] });
     setNewId('');
   }
 
   async function save() {
+    const unnamed = c.items.find((a) => !a.name.de.trim() && !a.name.en.trim());
+    if (unnamed) return setMessage({ ok: false, text: `Das Extra „${unnamed.id}“ hat noch keinen Namen – bitte ausfüllen oder entfernen.` });
     setPending(true);
     setMessage(null);
     try {
-      // Aktuellen Stand holen, damit Änderungen aus anderen Reitern nicht überschrieben werden
-      const current = (await api<{ settings: SiteSettings }>('/admin/settings')).settings;
-      const saved = (await api<{ settings: SiteSettings }>('/admin/settings', { body: { ...current, addons: c } })).settings.addons;
+      // Eigene Adresse nur für die Extras: Andere Reiter können den Katalog nicht überschreiben – und dieser nichts anderes
+      const saved = (await api<{ addons: AddonSettings }>('/admin/addons/settings', { body: { addons: c } })).addons;
       setC(saved);
       setBaseline(JSON.stringify(saved));
       setMessage({ ok: true, text: 'Gespeichert. Die Website übernimmt Änderungen innerhalb von etwa einer Minute.' });
@@ -485,7 +519,7 @@ export function AddonsAdmin({ settings }: { settings: SiteSettings }) {
 
       <Section
         title="Extras anbieten"
-        description="Kostenpflichtige Extras für kostenlose Server. Kunden buchen je Server und zahlen für eine Laufzeit im Voraus – ohne Abo, ohne automatische Verlängerung. Ausschalten stoppt nur neue Bestellungen; bezahlte Extras laufen bis zum Ende weiter."
+        description="Kostenpflichtige Extras für kostenlose Server. Kunden buchen je Server und zahlen für eine Laufzeit im Voraus – einmalig oder, wo du es anbietest, als Abo. Ausschalten stoppt neue Bestellungen und die Verlängerung von Abos; bezahlte Laufzeiten laufen bis zum Ende weiter."
       >
         <Toggle checked={c.enabled} onChange={(enabled) => set({ enabled })} label="Extras auf der Website anbieten" hint="Zeigt die Seite „Extras“, den Reiter „Extras“ beim Server und die Bedingungen im Footer." />
         {noPrice && <p className="text-sm text-amber-200">Noch ist kein Extra buchbar: Schalte unten mindestens ein Extra ein und gib ihm einen Preis.</p>}
@@ -505,11 +539,11 @@ export function AddonsAdmin({ settings }: { settings: SiteSettings }) {
           <Labeled label="Unbezahlte Bestellungen verwerfen nach (Tagen)">
             <NumberInput value={c.pendingDays} min={1} max={30} onChange={(pendingDays) => set({ pendingDays })} />
           </Labeled>
-          <Labeled label="An Verlängerung erinnern (Tage vor Ablauf)" hint="0 = keine Erinnerung.">
+          <Labeled label="An Verlängerung erinnern (Tage vor Ablauf)" hint="0 = keine Erinnerung. Abos werden unabhängig davon vor jeder Abbuchung angekündigt.">
             <NumberInput value={c.remindDaysBefore} min={0} max={14} onChange={(remindDaysBefore) => set({ remindDaysBefore })} />
           </Labeled>
         </div>
-        <Bilingual label="So wird ohne Automatik bezahlt" value={c.paymentNote} area maxLength={600} onChange={(paymentNote) => set({ paymentNote })} hint="Erscheint nach der Bestellung zusammen mit Betrag und Verwendungszweck – nur solange SumUp nicht eingerichtet ist." />
+        <Bilingual label="So wird ohne Automatik bezahlt" value={c.paymentNote} area maxLength={600} onChange={(paymentNote) => set({ paymentNote })} hint="Erscheint nach der Bestellung zusammen mit Betrag und Verwendungszweck – nur solange Mollie nicht eingerichtet ist." />
       </Section>
 
       <Section title="Katalog" description="Jedes Extra hat einen Preis und eine Laufzeit. Der Preis gilt für neue Bestellungen und Verlängerungen; laufende Buchungen bleiben, wie sie bezahlt wurden.">
