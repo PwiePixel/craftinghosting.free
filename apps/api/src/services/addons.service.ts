@@ -313,13 +313,17 @@ const BLOCK_TEXT = {
   locked: L('Dein Konto ist gesperrt – Extras lassen sich nicht buchen.', 'Your account is locked – extras cannot be booked.'),
   timeout: L('Wegen einer Verwarnung sind deine Dienste gerade offline. So lange lassen sich keine Extras buchen.', 'Because of a warning your services are offline right now. Until then no extras can be booked.'),
   discord: L('Für dieses Extra musst du dein Discord-Konto verknüpft haben und Mitglied auf unserem Discord-Server sein.', 'For this extra you need to have your Discord account linked and be a member of our Discord server.'),
+  discord_unavailable: L('Deine Discord-Mitgliedschaft lässt sich gerade nicht prüfen. Bitte versuche es gleich noch einmal.', 'Your Discord membership cannot be checked right now. Please try again shortly.'),
   limit: L('Dieser Server gehörte zu einer Boost-Belohnung, die nicht mehr aktiv ist. Das Extra lässt sich buchen, sobald du unseren Discord-Server wieder boostest.', 'This server was part of a boost reward that is no longer active. You can book the extra as soon as you boost our Discord server again.'),
 };
 
 /** „24/7“ hebt den Zyklus auf – deshalb gelten beim Buchen und Verlängern dieselben Schranken wie beim Reaktivieren */
 async function assertAlwaysOnAllowed(user: User, server: Server): Promise<void> {
-  const block = await renewalBlock(user, server, new Date(), { strict: true });
-  if (block) throw Errors.conflict(block === 'limit' ? 'boost_reward_ended' : block === 'discord' ? 'discord_required' : 'account_blocked', BLOCK_TEXT[block]);
+  // Streng (Discord nicht prüfbar = warten) nur, wenn dabei eine Zyklus-Sperre aufgehoben würde – ein laufender Server
+  // soll an einem kurzen Ausfall von Discord nicht scheitern
+  const held = server.status === 'expiring' || (server.status === 'suspended' && server.suspensionReason === 'cycle_expired');
+  const block = await renewalBlock(user, server, new Date(), { strict: held });
+  if (block) throw Errors.conflict(block === 'limit' ? 'boost_reward_ended' : block === 'discord' ? 'discord_required' : block === 'discord_unavailable' ? 'discord_unavailable' : 'account_blocked', BLOCK_TEXT[block]);
 }
 
 const paymentUnavailable = () => new ApiError(503, 'payment_unavailable', L('Die Bezahlseite ist gerade nicht erreichbar. Bitte versuche es gleich noch einmal.', 'The payment page is not available right now. Please try again shortly.'));
@@ -336,7 +340,7 @@ async function openCheckout(row: ServerAddon, lang: Locale): Promise<string | nu
     const state = await checkAddonPayment(row.id);
     if (state === 'paid') return null;
     if (state === 'processing') throw Errors.conflict('payment_processing', L('Deine Zahlung wird gerade verarbeitet. Das Extra wird freigeschaltet, sobald sie bestätigt ist.', 'Your payment is being processed. The extra is activated as soon as it is confirmed.'));
-    if (state === 'unknown') throw paymentUnavailable();
+    if (unsure(state)) throw paymentUnavailable();
     if (state === 'open' && row.checkoutUrl) return row.checkoutUrl;
     const [fresh] = await db.select().from(serverAddons).where(eq(serverAddons.id, row.id)).limit(1);
     if (!fresh || !(fresh.status === 'pending' || (fresh.status === 'active' && fresh.renewalRequestedAt !== null))) return null;
@@ -468,7 +472,7 @@ export async function renewAddon(user: User, serverId: string, rowId: string, in
   if (row.checkoutId) {
     const state = await checkAddonPayment(row.id);
     if (state === 'paid' || state === 'processing') return { addons: await viewFor(server, lang, user), checkoutUrl: null };
-    if (state === 'unknown') throw paymentUnavailable();
+    if (unsure(state)) throw paymentUnavailable();
   }
   // Eine alte, noch nicht widerrufene Einzugsermächtigung (gekündigtes Abo) zuerst loswerden – ein neues Abo bekommt eine neue
   if (row.mandateId) {
@@ -500,7 +504,7 @@ export async function cancelAddonOrder(user: User, serverId: string, rowId: stri
   if (row.checkoutId) {
     const state = await checkAddonPayment(row.id);
     if (state === 'processing') throw Errors.conflict('payment_processing', L('Deine Zahlung wird gerade verarbeitet – stornieren geht jetzt nicht mehr.', 'Your payment is being processed – cancelling is no longer possible.'));
-    if (state === 'unknown') throw paymentUnavailable();
+    if (unsure(state)) throw paymentUnavailable();
   }
   const [now] = await db.select().from(serverAddons).where(eq(serverAddons.id, row.id)).limit(1);
   if (now?.status === 'pending') {
@@ -632,12 +636,16 @@ async function applyPayment(rowId: string, pay: PaymentSource): Promise<ApplyOut
   if (!row) return 'orphan';
   const paid = formatAddonPrice(pay.amountCents, 'de');
   if (outcome === 'duplicate') return outcome;
+  // Verbucht, aber nichts geliefert: kennzeichnen – so wird die Zahlung erstattet (und die Erstattung nachgeholt, falls sie nicht klappt)
+  if ((outcome === 'orphan' || outcome === 'stale' || outcome === 'mismatch') && pay.providerRef) {
+    await db.update(addonPayments).set({ confirmedBy: UNDELIVERED }).where(eq(addonPayments.providerRef, pay.providerRef));
+  }
   if (outcome === 'orphan' || outcome === 'stale') {
-    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.payment_orphan', message: `Zahlung für „${row.name.de}“ (${row.ref}, ${paid}) eingegangen, aber ${outcome === 'orphan' ? 'den Server gibt es nicht mehr' : 'die Buchung ist beendet bzw. durch eine neue ersetzt'} – nichts freigeschaltet, bitte erstatten` });
+    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.payment_orphan', message: `Zahlung für „${row.name.de}“ (${row.ref}, ${paid}) eingegangen, aber ${outcome === 'orphan' ? 'den Server gibt es nicht mehr' : 'die Buchung ist beendet bzw. durch eine neue ersetzt'} – nichts freigeschaltet, wird automatisch erstattet` });
     return outcome;
   }
   if (outcome === 'mismatch') {
-    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.payment_mismatch', message: `Zahlung für „${row.name.de}“ (${row.ref}): bezahlt ${paid}, Preis der Buchung ${formatAddonPrice(row.priceCents, 'de')} – nichts freigeschaltet, bitte prüfen und erstatten` });
+    await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.payment_mismatch', message: `Zahlung für „${row.name.de}“ (${row.ref}): bezahlt ${paid}, Preis der Buchung ${formatAddonPrice(row.priceCents, 'de')} – nichts freigeschaltet, wird automatisch erstattet` });
     return outcome;
   }
   if (oversold) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.oversold', message: `Extra „${row.name.de}“ (${row.ref}) wurde bezahlt, obwohl die Höchstzahl schon erreicht war – bitte prüfen (einrichten oder erstatten)` });
@@ -686,25 +694,36 @@ async function applyPayment(rowId: string, pay: PaymentSource): Promise<ApplyOut
   return outcome;
 }
 
-const BLOCK_AUDIT = { locked: 'Konto gesperrt', timeout: 'Auszeit wegen Verwarnung', discord: 'Discord-Pflicht nicht erfüllt', limit: 'Server passt nicht mehr in die Grenzen (Boost-Belohnung beendet)' };
+const BLOCK_AUDIT = { locked: 'Konto gesperrt', timeout: 'Auszeit wegen Verwarnung', discord: 'Discord-Pflicht nicht erfüllt', discord_unavailable: 'Discord-Mitgliedschaft gerade nicht prüfbar', limit: 'Server passt nicht mehr in die Grenzen (Boost-Belohnung beendet)' };
 
 /**
  * paid = bezahlt und verbucht · processing = vom Kunden abgeschickt, die Bank verarbeitet noch · open = Bezahlseite
  * offen · failed = gescheitert, abgebrochen oder verfallen · none = keine Zahlung · unknown = Zahlungsdienst gerade
  * nicht erreichbar (dann darf nichts beendet oder verworfen werden).
  */
-export type PayState = 'paid' | 'processing' | 'open' | 'failed' | 'none' | 'unknown';
+export type PayState = 'paid' | 'processing' | 'open' | 'failed' | 'none' | 'unknown' | 'foreign';
+/** Stand nicht ermittelbar (Dienst nicht erreichbar oder Zahlung unter dem aktuellen Schlüssel nicht auffindbar): nichts beenden */
+const unsure = (s: PayState): boolean => s === 'unknown' || s === 'foreign';
+
+/** Kennzeichen einer verbuchten Zahlung, für die sich nichts freischalten ließ (wird erstattet) */
+const UNDELIVERED = 'Mollie (nicht geliefert)';
+/** … und für die die Erstattung bei Mollie schon ausgelöst ist (verbucht wird sie, sobald Mollie sie meldet) */
+const REFUND_SENT = 'Mollie (nicht geliefert, Erstattung ausgelöst)';
+/** Meldet Mollie eine ausgelöste Erstattung so lange nicht, sehen wir selbst nach */
+const REFUND_SENT_CHECK_MS = 3 * DAY_MS;
 
 /** Kennung einer Zahlung in der Buchhaltung – Testzahlungen sind eigens gekennzeichnet und zählen nicht als Einnahme */
 const providerRef = (p: Pick<MolliePayment, 'id' | 'mode'>) => `${p.mode === 'test' ? 'mollie-test' : 'mollie'}:${p.id}`;
 
 /** Zahlung wurde nach der Verbuchung zurückgeholt (Rücklastschrift, Chargeback) oder erstattet */
 async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void> {
-  const [booked] = await db.select({ id: addonPayments.id }).from(addonPayments).where(eq(addonPayments.providerRef, providerRef(p))).limit(1);
+  const [booked] = await db.select({ id: addonPayments.id, confirmedBy: addonPayments.confirmedBy }).from(addonPayments).where(eq(addonPayments.providerRef, providerRef(p))).limit(1);
   if (!booked) return;
+  // Diese Zahlung hat nie etwas freigeschaltet: Eine Rückbuchung nimmt dem Kunden dann nichts weg und sperrt ihn nicht
+  const delivered = booked.confirmedBy !== UNDELIVERED && booked.confirmedBy !== REFUND_SENT;
   // Mollie nennt jeweils die Summe aller Erstattungen bzw. Rückbuchungen einer Zahlung. Verbucht wird nur, was neu
   // dazugekommen ist – so zählt auch eine zweite Teil-Erstattung, und eine wiederholte Meldung zählt nicht doppelt.
-  const record = async (kind: 'chargeback' | 'refund', totalCents: number): Promise<number> => {
+  const record = async (kind: 'chargeback' | 'refund' | 'reversal', totalCents: number): Promise<number> => {
     const [sum] = await db
       .select({ cents: sql<number>`coalesce(sum(${addonPayments.amountCents}), 0)` })
       .from(addonPayments)
@@ -723,7 +742,10 @@ async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void>
     const delta = await record('refund', p.refundedCents);
     if (delta > 0) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.refund_recorded', message: `Erstattung über Mollie verbucht: „${row.name.de}“ (${row.ref}), ${formatAddonPrice(delta, 'de')}` });
   }
-  if (p.chargedBackCents > 0) {
+  if (p.chargedBackCents > 0 && !delivered) {
+    const delta = await record('reversal', p.chargedBackCents);
+    if (delta > 0) await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.refund_recorded', message: `Rückbuchung einer nicht freigeschalteten Zahlung verbucht: „${row.name.de}“ (${row.ref}), ${formatAddonPrice(delta, 'de')}` });
+  } else if (p.chargedBackCents > 0) {
     const delta = await record('chargeback', p.chargedBackCents);
     // Bezahlt war damit nichts: Extra beenden (ohne den fairen Neustart, den ein regulär beendetes 24/7 bekommt), Abo
     // stoppen. Unabhängig davon, ob die Rückbuchung gerade neu verbucht wurde – ein früherer Versuch kann hier
@@ -749,6 +771,75 @@ async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void>
   }
 }
 
+/** Versuche je Zahlung, eine Erstattung auszulösen: Zahlung → Zeitpunkt des letzten Versuchs (höchstens einer je Stunde) */
+const refundTried = new Map<string, number>();
+
+async function tryRefund(p: MolliePayment, row: Pick<ServerAddon, 'ref'>, cents: number): Promise<boolean> {
+  const now = Date.now();
+  if (refundTried.size > 5000) refundTried.clear();
+  refundTried.set(p.id, now);
+  try {
+    // Kennung je Zahlung, Betrag und Stunde: Dieselbe Anfrage erstattet nie doppelt, ein späterer Versuch ist aber möglich
+    await refundMolliePayment(p.id, cents, `${row.ref} – nicht zuordenbar`, `refund:${p.id}:${cents}:${Math.floor(now / 3_600_000)}`);
+    await db.update(addonPayments).set({ confirmedBy: REFUND_SENT }).where(and(eq(addonPayments.providerRef, providerRef(p)), eq(addonPayments.confirmedBy, UNDELIVERED)));
+    return true;
+  } catch (err) {
+    console.warn('[addons] Automatische Erstattung fehlgeschlagen:', (err as Error).message);
+    return false;
+  }
+}
+
+/** Verbuchte Zahlungen, für die nichts geliefert und (noch) nicht alles erstattet wurde */
+async function refundsDue(now = new Date()): Promise<{ payment: typeof addonPayments.$inferSelect; openCents: number }[]> {
+  const rows = await db
+    .select()
+    .from(addonPayments)
+    .where(
+      and(
+        // Erstattung noch nicht ausgelöst – oder ausgelöst, aber von Mollie auffällig lange nicht gemeldet
+        or(eq(addonPayments.confirmedBy, UNDELIVERED), and(eq(addonPayments.confirmedBy, REFUND_SENT), lte(addonPayments.createdAt, new Date(now.getTime() - REFUND_SENT_CHECK_MS)))),
+        gt(addonPayments.amountCents, 0),
+        gt(addonPayments.createdAt, new Date(now.getTime() - 120 * DAY_MS)),
+      ),
+    )
+    .orderBy(asc(addonPayments.createdAt))
+    .limit(100);
+  const due: { payment: typeof addonPayments.$inferSelect; openCents: number }[] = [];
+  for (const payment of rows) {
+    if (!payment.providerRef) continue;
+    const [back] = await db.select({ cents: sql<number>`coalesce(sum(${addonPayments.amountCents}), 0)` }).from(addonPayments).where(and(like(addonPayments.providerRef, `${payment.providerRef}:%`), lte(addonPayments.amountCents, 0)));
+    const openCents = payment.amountCents + Number(back?.cents ?? 0);
+    if (openCents > 0) due.push({ payment, openCents });
+  }
+  return due;
+}
+
+/** Erstattungen nachholen, die beim ersten Mal nicht geklappt haben oder noch nicht verbucht sind */
+async function retryRefunds(now: Date): Promise<void> {
+  for (const { payment } of await refundsDue(now)) {
+    const paymentId = payment.providerRef!.split(':')[1]!;
+    const last = refundTried.get(paymentId);
+    if (last && now.getTime() - last < 60 * 60_000) continue;
+    const testRow = payment.providerRef!.startsWith('mollie-test:');
+    if (testRow !== mollieTestMode()) continue;
+    let p: MolliePayment;
+    try {
+      p = await getMolliePayment(paymentId);
+    } catch {
+      continue;
+    }
+    const [row] = await db.select().from(serverAddons).where(eq(serverAddons.id, payment.serverAddonId)).limit(1);
+    if (!row) continue;
+    // Bei Mollie inzwischen erstattet oder zurückgeholt: nur noch verbuchen
+    if (p.refundedCents > 0 || p.chargedBackCents > 0) await handleReversal(p, row);
+    const open = p.amountCents - p.refundedCents - p.chargedBackCents;
+    if (open <= 0) continue;
+    if (await tryRefund(p, row, open)) {
+      await audit({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.payment_refunded', message: `Zahlung ${p.id} für „${row.name.de}“ (${row.ref}, ${formatAddonPrice(open, 'de')}) wurde im zweiten Anlauf automatisch erstattet` });
+    }
+  }
+}
+
 /**
  * Geld ist eingegangen, aber freischalten ließ sich nichts (Buchung beendet oder ersetzt, Server gelöscht, falscher
  * Betrag): automatisch zurückzahlen. Klappt das nicht, bleibt es als Aufgabe für das Team im Protokoll.
@@ -756,13 +847,7 @@ async function handleReversal(p: MolliePayment, row: ServerAddon): Promise<void>
 async function refundUndelivered(p: MolliePayment, row: ServerAddon, outcome: 'orphan' | 'stale' | 'mismatch'): Promise<void> {
   const cents = p.amountCents - p.refundedCents - p.chargedBackCents;
   if (cents <= 0) return;
-  let refunded = false;
-  try {
-    await refundMolliePayment(p.id, cents, `${row.ref} – nicht zuordenbar`, `refund:${p.id}`);
-    refunded = true;
-  } catch (err) {
-    console.warn('[addons] Automatische Erstattung fehlgeschlagen:', (err as Error).message);
-  }
+  const refunded = await tryRefund(p, row, cents);
   await audit({
     userId: row.userId,
     serverId: row.serverId,
@@ -846,6 +931,10 @@ export async function checkAddonPayment(rowId: string): Promise<PayState> {
     p = await getMolliePayment(row.checkoutId);
   } catch (err) {
     if (err instanceof MollieError && err.status === 404) {
+      // Eine Zahlung, die wir selbst angelegt haben, „gibt es nicht“: Das passiert, wenn der Schlüssel gewechselt wurde
+      // (Test ↔ Live, anderes Mollie-Profil). Dann nichts lösen und nichts beenden – unter dem richtigen Schlüssel ist
+      // sie wieder da. Erst nach langer Zeit gilt sie als verloren.
+      if (row.checkoutAt && Date.now() - row.checkoutAt.getTime() < POLL_MAX_MS) return 'foreign';
       await db.update(serverAddons).set({ checkoutId: null, checkoutUrl: null, checkoutAt: null }).where(and(eq(serverAddons.id, row.id), eq(serverAddons.checkoutId, row.checkoutId)));
       return 'failed';
     }
@@ -877,7 +966,11 @@ export async function handlePaymentWebhook(paymentId: string): Promise<boolean> 
     p = await getMolliePayment(paymentId);
   } catch (err) {
     // Unbekannte Zahlung: erledigt. Alles andere (nicht erreichbar, Schlüssel ungültig …): Mollie soll es erneut melden.
-    if (err instanceof MollieError && (err.status === 404 || err.status === 410)) return true;
+    if (err instanceof MollieError && (err.status === 404 || err.status === 410)) {
+      // Hängt an dieser Zahlung eine Buchung, gibt es sie – nur nicht unter dem aktuellen Schlüssel: Mollie soll es erneut melden
+      const [known] = await db.select({ id: serverAddons.id }).from(serverAddons).where(eq(serverAddons.checkoutId, paymentId)).limit(1);
+      return !known && !mollieTestMode();
+    }
     console.error('[addons] Rückmeldung von Mollie ließ sich nicht prüfen:', (err as Error).message);
     return false;
   }
@@ -901,10 +994,24 @@ export async function checkServerPayments(user: User, serverId: string, lang: Lo
 
 /* ------------------------------------------------------------ Abo */
 
+/**
+ * In welchem Betrieb wurde diese Buchung bezahlt – mit echtem Geld (live) oder zum Test? Kunde und Mandat bei Mollie
+ * gibt es nur dort. Läuft die Website gerade mit dem anderen Schlüssel, wird für die Buchung weder abgebucht noch
+ * widerrufen – sonst sähe ein Schlüsselwechsel wie eine Absage der Bank aus.
+ */
+async function otherMode(rowId: string): Promise<boolean> {
+  const rows = await db.select({ ref: addonPayments.providerRef }).from(addonPayments).where(and(eq(addonPayments.serverAddonId, rowId), like(addonPayments.providerRef, 'mollie%:tr%'))).limit(50);
+  const live = rows.some((r) => r.ref?.startsWith('mollie:'));
+  const test = rows.some((r) => r.ref?.startsWith('mollie-test:'));
+  if (!live && !test) return false;
+  return mollieTestMode() ? live : !live && test;
+}
+
 /** Einzugsermächtigung beim Zahlungsdienst widerrufen – danach kann nichts mehr abgebucht werden. Scheitert das, versucht es der Job erneut. */
 async function revokeMandate(row: Pick<ServerAddon, 'id' | 'customerId' | 'mandateId'>): Promise<void> {
   if (!row.mandateId) return;
   if (online() && row.customerId) {
+    if (await otherMode(row.id)) return;
     try {
       await revokeMollieMandate(row.customerId, row.mandateId);
     } catch (err) {
@@ -916,13 +1023,13 @@ async function revokeMandate(row: Pick<ServerAddon, 'id' | 'customerId' | 'manda
 }
 
 /** Abo beenden: keine weitere Abbuchung, die bezahlte Laufzeit läuft zu Ende */
-async function stopSubscription(row: ServerAddon, byCustomer: boolean): Promise<boolean> {
+async function stopSubscription(row: ServerAddon, byCustomer: boolean, opts: { /** Widerruf beim Zahlungsdienst dem Job überlassen (Antwortzeit verrät sonst etwas) */ later?: boolean } = {}): Promise<boolean> {
   const res = await db
     .update(serverAddons)
     .set({ autoRenew: false, ...(byCustomer ? { subscriptionCanceledAt: new Date() } : {}) })
     .where(and(eq(serverAddons.id, row.id), eq(serverAddons.autoRenew, true)));
   if (affectedRows(res) !== 1) return false;
-  await revokeMandate(row);
+  if (!opts.later) await revokeMandate(row);
   return true;
 }
 
@@ -955,6 +1062,16 @@ async function confirmCancellation(row: ServerAddon, at: Date, viaPage: boolean)
     dedupeKey: `addon-sub-canceled:${row.id}:${at.getTime()}`,
     email: true,
   });
+}
+
+/** Denselben Eintrag höchstens einmal am Tag ins Protokoll schreiben (z. B. wiederholte Meldungen eines Dauerzustands) */
+async function auditOnce(input: Parameters<typeof audit>[0]): Promise<void> {
+  const [same] = await db
+    .select({ id: auditLogs.id })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.action, input.action), eq(auditLogs.message, input.message.slice(0, 500)), gt(auditLogs.createdAt, new Date(Date.now() - DAY_MS))))
+    .limit(1);
+  if (!same) await audit(input);
 }
 
 /** Kunde kündigt sein Abo in „Meine Server“ */
@@ -991,11 +1108,12 @@ export async function requestCancellation(input: { email: string; ref?: string }
   const byRef = ref ? subs.filter((r) => r.ref === ref) : [];
   const targets = byRef.length ? byRef : subs;
   if (targets.length === 0) {
-    await audit({ userId: user?.id ?? null, actor: 'user', action: 'addon.cancel_request_unmatched', message: `Kündigung über die Kündigungsseite eingegangen, aber keinem Abo zuzuordnen (E-Mail ${email.slice(0, 120)}${ref ? `, Verwendungszweck ${ref.slice(0, 20)}` : ''}) – bitte prüfen und beantworten`, ip });
+    const message = `Kündigung über die Kündigungsseite eingegangen, aber keinem Abo zuzuordnen (E-Mail ${email.slice(0, 120)}${ref ? `, Verwendungszweck ${ref.slice(0, 20)}` : ''}) – bitte prüfen und beantworten`;
+    await auditOnce({ userId: user?.id ?? null, actor: 'user', action: 'addon.cancel_request_unmatched', message, ip });
     return;
   }
   for (const row of targets) {
-    if (!(await stopSubscription(row, true))) continue;
+    if (!(await stopSubscription(row, true, { later: true }))) continue;
     await audit({ userId: row.userId, serverId: row.serverId, actor: 'user', action: 'addon.subscription_canceled', message: `Abo „${row.name.de}“ (${row.ref}) über die Kündigungsseite gekündigt – läuft bis ${row.paidUntil ? when(row.paidUntil, 'de') : 'zur ersten Zahlung'}`, ip });
     await confirmCancellation(row, at, true);
   }
@@ -1061,6 +1179,12 @@ async function ensureRenewalNotice(row: ServerAddon, serverName: string, now: Da
 async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date): Promise<'charged' | 'stopped' | 'skipped'> {
   if (!row.paidUntil || !row.customerId || !row.mandateId) return 'skipped';
   if (row.paidUntil.getTime() - now.getTime() > addonRenewLeadDays(row.periodDays) * DAY_MS) return 'skipped';
+  // Die Website läuft gerade mit dem anderen Schlüssel (Test statt Live oder umgekehrt): Dort gibt es Kunde und
+  // Einzugsermächtigung dieser Buchung nicht – nichts abbuchen und das Abo nicht beenden
+  if (await otherMode(row.id)) {
+    await auditOnce({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.renewal_stuck', message: `Abo „${row.name.de}“ (${row.ref}) kann gerade nicht abgebucht werden: Die Website läuft mit einem ${mollieTestMode() ? 'Test' : 'Live'}-Schlüssel, die Buchung gehört zum anderen Betrieb – läuft bis ${when(row.paidUntil, 'de')}` });
+    return 'skipped';
+  }
   const link = async (payment: MolliePayment): Promise<'charged' | 'skipped'> => {
     const linked = await db.update(serverAddons).set({ checkoutId: payment.id, checkoutUrl: null, checkoutAt: now }).where(and(eq(serverAddons.id, row.id), isNull(serverAddons.checkoutId)));
     if (affectedRows(linked) !== 1) return 'skipped';
@@ -1115,7 +1239,20 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
     }
     // Server ruht gerade wegen des Zyklus (abgelaufen, noch nicht reaktiviert): jetzt nichts abbuchen. Läuft die
     // bezahlte Zeit so aus, endet das Extra von selbst – ohne Abbuchung für einen Server, der vielleicht gelöscht wird.
-    if (server!.status !== 'active') return 'skipped';
+    if (server!.status !== 'active') {
+      await tell(row, {
+        serverId: row.serverId,
+        type: 'addon.renewal_paused',
+        title: L(`Abo pausiert: ${row.name.de}`, `Subscription paused: ${row.name.en || row.name.de}`),
+        body: (l) =>
+          l === 'en'
+            ? `Your server “${server!.name}” is resting at the moment, so we are not charging the renewal of “${row.name.en || row.name.de}” (${row.ref}).\nReactivate the server before ${when(row.paidUntil!, l)} and the subscription simply continues. Otherwise the extra ends then – without any charge.`
+            : `Dein Server „${server!.name}“ ruht gerade, deshalb buchen wir die Verlängerung von „${row.name.de}“ (${row.ref}) nicht ab.\nReaktivierst du den Server vor dem ${when(row.paidUntil!, l)}, läuft das Abo einfach weiter. Sonst endet das Extra dann – ohne Abbuchung.`,
+        dedupeKey: `addon-renewal-paused:${row.id}:${row.paidUntil.getTime()}`,
+        email: true,
+      });
+      return 'skipped';
+    }
     // Erst ankündigen, dann – frühestens einen Tag später – abbuchen
     const noticeAt = await ensureRenewalNotice(row, server!.name, now);
     if (!noticeAt || now.getTime() - noticeAt.getTime() < RENEW_NOTICE_MS) return 'skipped';
@@ -1144,12 +1281,15 @@ async function chargeRenewal(row: ServerAddon, settings: SiteSettings, now: Date
   } catch (err) {
     // Eindeutige Absage (z. B. Einzugsermächtigung ungültig): Abo beenden. Alles andere – nicht erreichbar, überlastet,
     // Schlüssel ungültig, Antwort abgebrochen – ist nicht die Schuld des Kunden: später mit derselben Kennung noch einmal.
-    if (err instanceof MollieError && [400, 404, 410, 422].includes(err.status)) {
+    // Eindeutig ist nur: Mollie lehnt genau den Kunden bzw. die Einzugsermächtigung ab (oder sie gibt es nicht mehr).
+    if (err instanceof MollieError && (err.status === 410 || (err.status === 422 && (err.field === 'mandateId' || err.field === 'customerId')))) {
       console.warn('[addons] Abbuchung abgelehnt:', err.message);
       await renewalFailed(row);
       return 'stopped';
     }
     console.error('[addons] Abbuchung ließ sich nicht anlegen – neuer Versuch im nächsten Lauf:', (err as Error).message);
+    // Bleibt das so, läuft das Extra am Ende der bezahlten Zeit aus – das Team soll davon erfahren, bevor es so weit ist
+    await auditOnce({ userId: row.userId, serverId: row.serverId, actor: 'system', action: 'addon.renewal_stuck', message: `Abo „${row.name.de}“ (${row.ref}) ließ sich nicht abbuchen (${(err as Error).message.slice(0, 120)}) – neuer Versuch folgt; ohne Erfolg endet das Extra am ${when(row.paidUntil, 'de')}` });
     return 'skipped';
   }
   return link(payment);
@@ -1204,18 +1344,22 @@ export async function deactivateAlwaysOn(serverId: string, now = new Date(), opt
   if (other) return;
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId)).limit(1);
   if (!server?.alwaysOnSince) return;
-  const [owner] = await db.select().from(users).where(eq(users.id, server.userId)).limit(1);
+  const fair = opts.fair !== false;
+  const [owner] = fair ? await db.select().from(users).where(eq(users.id, server.userId)).limit(1) : [];
   const fits = owner ? await fitsServerLimits(owner, server).catch(() => true) : true;
+  // Angebote ohne Zyklus (Discord-Bots) bekommen auch keinen: Für sie bleibt es beim „ohne Ablaufdatum“
+  const noCycle = cycleEndFor(server.kind, now, freeHostingConfig.cycle).getTime() === NO_CYCLE_END.getTime();
   const cycle =
-    opts.fair === false
-      ? // Zahlung zurückgeholt: kein Vorteil aus der unbezahlten Zeit – der Zyklus gilt als abgelaufen (normaler Ablauf mit Ruhezeit)
-        { cycleEndsAt: now }
+    !fair
+      ? // Zahlung zurückgeholt bzw. nur zum Test bezahlt: kein Vorteil aus der unbezahlten Zeit – der Zyklus gilt als
+        // abgelaufen (normaler Ablauf mit Ruhezeit). Neue Zyklus-Nummer, damit die Hinweise dazu ankommen.
+        { cycleNumber: server.cycleNumber + 1, cycleEndsAt: noCycle ? NO_CYCLE_END : now }
       : fits
         ? // Fairer Neustart: frischer Zyklus, die Laufzeit aus der Zeit mit dem Extra zählt nicht gegen die Fair-Use-Regeln
           { fairUseResetAt: now, cycleNumber: server.cycleNumber + 1, cycleStartedAt: now, cycleEndsAt: cycleEndFor(server.kind, now, freeHostingConfig.cycle) }
         : // Passt nicht mehr in die Grenzen (Boost-Belohnung beendet): kein neuer Zyklus – es gilt das Ende, das der
           // Server ohne das Extra gehabt hätte (frühestens jetzt)
-          { fairUseResetAt: now, cycleEndsAt: new Date(Math.max(now.getTime(), cycleEndFor(server.kind, server.cycleStartedAt ?? now, freeHostingConfig.cycle).getTime())) };
+          { fairUseResetAt: now, cycleNumber: server.cycleNumber + 1, cycleEndsAt: new Date(Math.max(now.getTime(), cycleEndFor(server.kind, server.cycleStartedAt ?? now, freeHostingConfig.cycle).getTime())) };
   await db
     .update(servers)
     .set({
@@ -1246,8 +1390,9 @@ export async function endAddon(row: ServerAddon, reason: EndReason, opts: { sile
     .set({ status: 'ended', endedAt: now, endReason: reason, renewalRequestedAt: null, checkoutId: null, checkoutUrl: null, checkoutAt: null, autoRenew: false, fulfilment, ...(opts.note ? { adminNote: opts.note.slice(0, 500) } : {}) })
     .where(and(eq(serverAddons.id, row.id), eq(serverAddons.status, row.status), opts.ifPaidUntil ? eq(serverAddons.paidUntil, opts.ifPaidUntil) : undefined));
   if (affectedRows(res) !== 1) return false;
-  await revokeMandate(row);
+  // Erst die Wirkung zurücknehmen (ohne Wartezeit), dann den Zahlungsdienst fragen – sonst käme der Abgleich im Job dazwischen
   if (wasActive && row.effect === 'always_on') await deactivateAlwaysOn(row.serverId, now, { fair: !opts.unfair });
+  await revokeMandate(row);
   if (opts.silent || !wasActive || reason === 'server_deleted') return true;
   const [server] = await db.select({ name: servers.name }).from(servers).where(eq(servers.id, row.serverId)).limit(1);
   await tell(row, {
@@ -1330,6 +1475,7 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
       // Abo: Abbuchung rechtzeitig ankündigen (spätestens einen Tag vorher – ohne Ankündigung wird nicht abgebucht)
       const charge = nextCharge(row);
       if (!charge || charge.getTime() - now.getTime() > Math.min(3, addonRenewLeadDays(row.periodDays) + 1) * DAY_MS) continue;
+      if (server.status !== 'active') continue;
       const [had] = await db.select({ id: notifications.id }).from(notifications).where(and(eq(notifications.userId, row.userId), eq(notifications.dedupeKey, `addon-renewal-notice:${row.id}:${row.paidUntil!.getTime()}`))).limit(1);
       if (!had && (await ensureRenewalNotice(row, server.name, now))) stats.reminded++;
       continue;
@@ -1399,6 +1545,9 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
       }
     }
 
+    // Erstattungen nachholen, die nicht geklappt haben (z. B. zu wenig Guthaben bei Mollie)
+    if (!down) await retryRefunds(now).catch((err) => console.error('[addons] Erstattungen nachholen fehlgeschlagen', err));
+
     // 5) Widerruf von Einzugsermächtigungen nachholen, der beim Kündigen nicht geklappt hat
     if (!down) {
       const stale = await db
@@ -1420,7 +1569,7 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     // Vorher beim Zahlungsdienst nachsehen – eine bezahlte oder gerade verarbeitete Zahlung wird nie verworfen
     const state = row.checkoutId ? await check(row.id) : 'none';
     if (state === 'paid' || state === 'processing') continue;
-    if (state === 'unknown' && row.checkoutAt && now.getTime() - row.checkoutAt.getTime() < POLL_MAX_MS) continue;
+    if (unsure(state) && row.checkoutAt && now.getTime() - row.checkoutAt.getTime() < POLL_MAX_MS) continue;
     if (await endAddon(row, 'unpaid', { silent: true })) stats.unpaid++;
   }
 
@@ -1438,7 +1587,7 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     // Online-Zahlung, wenn der Kunde die Verlängerung angefragt hat und das Team den Eingang noch bestätigen muss.
     // Wird bezahlt, zählt die Verlängerung ab dem alten Ende – die Nachfrist ist dann mitbezahlt.
     const grace =
-      state === 'processing' || (state === 'unknown' && row.checkoutAt !== null && now.getTime() - row.checkoutAt.getTime() < PROCESSING_GRACE_MS)
+      state === 'processing' || (unsure(state) && row.checkoutAt !== null && now.getTime() - row.checkoutAt.getTime() < PROCESSING_GRACE_MS)
         ? PROCESSING_GRACE_MS
         : !online() && row.renewalRequestedAt
           ? Math.min(MANUAL_GRACE_MS, Math.max(row.periodDays, 1) * DAY_MS)
@@ -1457,7 +1606,14 @@ export async function runAddons(now = new Date()): Promise<{ expired: number; un
     .where(and(isNotNull(servers.alwaysOnSince), ne(servers.status, 'deleted'), sql`not exists (select 1 from ${serverAddons} where ${serverAddons.serverId} = ${servers.id} and ${serverAddons.effect} = 'always_on' and ${serverAddons.status} = 'active')`))
     .limit(100);
   for (const s of flagged) {
-    await deactivateAlwaysOn(s.id, now);
+    // Endete das letzte 24/7 durch eine zurückgeholte Zahlung oder war es nur eine Testzahlung, gibt es keinen fairen Neustart
+    const [last] = await db
+      .select({ endReason: serverAddons.endReason, note: serverAddons.adminNote })
+      .from(serverAddons)
+      .where(and(eq(serverAddons.serverId, s.id), eq(serverAddons.effect, 'always_on'), eq(serverAddons.status, 'ended')))
+      .orderBy(desc(serverAddons.endedAt))
+      .limit(1);
+    await deactivateAlwaysOn(s.id, now, { fair: !(last && (last.endReason === 'refunded' || last.note?.startsWith('Testzahlung'))) });
     stats.healed++;
   }
   const missing = await db
@@ -1494,7 +1650,8 @@ const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 /** Echte Zahlungen (ohne Testzahlungen) – für Einnahmen und „bezahlt“-Summen */
 const realMoney = sql`(${addonPayments.providerRef} is null or ${addonPayments.providerRef} not like ${TEST_REF})`;
 /** Vorgänge, die das Team sehen soll (Admin → Extras → Hinweise) */
-const NOTICE_ACTIONS = ['addon.payment_orphan', 'addon.payment_mismatch', 'addon.payment_refunded', 'addon.refund_failed', 'addon.oversold', 'addon.chargeback', 'addon.cancel_request_unmatched', 'addon.ended_server_deleted', 'addon.renewal_failed', 'addon.test_ended', 'addon.always_on_waiting'];
+const NOTICE_URGENT = ['addon.refund_failed', 'addon.chargeback', 'addon.oversold', 'addon.renewal_stuck'];
+const NOTICE_INFO = ['addon.payment_refunded', 'addon.cancel_request_unmatched', 'addon.ended_server_deleted', 'addon.renewal_failed', 'addon.test_ended', 'addon.always_on_waiting'];
 
 const countsSelect = {
   active: sql<number>`sum(case when ${serverAddons.status} = 'active' then 1 else 0 end)`,
@@ -1558,18 +1715,24 @@ export async function listAdminAddons(filter: { q?: string; status?: string; pag
     .from(addonPayments)
     .where(and(gt(addonPayments.createdAt, new Date(now.getTime() - 30 * DAY_MS)), realMoney));
   // Was das Team wissen muss, steht sonst nur im Protokoll: nicht zuordenbare Zahlungen, Rückbuchungen, Kündigungen ohne Treffer …
-  const noticeRows = await db
-    .select({ at: auditLogs.createdAt, action: auditLogs.action, message: auditLogs.message })
-    .from(auditLogs)
-    .where(and(inArray(auditLogs.action, NOTICE_ACTIONS), gt(auditLogs.createdAt, new Date(now.getTime() - 14 * DAY_MS))))
-    .orderBy(desc(auditLogs.id))
-    .limit(15);
+  // Dringendes und bloß Informatives getrennt – viele unwichtige Einträge können Wichtiges nicht verdrängen
+  const noticesOf = (actions: string[], limit: number) =>
+    db
+      .select({ at: auditLogs.createdAt, action: auditLogs.action, message: auditLogs.message })
+      .from(auditLogs)
+      .where(and(inArray(auditLogs.action, actions), gt(auditLogs.createdAt, new Date(now.getTime() - 14 * DAY_MS))))
+      .orderBy(desc(auditLogs.id))
+      .limit(limit);
+  const noticeRows = [...(await noticesOf(NOTICE_URGENT, 20)), ...(await noticesOf(NOTICE_INFO, 10))];
+  // Offene Erstattungen bleiben stehen, bis das Geld wirklich zurück ist
+  const due = await refundsDue(now);
   const blocked = new Set<string>();
   for (const userId of new Set(list.map((l) => l.row.userId))) if (await chargebackBlocked(userId, now)) blocked.add(userId);
   for (const r of rows) r.chargebackBlocked = blocked.has(r.userId);
   return {
     rows,
-    notices: noticeRows.map((n) => ({ at: n.at.toISOString(), action: n.action, message: n.message })),
+    notices: noticeRows.map((n) => ({ at: n.at.toISOString(), action: n.action, message: n.message, urgent: NOTICE_URGENT.includes(n.action) })),
+    refundsDue: due.map((d) => ({ ref: d.payment.ref, name: d.payment.addonName, cents: d.openCents, paymentId: d.payment.providerRef?.split(':')[1] ?? '', since: d.payment.createdAt.toISOString() })),
     ...info,
     stats: { active: Number(a?.active ?? 0), awaitingPayment: Number(a?.awaiting ?? 0), tasks: Number(a?.tasks ?? 0), subscriptions: Number(a?.subscriptions ?? 0), revenue30dCents: Number(rev?.cents ?? 0), monthlyRunRateCents: Math.round(Number(a?.runRate ?? 0)) },
     payment: { online: online(), testMode: mollieTestMode(), webhookUrl: paymentWebhookUrl() },
@@ -1593,7 +1756,7 @@ export async function adminConfirmAddonPayment(admin: Pick<User, 'email'>, rowId
     const state = await checkAddonPayment(row.id);
     if (state === 'paid') return;
     if (state === 'processing') throw Errors.conflict('payment_processing', L('Für diese Buchung läuft gerade eine Online-Zahlung, die die Bank noch verarbeitet. Bitte abwarten.', 'An online payment for this booking is currently being processed by the bank. Please wait.'));
-    if (state === 'unknown') throw paymentUnavailable();
+    if (unsure(state)) throw paymentUnavailable();
   }
   await applyPayment(row.id, { provider: 'manual', providerRef: null, amountCents: amountCents ?? row.priceCents, confirmedBy: admin.email });
 }

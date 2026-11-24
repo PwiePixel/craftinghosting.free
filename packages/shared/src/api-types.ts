@@ -1403,7 +1403,9 @@ export interface AdminAddonRowDTO extends Omit<ServerAddonDTO, 'payment' | 'canR
 export interface AdminAddonsDTO extends PageInfo {
   rows: AdminAddonRowDTO[];
   /** Vorgänge der letzten 14 Tage, die das Team sehen soll (nicht zuordenbare Zahlungen, Rückbuchungen …) */
-  notices: { at: string; action: string; message: string }[];
+  notices: { at: string; action: string; message: string; /** braucht Aufmerksamkeit (Rückbuchung, gescheiterte Erstattung …) */ urgent: boolean }[];
+  /** Zahlungen, für die nichts geliefert wurde und die noch nicht (ganz) erstattet sind – das System versucht es stündlich erneut */
+  refundsDue: { ref: string; name: string; cents: number; paymentId: string; since: string }[];
   stats: {
     active: number;
     /** Bestellt, Zahlung offen (inklusive angefragter Verlängerungen) */

@@ -455,11 +455,13 @@ export async function fitsServerLimits(user: Pick<User, 'id' | 'discordId' | 'li
  * Ist Discord gerade nicht erreichbar, blockiert das nur mit `strict` (Bestellen, Bezahlen, Sperre aufheben) – eine
  * laufende Abo-Verlängerung soll an einem Ausfall von Discord nicht scheitern.
  */
-export async function renewalBlock(user: User, server: Server, now = new Date(), opts: { /** Discord nicht prüfbar zählt als Hindernis (wie beim Reaktivieren) */ strict?: boolean } = {}): Promise<'locked' | 'timeout' | 'discord' | 'limit' | null> {
+export async function renewalBlock(user: User, server: Server, now = new Date(), opts: { /** Discord nicht prüfbar zählt als Hindernis (wie beim Reaktivieren) */ strict?: boolean } = {}): Promise<'locked' | 'timeout' | 'discord' | 'discord_unavailable' | 'limit' | null> {
   if (user.status !== 'active' || user.bannedAt) return 'locked';
   if (inTimeout(user, now)) return 'timeout';
   const gate = await discordGate(user);
-  if (!gate.ok && (opts.strict || gate.reason !== 'unavailable')) return 'discord';
+  if (!gate.ok && gate.reason === 'unavailable') {
+    if (opts.strict) return 'discord_unavailable';
+  } else if (!gate.ok) return 'discord';
   if (!(await fitsServerLimits(user, server))) return 'limit';
   return null;
 }

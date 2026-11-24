@@ -220,11 +220,27 @@ function Bookings({ catalog, onChanged }: { catalog: AddonSetting[]; onChanged: 
         </div>
       </Section>
 
+      {data && data.refundsDue.length > 0 && (
+        <Section title="Offene Erstattungen" description="Für diese Zahlungen ließ sich nichts freischalten, und das Geld ist noch nicht (ganz) zurück. Das System versucht die Erstattung stündlich erneut – klappt sie nicht (z. B. zu wenig Guthaben bei Mollie), erstatte bitte im Mollie-Konto von Hand. Der Eintrag verschwindet, sobald die Erstattung verbucht ist.">
+          <ul className="divide-y divide-line rounded-xl border border-amber-400/30 text-[13px]">
+            {data.refundsDue.map((r) => (
+              <li key={r.paymentId} className="flex flex-wrap gap-x-3 gap-y-1 px-4 py-2.5 text-amber-100">
+                <span className="shrink-0 text-subtle tabular-nums">{date(r.since)}</span>
+                <span className="min-w-0 flex-1">
+                  {r.name} · <span className="font-mono">{r.ref}</span> · Zahlung <span className="font-mono">{r.paymentId}</span>
+                </span>
+                <span className="font-semibold tabular-nums">{eur(r.cents)}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
       {data && data.notices.length > 0 && (
         <Section title="Hinweise (letzte 14 Tage)" description="Vorgänge, die du kennen solltest: Zahlungen, für die sich nichts freischalten ließ (werden automatisch erstattet), Rückbuchungen, Kündigungen ohne Treffer, gescheiterte Abbuchungen. Alles steht auch im Protokoll.">
           <ul className="divide-y divide-line rounded-xl border border-line text-[13px]">
             {data.notices.map((n, i) => (
-              <li key={`${n.at}-${i}`} className={cn('flex flex-wrap gap-x-3 gap-y-1 px-4 py-2.5', n.action === 'addon.refund_failed' || n.action === 'addon.chargeback' || n.action === 'addon.cancel_request_unmatched' ? 'text-amber-200' : 'text-muted')}>
+              <li key={`${n.at}-${i}`} className={cn('flex flex-wrap gap-x-3 gap-y-1 px-4 py-2.5', n.urgent ? 'text-amber-200' : 'text-muted')}>
                 <span className="shrink-0 text-subtle tabular-nums">{date(n.at)}</span>
                 <span className="min-w-0 flex-1">{n.message}</span>
               </li>
