@@ -112,7 +112,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   });
 
   /** Kündigung ohne Anmeldung. Die Antwort ist immer dieselbe – sie verrät nicht, ob es zu einer Adresse ein Konto gibt. */
-  app.post('/payments/cancel-subscription', strict(5, '1 hour'), async (request) => {
+  app.post('/payments/cancel-subscription', strict(10, '1 hour'), async (request) => {
     const body = z.object({ email: z.string().trim().email().max(200), ref: z.string().trim().max(20).optional() }).parse(request.body);
     await requestCancellation(body, request.ip);
     return { ok: true };
